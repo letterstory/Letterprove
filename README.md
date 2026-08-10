@@ -1,6 +1,17 @@
-# Letterprove
+<div align="center">
 
-**Attested proof for AI agents.** The "EEAT" for AEO.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <img src="assets/logo-light.svg" alt="Letterprove" width="380">
+</picture>
+
+<br>
+
+**Attested proof for AI agents.** &nbsp;·&nbsp; The "EEAT" for AEO.
+
+</div>
+
+---
 
 A human evaluating software might skim three tabs. An agent evaluates thirty
 products, reads every claim, checks every source, and discounts for vendor bias.
