@@ -21,8 +21,8 @@ Letterprove turns a vendor's logo wall — a page of unverifiable claims — int
 signed, machine-readable attestations that an agent can fetch, verify, and cite.
 
 > [!NOTE]
-> **Status: design, not yet built.** This repo is empty apart from this
-> document. What follows is the agreed architecture, written down so
+> **Status: design, not yet built.** There is no code in this repo yet.
+> What follows is the agreed architecture, written down so
 > implementation starts from a contract instead of a Slack thread. Every
 > decision below is tagged **Decided**, **Proposed**, or **Open**.
 
@@ -90,28 +90,89 @@ word *verified* where the tier doesn't earn it.
 
 ## Architecture
 
-Letterprove is its own deploy. **Letterstory is the source of truth** for what
-we collect, what we need to collect, and what every claim means.
+Letterprove is **its own service, its own repo, its own deploy**. It owns
+everything specific to attestation. Letterstory is a deliberately thin trunk
+holding only what is genuinely cross-service.
+
+The organizing rule: **service-level concerns live in the service; the trunk
+coordinates.** Letterstory already carries a lot, and every Letterprove concern
+pushed into it is coordination overhead that compounds as both grow. Leaves stay
+fat and autonomous, the trunk stays minimal and agile.
 
 ```mermaid
 flowchart LR
-    A["Vendor's site<br/><i>attest.js</i>"] -->|"observations"| B["<b>Letterprove</b><br/>collector"]
-    B -->|"raw events"| C["<b>Letterstory</b><br/>source of truth"]
-    C -->|"collection config"| B
-    C -->|"signed snapshots"| D["<b>Letterprove</b><br/>publisher"]
-    D -->|"proofs"| E["Evaluating<br/>agent"]
+    A["Vendor's site<br/><i>attest.js</i>"] -->|"observations"| B["<b>Letterprove</b><br/>collect · store · roll up"]
+    B -->|"fraud features"| C["<b>Letterstory</b><br/>score · countersign"]
+    C -->|"signature"| B
+    B -->|"signed proofs"| E["Evaluating<br/>agent"]
 ```
 
-**Letterprove owns** the script, its delivery, the collector, dedupe and
-anti-spoof, and serving published proofs. It is a fast, cacheable, dumb pipe.
-**It never computes a claim.**
+| Trunk — **Letterstory** | Leaf — **Letterprove** |
+|---|---|
+| Staff identity / SSO | Vendors, their customers, consent state |
+| Anti-fraud scoring **+ the signing key** | Signal registry, per-vendor collection config |
+| Billing and entitlements | The script, collector, storage, rollups |
+| Cross-product customer record | Publishing, endpoints, proof surfaces |
 
-**Letterstory owns** the signal registry, per-vendor collection config, storage,
-rollups, the internal views, consent state, and the signing of published
-snapshots. Everything interpretive happens where the truth lives.
+Four things in the trunk, all genuinely cross-service.
 
-**The seam** is two contracts — an event schema and a config endpoint. Agree on
-those and neither workstream blocks the other.
+### Identity
+
+Letterprove stands up its **own** vendor, customer, and org model rather than
+borrowing Letterstory's — and this is more necessary than it looks. Consent has
+no Letterstory analogue: when Acme approves their own attestation, that is the
+vendor's customer, someone who will never hold a Letterstory account. Modelling
+them in the trunk would be genuinely wrong.
+
+- **Letterprove owns outright** — vendors, their customers, consent state,
+  publishable keys.
+- **Letterstory federates in** — staff access only. One SSO hop.
+
+End-customer orgs are never synced between the two. Two identity systems trying
+to mirror each other is the worst of both.
+
+### Open code, closed data
+
+Letterprove's computation is **open source**, and that is a product decision
+rather than housekeeping. The premise of the whole system is *don't take our
+word for it* — an agent that can read the code that produced a claim is in a
+categorically better position than one that can only check a signature.
+
+So every attestation carries a `method` pointer: repo, path, and commit SHA of
+the rollup logic that computed it. **The attestation cites the code that made
+it.**
+
+The inverse holds just as firmly. Open source is not open data — the
+observations Letterprove stores are never public. And **anti-fraud stays
+closed**, in Letterstory, because published detection logic is an evasion
+manual.
+
+### The signing seam
+
+One capability does not move to the leaf: **the authority to say "this is
+true."**
+
+```
+Letterprove computes a snapshot
+  → Letterstory scores it for fraud and countersigns
+    → Letterprove publishes
+```
+
+This is what makes the fraud check load-bearing instead of advisory. If
+Letterprove held the key, Letterstory's scoring would be a report nobody is
+obliged to obey, and a single compromise would mint arbitrary valid proofs.
+The leaf is autonomous for everything except the one irreversible act.
+
+### The test that keeps this honest
+
+Two services that must deploy together are not two services. The check:
+
+> **Letterprove can ship a new signal, a new rollup, or a new endpoint without
+> Letterstory moving.**
+
+Countersigning is a runtime call, not a build dependency, so this holds. If a
+change ever requires a coordinated deploy, the boundary has drifted and the
+fix belongs here, not in a release plan.
 
 ---
 
@@ -136,9 +197,9 @@ territory on the end-user side.
 ### Identity resolution — **Decided**
 
 Account identity is **inferred from the email domain**, automatically, with no
-vendor integration work. Inference *proposes*; **Letterstory decides.**
+vendor integration work. Inference *proposes*; **the alias map decides.**
 
-Letterstory holds a domain→account alias list per customer, because inference
+Letterprove holds a domain→account alias list per customer, because inference
 alone is wrong in three predictable ways, and a wrong answer here is not a
 missing row — it is a signed attestation that is false:
 
@@ -153,8 +214,8 @@ missing row — it is a signed attestation that is false:
   tenant is attributed to Consultancy. This is the case that publishes something
   false, and the only defense is a human-correctable mapping.
 
-Because the mapping lives in Letterstory, fixing any of these is a data change,
-never a vendor redeploy.
+Because the mapping is service-local data, fixing any of these is a row edit —
+never a vendor redeploy, and never a cross-repo coordination.
 
 ### Event schema — **Proposed**
 
@@ -186,11 +247,11 @@ backend, HMAC-signed with a replay nonce.
 
 ### Configuration — **Decided**
 
-The script pulls its collection config from Letterstory at boot. Signals change
+The script pulls its collection config from Letterprove at boot. Signals change
 without shipping new script and without a vendor ever re-pulling.
 
 - **Fails closed.** No config, no collection. Never blocks page render.
-- **Cached last-known** with a TTL, so a Letterstory blip doesn't blind the fleet.
+- **Cached last-known** with a TTL, so a service blip doesn't blind the fleet.
 - **Public by nature.** It ships to a browser; anyone can read what a vendor
   collects. No secrets in it, ever.
 - **Versioned.** Every event carries its `cfg` version, or a mid-month schema
@@ -199,11 +260,12 @@ without shipping new script and without a vendor ever re-pulling.
 ### Reliability
 
 Telemetry must never break a host page — every path wrapped, every failure
-silent. And because collection spans two deploys, **the script's response
-carries a diagnostic header** (`x-letterprove: on | off`) from day one. Whether
-a vendor is reporting should be answerable with one `curl`, not an afternoon.
-Config-ordering bugs across two deploys look exactly like broken code; this is
-what makes them visible.
+silent. And because collection spans a third party's page, a CDN, and our
+collector, **the script's response carries a diagnostic header**
+(`x-letterprove: on | off`) from day one. Whether a vendor is reporting should
+be answerable with one `curl`, not an afternoon. Configuration bugs across a
+distributed install look exactly like broken code; this is what makes them
+visible.
 
 ---
 
@@ -238,9 +300,14 @@ script also injects JSON-LD into the vendor's page, and vendors may proxy
   "ttl": 3600,
   "key_id": "lp-2026-08",
   "prev_hash": "…",
+  "method": "https://github.com/letterstory/Letterprove/blob/a1b2c3d/src/rollup/sessions.ts",
   "signature": "att_9f2c14…"
 }
 ```
+
+`method` is a commit-pinned link to the open-source logic that produced these
+numbers. An agent — or a competitor, or a customer — can read exactly how the
+count was reached. Nothing else in the file asks to be trusted.
 
 ### Freshness
 
@@ -256,8 +323,10 @@ on the fly.
 
 ### Signing — **Proposed**
 
-Ed25519. The private key lives in Letterstory's server environment — never in
-the repo, never client-reachable. Public keys are published at the JWKS
+Ed25519, countersigned by Letterstory as described in [the signing
+seam](#the-signing-seam). The private key lives in Letterstory's server
+environment — never in this repo, never client-reachable, never held by the
+service that computes the numbers. Public keys are published at the JWKS
 endpoint, and **every signature carries a `key_id`**.
 
 Rotation is additive: mint the new key, sign with it, and **keep old public keys
@@ -286,6 +355,11 @@ published at all.
 
 The internal record is enough to prove distinctness and catch a spoofing rig.
 It is never enough to name a person, and it never appears in public JSON.
+
+**All of it stays in Letterprove.** Letterstory holds no Letterprove data — it
+holds judgment. Fraud scoring runs on a feature stream the service pushes
+(ASN distributions, per-domain distinct-hash counts, timing shape), not on a
+copy of the observations. The leaf keeps its data whole; the trunk stays small.
 
 ---
 
@@ -321,14 +395,16 @@ proof in the system.
 
 | # | Question | Status |
 |:---:|---|---|
-| 1 | Account identity — infer from domain, Letterstory holds the alias override | ✅ **Decided** |
-| 2 | Script pulls collection config from Letterstory | ✅ **Decided** |
-| 3 | Letterprove is its own deploy; it collects and publishes, never computes a claim | ✅ **Decided** |
+| 1 | Account identity — infer from domain, Letterprove holds the alias override | ✅ **Decided** |
+| 2 | Script pulls collection config from Letterprove | ✅ **Decided** |
+| 3 | **Microservice split** — Letterprove owns storage, rollups, config and publishing; Letterstory is a minimal coordination trunk | ✅ **Decided** |
 | 4 | Domain only — the email local part never leaves the browser | ✅ **Decided** |
 | 5 | Provenance tier on every claim; identity hashed and retained, not published | ✅ **Decided** |
-| 6 | Consent — build named, ship anonymized | 🟡 Proposed |
-| 7 | Signing key custody and rotation | 🟡 Proposed |
-| 8 | Event schema and config endpoint shapes | 🟡 Proposed |
+| 6 | Letterprove owns its own vendor/customer/consent model; Letterstory federates staff only | ✅ **Decided** |
+| 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | 🟡 Proposed |
+| 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
+| 9 | Consent — build named, ship anonymized | 🟡 Proposed |
+| 10 | Event schema and config endpoint shapes | 🟡 Proposed |
 
 ### Open
 
