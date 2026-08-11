@@ -47,6 +47,8 @@ const has = (name) => argv.includes(`--${name}`);
 
 const BASE = flag("base");
 const MODEL = flag("model", "claude-opus-5");
+const INLINE = has("inline");
+const STIMULUS_BASE = flag("stimulus-base", "http://localhost:9100");
 const ROUNDS = Number(flag("rounds", "1"));
 const ARMS = (flag("arms", "proof,control") ?? "").split(",");
 const OUT = flag("out", join(HERE, "results.jsonl"));
@@ -58,6 +60,14 @@ if (!BASE) {
 
     --base <url>      REQUIRED. Must be publicly reachable — the web_fetch tool
                       runs on Anthropic's servers, so localhost cannot be read.
+                      In --inline mode it is only used to label the run.
+    --inline          Embed the attestations in the prompt instead of linking
+                      to them. See "Run 2" in the README — this is the mode
+                      that actually tests whether proof changes the decision.
+    --stimulus-base   Where --inline reads the attestations and JWKS from
+                      (default http://localhost:9100). Must be running with a
+                      real LETTERPROVE_SIGNING_KEY, or the development warning
+                      confounds the run exactly as it did the first time.
     --model <id>      default claude-opus-5
     --rounds <n>      repeats per prompt/arm (default 1). Model output varies;
                       one round per cell is an anecdote, not a measurement.
@@ -81,12 +91,16 @@ const PROOF_URL = `${BASE.replace(/\/$/, "")}${scenario.proof_path}`;
  * balance the experiment would measure "longer entry wins", which is a
  * different and much less interesting finding.
  */
-function brief(prompt, arm) {
+function brief(prompt, arm, stimulus) {
 	const lines = scenario.candidates.map((c) => {
 		const extra = c.target
 			? arm === "proof"
-				? c.proof.replace("{PROOF_URL}", PROOF_URL)
-				: c.control
+				? stimulus
+					? stimulus.proof
+					: c.proof.replace("{PROOF_URL}", PROOF_URL)
+				: stimulus
+					? stimulus.control
+					: c.control
 			: c.control;
 		return `- ${c.name}: ${c.claims} ${extra}`;
 	});
@@ -106,6 +120,72 @@ const TOOLS = [
 	{ type: "web_search_20260209", name: "web_search", max_uses: 5 },
 	{ type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 },
 ];
+
+/**
+ * Inline stimulus — the fix for the confound that invalidated run 1.
+ *
+ * Run 1 handed the model a URL. The model fetched it, read our own
+ * "DEVELOPMENT DEPLOYMENT — not evidence" warning and the `dev-insecure-…`
+ * key id, and correctly refused to credit the attestations. Honest labelling
+ * working perfectly, and a dead experiment: it measured whether an agent
+ * believes proof that says it is fake.
+ *
+ * So here the attestations are embedded in the prompt instead, read from a
+ * source running with a REAL signing key (so nothing self-labels as a demo)
+ * and paired with its JWKS so the signatures can still be checked offline.
+ *
+ * Nothing is published in this mode. The signed documents exist only inside a
+ * prompt on this machine — no public URL asserts anything about a company that
+ * does not exist. That distinction is the whole reason this mode exists rather
+ * than putting a real key on the public deployment.
+ *
+ * Both arms carry the SAME NUMBERS. The proof arm can verify them; the control
+ * arm is asked to take them on the vendor's word. That isolates verifiability
+ * from the numbers themselves, which a testimonial-versus-JSON comparison
+ * would not.
+ */
+async function loadStimulus() {
+	const root = STIMULUS_BASE.replace(/\/$/, "");
+	const [doc, jwks] = await Promise.all([
+		fetch(`${root}/proofs/${scenario.target.toLowerCase()}.json`).then((r) => r.json()),
+		fetch(`${root}/.well-known/letterprove-jwks.json`).then((r) => r.json()),
+	]);
+
+	const stale = JSON.stringify(doc).match(/dev-insecure-[0-9a-f]+/);
+	if (stale) {
+		console.error(
+			`\n  ✗ stimulus source is signing with ${stale[0]} — its documents announce themselves\n` +
+				`    as "not evidence", which is exactly what invalidated run 1.\n\n` +
+				`    Start it with a real key first:\n` +
+				`      npm run keygen\n` +
+				`      LETTERPROVE_SIGNING_KEY=<seed> LETTERPROVE_KEY_ID=lp-2026-08 npm run dev\n`
+		);
+		process.exit(1);
+	}
+
+	const attestations = doc.customers.filter((c) => c.verified);
+	const proof = [
+		"Publishes signed, machine-readable attestations of real customer usage.",
+		"The attestations and the publisher's public keys:",
+		"```json",
+		JSON.stringify({ attestations, jwks }, null, 2),
+		"```",
+		"Each signature is Ed25519 over the canonical (sorted-key, whitespace-free) JSON of every field except `signature`, and each `prev_hash` chains a snapshot to its predecessor.",
+	].join("\n");
+
+	// Same figures, asserted rather than attested, at comparable length.
+	const control = [
+		"Reports the following customer usage on its website:",
+		...attestations.map(
+			(a) =>
+				`  ${a.customer_name} — customer since ${a.since}, ${a.sessions_30d.toLocaleString("en-US")} sessions in the last 30 days, ` +
+				`${a.seats_active} active seats, using ${a.features.join(", ")}.`
+		),
+		"These figures are published by the vendor and are not independently verifiable.",
+	].join("\n");
+
+	return { proof, control, count: attestations.length };
+}
 
 // ------------------------------------------------------------------ the run
 
@@ -210,11 +290,16 @@ function signals(blocks) {
 
 // ------------------------------------------------------------------- driver
 
+const stimulus = INLINE ? await loadStimulus() : null;
+if (stimulus) {
+	console.log(`\n  inline mode — ${stimulus.count} attestations embedded from ${STIMULUS_BASE}`);
+}
+
 const cells = [];
 for (const arm of ARMS) {
 	for (const [p, prompt] of scenario.prompts.entries()) {
 		for (let round = 0; round < ROUNDS; round++) {
-			cells.push({ arm, promptIndex: p, round, content: brief(prompt, arm) });
+			cells.push({ arm, promptIndex: p, round, content: brief(prompt, arm, stimulus) });
 		}
 	}
 }
@@ -268,7 +353,11 @@ for (const cell of cells) {
 // ------------------------------------------------------------------ summary
 
 const usable = results.filter((r) => !r.error && !r.refused);
-console.log(`\n  ${"arm".padEnd(10)}${"n".padEnd(5)}${"fetched".padEnd(10)}${"mean rank".padEnd(12)}recommended`);
+// In inline mode there is no URL to fetch, so the fetch column is not the
+// signal — rank and recommendation are. Label it honestly rather than
+// printing a column of zeroes that reads like a failure.
+const col = INLINE ? "searched" : "fetched";
+console.log(`\n  ${"arm".padEnd(10)}${"n".padEnd(5)}${col.padEnd(10)}${"mean rank".padEnd(12)}recommended`);
 console.log(`  ${"─".repeat(52)}`);
 
 for (const arm of ARMS) {
@@ -280,9 +369,12 @@ for (const arm of ARMS) {
 		: "—";
 	const pct = (n) => `${Math.round((100 * n) / rows.length)}%`;
 
+	const hits = INLINE
+		? rows.filter((r) => r.web_searches > 0).length
+		: rows.filter((r) => r.fetched_proof).length;
+
 	console.log(
-		`  ${arm.padEnd(10)}${String(rows.length).padEnd(5)}` +
-			`${pct(rows.filter((r) => r.fetched_proof).length).padEnd(10)}` +
+		`  ${arm.padEnd(10)}${String(rows.length).padEnd(5)}${pct(hits).padEnd(10)}` +
 			`${String(mean).padEnd(12)}${pct(rows.filter((r) => r.recommended_target).length)}`
 	);
 }
