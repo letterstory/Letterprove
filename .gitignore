@@ -10,3 +10,6 @@ build
 tsconfig.tsbuildinfo
 .vercel
 coverage
+
+# experiment output
+experiments/**/results.jsonl

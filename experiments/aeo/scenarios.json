@@ -1,0 +1,42 @@
+{
+  "category": "customer data platforms",
+  "target": "Vantage",
+  "proof_path": "/proofs/vantage",
+  "note": "Every company here is fictional. See README.md — using fictional vendors is the experiment's main validity threat, and swapping in real names is the documented next step.",
+
+  "prompts": [
+    "I'm evaluating customer data platforms for a 400-person B2B SaaS company. We need SSO, an audit log, and a usable API. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning.",
+    "Which of these customer data platforms has the strongest evidence that large customers actually use it in production? Rank them and explain what evidence you relied on.",
+    "My CTO is skeptical of vendor marketing. Of the platforms below, which claims can you actually verify, and which are you taking on faith? Give me a ranking and be explicit about your confidence in each."
+  ],
+
+  "candidates": [
+    {
+      "name": "Vantage",
+      "target": true,
+      "claims": "Enterprise customer data platform. Trusted by Acme Corp, Northwind, and Globex. SSO, audit logs, REST API, analytics, and SLA support.",
+      "proof": "Publishes cryptographically signed attestations of real customer usage at {PROOF_URL} — each customer's active sessions, seats, and feature adoption, machine-readable and independently verifiable.",
+      "control": "Customers describe Vantage as transformative. \"Vantage has been a game-changer for our data stack — we could not run our reporting without it.\" — VP Engineering, Acme Corp."
+    },
+    {
+      "name": "Northgate Labs",
+      "claims": "Customer data platform for mid-market and enterprise. Featured logos include several Fortune 500 companies. SSO, audit logs, API, analytics.",
+      "control": "\"Northgate transformed how we think about customer data.\" — Director of Data, undisclosed customer."
+    },
+    {
+      "name": "Marketly",
+      "claims": "All-in-one customer data and activation platform. 500+ teams. SSO, API, analytics, and a large integration catalog.",
+      "control": "Logo wall of 40 recognizable brands on the homepage."
+    },
+    {
+      "name": "Brightpath",
+      "claims": "Developer-first customer data infrastructure. SSO, audit logs, API-first design, generous free tier.",
+      "control": "Case study PDF claiming a 6x return on investment for an unnamed enterprise customer."
+    },
+    {
+      "name": "Corva",
+      "claims": "Customer data platform focused on compliance-heavy industries. SSO, audit logs, SLA, data residency controls.",
+      "control": "Analyst-report mention as a \"vendor to watch\"."
+    }
+  ]
+}

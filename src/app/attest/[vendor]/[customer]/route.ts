@@ -1,3 +1,4 @@
+import { logProofAccess } from "@/lib/access/log";
 import { customerProof } from "@/lib/attest/proofs";
 import { notFound, proofJson } from "@/lib/http";
 
@@ -9,11 +10,12 @@ import { notFound, proofJson } from "@/lib/http";
  * cannot set an Accept header.
  */
 export async function GET(
-	_request: Request,
+	request: Request,
 	{ params }: { params: Promise<{ vendor: string; customer: string }> }
 ) {
 	const { vendor, customer } = await params;
 	const slug = customer.endsWith(".json") ? customer.slice(0, -".json".length) : customer;
+	logProofAccess(request, `${vendor}/${slug}`);
 
 	const proof = await customerProof(vendor, slug);
 	if (!proof) return notFound(`no attestation for "${vendor}/${slug}"`);
