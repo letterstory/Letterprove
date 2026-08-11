@@ -1,9 +1,12 @@
+import { logProofAccess } from "@/lib/access/log";
 import { vendorProof } from "@/lib/attest/proofs";
 import { notFound, proofJson } from "@/lib/http";
 
-/** The machine half of /proofs/{vendor} — see src/middleware.ts. */
-export async function GET(_request: Request, { params }: { params: Promise<{ vendor: string }> }) {
+/** The machine half of /proofs/{vendor} — see src/proxy.ts. */
+export async function GET(request: Request, { params }: { params: Promise<{ vendor: string }> }) {
 	const { vendor } = await params;
+	logProofAccess(request, vendor);
+
 	const proof = await vendorProof(vendor);
 	if (!proof) return notFound(`no vendor "${vendor}"`);
 

@@ -1,3 +1,4 @@
+import { logProofAccess } from "@/lib/access/log";
 import { customerChain } from "@/lib/attest/proofs";
 import { notFound, proofJson } from "@/lib/http";
 
@@ -9,10 +10,12 @@ import { notFound, proofJson } from "@/lib/http";
  * quietly rewritten a number we published last quarter.
  */
 export async function GET(
-	_request: Request,
+	request: Request,
 	{ params }: { params: Promise<{ vendor: string; customer: string }> }
 ) {
 	const { vendor, customer } = await params;
+	logProofAccess(request, `${vendor}/${customer}/chain`);
+
 	const chain = await customerChain(vendor, customer);
 	if (!chain) return notFound(`no attestation for "${vendor}/${customer}"`);
 
