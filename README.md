@@ -248,13 +248,16 @@ except that it happened — counting and validation both run server-side.
    Letterprove alone.
 
    > [!NOTE]
-   > **Open, not yet decided:** what authenticates *this* call. Human auth
-   > just moved to Letterprove entirely (08-11) — no SSO bridge, no shared
-   > session. But this RPC is service-to-service, not a human session, so it
-   > needs its own machine credential — the same shape as the
-   > `KERNEL_HEADLESS_KEY` pattern between `lb` and `kernels`: a shared
-   > secret scoped to this one call, never a user-identity bridge. Not yet
-   > specced; belongs in the decision log once it is.
+   > **Decided (08-11):** a scoped shared secret, same shape as the
+   > `KERNEL_HEADLESS_KEY` pattern between `lb` and `kernels` — Letterprove
+   > sends it, Letterstory checks it before running fraud scoring. No mTLS,
+   > no service-identity PKI; that's infra this pair of services doesn't need
+   > yet. One deliberate addition over the `kernels` precedent: this secret
+   > gates entry to the signing endpoint, not just job submission, so it's
+   > **independently rotatable** from day one — same additive rollover the
+   > Ed25519 signing keys already use (mint new, both valid during rollover,
+   > no coordinated redeploy). Fraud scoring stays the real gate against a
+   > leaked secret; the rotation habit is what keeps a leak cheap to close.
 
 ### Publication
 
@@ -553,7 +556,7 @@ and carries the function signature the Letterstory RPC will have.
 | 9 | Consent — build named, ship anonymized | 🟡 Proposed |
 | 10 | Event schema and config endpoint shapes | 🟡 Proposed |
 | 11 | Billing/entitlements — isolated in Letterprove for the initial implementation | 🟡 Proposed, explicitly punted |
-| 12 | What authenticates the Letterprove→Letterstory countersign RPC | ⚪ Open — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
+| 12 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 
 ### Open
 
