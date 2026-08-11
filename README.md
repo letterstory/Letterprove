@@ -21,10 +21,11 @@ Letterprove turns a vendor's logo wall — a page of unverifiable claims — int
 signed, machine-readable attestations that an agent can fetch, verify, and cite.
 
 > [!NOTE]
-> **Status: design, not yet built.** There is no code in this repo yet.
-> What follows is the agreed architecture, written down so
-> implementation starts from a contract instead of a Slack thread. Every
-> decision below is tagged **Decided**, **Proposed**, or **Open**.
+> **Status: publishing half built, collection not started.** Signing, chaining,
+> the proof endpoints and the verifier all work today against fixture data —
+> see [Running it](#running-it). Collection is Steve's, and lands against the
+> contracts below. Every decision is tagged **Decided**, **Proposed**, or
+> **Open**.
 
 ---
 
@@ -390,6 +391,51 @@ own attestation has just produced a tier-4 counter-signature, the strongest
 proof in the system.
 
 ---
+
+## Running it
+
+```bash
+nvm use          # Node 22
+npm install
+npm run dev      # http://localhost:9100
+npm test
+```
+
+With no signing key configured the service derives a deterministic one from a
+published seed, ids it `dev-insecure-…`, and says so on every page and in the
+discovery document. Mint a real one with `npm run keygen`.
+
+| Surface | |
+|---|---|
+| `/` | Index of published proofs |
+| `/proofs/vantage` | The report — HTML for a person, JSON for `Accept: application/json` or a `.json` suffix |
+| `/attest/vantage/acme-corp.json` | One signed attestation |
+| `/attest/vantage/acme-corp/chain` | Its full signed history |
+| `/.well-known/letterprove.json` | Discovery |
+| `/.well-known/letterprove-jwks.json` | Public keys |
+
+### Verify it yourself
+
+```bash
+npm run verify -- http://localhost:9100/attest/vantage/acme-corp/chain
+```
+
+`scripts/verify.mjs` shares **no code** with the service. It re-implements
+canonicalisation and signature checking from the published description using
+only Node built-ins, because a verifier that imports the producer's own
+canonicaliser cannot catch the one bug that matters — the producer and the spec
+disagreeing. It is also the artifact a sceptical third party should be able to
+run without trusting us, so it stays dependency-free and short enough to read.
+
+### What is fixture and what is real
+
+`src/lib/fixtures/vendors.ts` is a fictional vendor. **Vantage does not exist
+and nothing it publishes is evidence.** Everything downstream of it — the
+rollup, signing, chaining, the endpoints, the JSON-LD, the verifier — is the
+production path. When telemetry lands, only the input to `bodiesFor` changes.
+
+The `countersign` seam in `src/lib/attest/countersign.ts` signs locally for now
+and carries the function signature the Letterstory RPC will have.
 
 ## Decision log
 

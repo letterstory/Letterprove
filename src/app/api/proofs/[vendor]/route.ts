@@ -1,0 +1,18 @@
+import { vendorProof } from "@/lib/attest/proofs";
+import { notFound, proofJson } from "@/lib/http";
+
+/** The machine half of /proofs/{vendor} — see src/middleware.ts. */
+export async function GET(_request: Request, { params }: { params: Promise<{ vendor: string }> }) {
+	const { vendor } = await params;
+	const proof = await vendorProof(vendor);
+	if (!proof) return notFound(`no vendor "${vendor}"`);
+
+	return proofJson({
+		vendor: proof.vendor,
+		summary: proof.summary,
+		// The full chain is one fetch away per customer rather than inlined —
+		// a vendor with 200 customers would otherwise ship a megabyte to an
+		// agent that wanted one number.
+		customers: proof.customers.map((c) => c.current),
+	});
+}
