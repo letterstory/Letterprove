@@ -171,6 +171,62 @@ Three consequences worth carrying forward:
 3. Validity threat 1 is confirmed rather than hypothetical: the model described
    the data as a placeholder.
 
+### Run 2 — 2026-08-11, `--inline`, 6 cells, `claude-opus-5`
+
+**The premise held, on every cell.**
+
+```
+arm       n    searched  mean rank   recommended
+proof     3    100%      1.00        100%
+control   3    100%      2.00        0%
+```
+
+| Prompt | proof | control |
+|---|---|---|
+| 0 — neutral ("rank these, which do you recommend") | **1st, recommended** | 2nd, not recommended |
+| 1 — "strongest evidence of production use" | **1st, recommended** | 2nd, not recommended |
+| 2 — "which claims can you actually verify" | **1st, recommended** | 2nd, not recommended |
+
+No variance within either arm. The same figures, signed and checkable, took the
+vendor from *second and never recommended* to *first and always recommended* —
+including on **prompt 0, the neutral one that never mentions evidence**, which
+is the cell least stacked in proof's favour.
+
+**The model did not just check the signature — it tried to break it.**
+Unprompted, all three proof cells ran adversarial tests:
+
+> Tamper test: mutating `seats_active` 148 → 1480 caused verification to fail,
+> confirming signatures are genuinely binding not decorative.
+
+> Self-mint test: generated a fresh keypair and forged a `Globex` attestation —
+> rejected, as its key is not in the published JWKS.
+
+That is the behaviour the product needs and cannot ask for: the agent
+establishing for itself that the proof is non-vacuous before crediting it.
+
+**Read this against three caveats.**
+
+1. **n=3 per arm, one round.** The effect is large and perfectly consistent, so
+   it is visible at this size — but it is directional. Rerun at `--rounds 5`
+   before quoting a number to anyone outside the team.
+2. **Confidence was `low` in five of six cells** (`medium` in one). The model
+   ranked Vantage first while telling us it was not sure — appropriate, given
+   the vendors are invented, and worth not overselling.
+3. **The fictional-vendor threat probably inflates this result.** Both arms
+   searched; both found nothing. The model noted that "Acme Corp, Northwind and
+   Globex are canonical placeholders" and that every vendor name collided with
+   unrelated real companies. In a world where *no* external corroboration is
+   available, an inline verifiable document is the only checkable thing on the
+   table — which is a friendlier setting than a real evaluation, where
+   competitors have real G2 reviews, real docs and real trust centres to point
+   at. The honest version of this experiment uses one real, consenting
+   customer.
+
+**What it supports saying:** when an agent can verify a claim and cannot verify
+its competitors' claims, it prefers the verifiable one, and it does the
+cryptographic work itself. **What it does not yet support:** a number for how
+much proof is worth against real competitors with real corroboration.
+
 ## Files
 
 | | |
