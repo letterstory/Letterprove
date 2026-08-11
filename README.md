@@ -110,27 +110,36 @@ flowchart LR
 
 | Trunk — **Letterstory** | Leaf — **Letterprove** |
 |---|---|
-| Staff identity / SSO | Vendors, their customers, consent state |
-| Anti-fraud scoring **+ the signing key** | Signal registry, per-vendor collection config |
-| Billing and entitlements | The script, collector, storage, rollups |
-| Cross-product customer record | Publishing, endpoints, proof surfaces |
+| Anti-fraud scoring **+ the signing key** | Auth — Letterprove ships its own, no SSO bridge |
+| Cross-product customer record | Vendors, their customers, consent state |
+| | Billing and entitlements — isolated in LP for now, explicitly punted |
+| | Signal registry, per-vendor collection config |
+| | The script, collector, storage, rollups |
+| | Publishing, endpoints, proof surfaces |
 
-Four things in the trunk, all genuinely cross-service.
+**Narrowed 08-11** — two things left in the trunk, both genuinely cross-service.
+Auth and billing moved to the leaf; neither survived the test above once pressure-tested
+against how `time.letterbrace.com` and `kernels` actually run (fully independent
+auth, no federation — the only existing cross-service trust anywhere in the
+fleet is a machine-to-machine shared secret, never a human-identity bridge).
 
 ### Identity
 
-Letterprove stands up its **own** vendor, customer, and org model rather than
-borrowing Letterstory's — and this is more necessary than it looks. Consent has
-no Letterstory analogue: when Acme approves their own attestation, that is the
-vendor's customer, someone who will never hold a Letterstory account. Modelling
-them in the trunk would be genuinely wrong.
+Letterprove stands up its **own** vendor, customer, org, *and staff auth*
+model rather than borrowing Letterstory's — and this is more necessary than it
+looks. Consent has no Letterstory analogue: when Acme approves their own
+attestation, that is the vendor's customer, someone who will never hold a
+Letterstory account. Modelling them in the trunk would be genuinely wrong.
 
 - **Letterprove owns outright** — vendors, their customers, consent state,
-  publishable keys.
-- **Letterstory federates in** — staff access only. One SSO hop.
+  publishable keys, and its own Supabase Auth (staff included — no SSO hop).
+- **Letterstory holds nothing about Letterprove's users.** The only identity
+  that crosses the boundary is machine identity, for the signing RPC — see
+  [the countersign call](#processing--the-one-trunk-crossing) below.
 
 End-customer orgs are never synced between the two. Two identity systems trying
-to mirror each other is the worst of both.
+to mirror each other is the worst of both. A unified auth service is plausible
+eventually; explicitly not now.
 
 ### Open code, closed data
 
@@ -174,6 +183,98 @@ Two services that must deploy together are not two services. The check:
 Countersigning is a runtime call, not a build dependency, so this holds. If a
 change ever requires a coordinated deploy, the boundary has drifted and the
 fix belongs here, not in a release plan.
+
+---
+
+## Event lifecycle
+
+The diagram above draws the shape. This traces one event through it, hop by
+hop — the spine the sections below hang their detail off of.
+
+```mermaid
+sequenceDiagram
+    participant Browser as Vendor's site<br/>(attest.js)
+    participant LP as Letterprove<br/>collector
+    participant Store as Letterprove<br/>store (hot → rolled up)
+    participant LS as Letterstory<br/>fraud + signing key
+    participant Pub as Letterprove<br/>publish (chained)
+    participant Agent as Evaluating agent
+
+    Browser->>LP: POST /v1/observe<br/>{k, domain, ev, cfg, ts}
+    LP->>LP: bind receipt_ts, origin, ASN<br/>validate cfg version
+    LP->>Store: append raw event (Hot)
+    Note over Store: hourly job
+    Store->>Store: aggregate → Rolled up<br/>(account × feature)
+    Store->>LP: fraud features<br/>(ASN dist, distinct-hash counts, timing shape)
+    LP->>LS: countersign(snapshot, fraud_features)
+    LS->>LS: score for fraud
+    alt passes
+        LS-->>LP: signature (Ed25519, key_id)
+    else fails
+        LS-->>LP: rejected
+    end
+    LP->>Pub: write signed snapshot<br/>chained via prev_hash (Published)
+    Agent->>Pub: GET /attest/{vendor}/{customer}.json
+    Pub-->>Agent: signed attestation
+    Agent->>Pub: GET /.well-known/letterprove-jwks.json
+    Agent->>Agent: verify signature, walk chain
+```
+
+### Emission
+
+Browser fires `POST /v1/observe` per the [event schema](#event-schema--proposed).
+Domain only, sendBeacon-safe, key-scoped. Nothing is trusted from the client
+except that it happened — counting and validation both run server-side.
+
+### Processing — Letterprove side
+
+1. **Ingest.** The collector binds facts the client did not supply — receipt
+   timestamp, request origin, ASN — and validates the event's `cfg` version
+   against what's on file. Stored as a Hot-tier row.
+2. **Roll up.** An hourly job aggregates Hot → Rolled-up, per account ×
+   feature. This is what the charts and the eventual attestation numbers read.
+3. **Extract fraud features.** Letterprove computes a *feature stream* from
+   the rollups — ASN distribution, distinct-hash counts, timing shape — never
+   raw observations. This is the only thing that crosses to Letterstory; see
+   [Published vs. retained](#published-vs-retained) — all raw data stays put.
+
+### Processing — the one trunk crossing
+
+4. **Countersign RPC.** Letterprove calls Letterstory with the proposed
+   snapshot and fraud features. Letterstory scores it and, if it passes,
+   signs with the Ed25519 key that never leaves its environment — see
+   [the signing seam](#the-signing-seam). This is the single call where the
+   two services must agree at runtime; everything else in this trace is
+   Letterprove alone.
+
+   > [!NOTE]
+   > **Open, not yet decided:** what authenticates *this* call. Human auth
+   > just moved to Letterprove entirely (08-11) — no SSO bridge, no shared
+   > session. But this RPC is service-to-service, not a human session, so it
+   > needs its own machine credential — the same shape as the
+   > `KERNEL_HEADLESS_KEY` pattern between `lb` and `kernels`: a shared
+   > secret scoped to this one call, never a user-identity bridge. Not yet
+   > specced; belongs in the decision log once it is.
+
+### Publication
+
+5. **Publish.** Letterprove writes the now-signed snapshot to the Published
+   tier, chained to its predecessor via `prev_hash`. This is what makes the
+   record auditable, not just signed.
+
+### Presentation
+
+6. **Agent fetches.** An evaluating agent — or the vendor's own page via
+   `attest.js`-injected JSON-LD, or a same-origin proxy — requests
+   `/attest/{vendor}/{customer}.json` or `/proofs/{vendor}`.
+7. **Agent verifies.** It pulls the public key from
+   `/.well-known/letterprove-jwks.json` by `key_id`, checks the signature,
+   and — if it wants the audit trail — walks `prev_hash` back through
+   `/attest/{vendor}/{customer}/chain`. Nothing past this point asks to be
+   trusted; it's checked. (Confirmed empirically, not just in theory — see
+   the [AEO experiment run log](experiments/aeo/README.md#run-log): agents
+   verified signatures unaided, and unprompted ran tamper and self-mint
+   tests against them.)
 
 ---
 
@@ -446,11 +547,13 @@ and carries the function signature the Letterstory RPC will have.
 | 3 | **Microservice split** — Letterprove owns storage, rollups, config and publishing; Letterstory is a minimal coordination trunk | ✅ **Decided** |
 | 4 | Domain only — the email local part never leaves the browser | ✅ **Decided** |
 | 5 | Provenance tier on every claim; identity hashed and retained, not published | ✅ **Decided** |
-| 6 | Letterprove owns its own vendor/customer/consent model; Letterstory federates staff only | ✅ **Decided** |
+| 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | 🟡 Proposed |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
 | 9 | Consent — build named, ship anonymized | 🟡 Proposed |
 | 10 | Event schema and config endpoint shapes | 🟡 Proposed |
+| 11 | Billing/entitlements — isolated in Letterprove for the initial implementation | 🟡 Proposed, explicitly punted |
+| 12 | What authenticates the Letterprove→Letterstory countersign RPC | ⚪ Open — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 
 ### Open
 
