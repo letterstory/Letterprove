@@ -222,7 +222,7 @@ sequenceDiagram
 
 ### Emission
 
-Browser fires `POST /v1/observe` per the [event schema](#event-schema--proposed).
+Browser fires `POST /v1/observe` per the [event schema](#event-schema--decided).
 Domain only, sendBeacon-safe, key-scoped. Nothing is trusted from the client
 except that it happened — counting and validation both run server-side.
 
@@ -322,45 +322,88 @@ missing row — it is a signed attestation that is false:
 Because the mapping is service-local data, fixing any of these is a row edit —
 never a vendor redeploy, and never a cross-repo coordination.
 
-### Event schema — **Proposed**
+### Event schema — **Decided**
 
-Two events, not a general analytics firehose. The firehose is what turns this
+Three events, not a general analytics firehose. The firehose is what turns this
 into a six-month schema debate.
 
 ```jsonc
 POST /v1/observe          // sendBeacon-safe, key-scoped, origin-pinned
 {
-  "k":      "lp_live_…",  // publishable key
+  "k":      "lp_live_…",  // publishable key — identifies vendor, validates origin
   "domain": "acme.com",   // the join key — domain only, always
-  "ev":     "session",    // session | signup | login | feature
-  "feat":   "sso",        // only when ev=feature
+  "ev":     "session",    // session | signup | login — phase-1 only, see below
   "cfg":    7,            // config version that produced this event
-  "ts":     1754870400
+  "ts":     1754870400    // client-observed time — ordering/dedup only, never authoritative
 }
 ```
 
+`ev` is a closed enum scoped to the phase-1 signal list — `session | signup |
+login`. It does **not** include a `feature`/named-event type: shipping one now
+would silently pre-empt the still-open "phase-1 signal list, confirmed in
+writing" item below. Named events ride on the config endpoint's `signals`
+registry once that's real, as a phase-2 addition — not wired speculatively
+today. "Active accounts" isn't a fourth event type either; it's derived
+server-side from session/login activity, so it needs no wire representation.
+
 The client sends facts. **All counting happens server-side** — never trust a
-counter the page could inflate.
+counter the page could inflate. `ts` is one of those facts, not a source of
+truth: it's client-observed and untrusted, used only for client-side ordering
+and dedup. What the rollup actually keys off is `receipt_ts` — the server-bound
+timestamp below.
 
 Each observation is stored bound to facts the client did not supply: our receipt
-timestamp, the request origin, and the originating ASN. ASN matters more than
-geography for fraud detection — *"all 4,182 sessions came from one AWS range"*
-is the tell that catches a spoofing rig, and country-level geo never would.
+timestamp (`receipt_ts`), the request origin, and the originating ASN. ASN
+matters more than geography for fraud detection — *"all 4,182 sessions came
+from one AWS range"* is the tell that catches a spoofing rig, and country-level
+geo never would.
+
+The response is always `204`, even on a bad key or stale `cfg` — per
+[Reliability](#reliability) below, the host page never sees a failure. Status
+lives entirely in the `x-letterprove` header, never the body.
+
+One transport gotcha worth deciding now instead of discovering in production:
+`navigator.sendBeacon` can't reliably set `Content-Type: application/json` — it
+often lands as `text/plain`. The collector parses the body as JSON regardless
+of what `Content-Type` says, or `attest.js` intermittently fails in a way that
+looks like a client bug and isn't.
 
 For tier 2 server-side reporting, a parallel `POST /v1/ingest` from the vendor's
-backend, HMAC-signed with a replay nonce.
+backend, HMAC-signed with a replay nonce. Its field shape is explicitly out of
+scope here — phase 1 is script-only, so specifying it now would be designing
+for a phase we're not building.
 
 ### Configuration — **Decided**
 
 The script pulls its collection config from Letterprove at boot. Signals change
 without shipping new script and without a vendor ever re-pulling.
 
-- **Fails closed.** No config, no collection. Never blocks page render.
-- **Cached last-known** with a TTL, so a service blip doesn't blind the fleet.
+```jsonc
+GET /v1/config?k=lp_live_…
+→ 200, Cache-Control: max-age=…, stale-while-revalidate
+{
+  "cfg":     7,
+  "signals": []   // reserved for phase-2 named/feature events; empty in phase 1
+}
+```
+
+Keyed by the same publishable `k` as events — `attest.js` has nothing else to
+work with beyond its `data-key` attribute. CORS open
+(`access-control-allow-origin: *`), same as the proofs endpoint, since it's
+fetched cross-origin from the vendor's page.
+
+- **Fails closed.** No config, no collection. Never blocks page render. The
+  edge case the constraint alone doesn't cover: a cold cache *and* a failed
+  fetch (first-ever page load, service down) means no collection, not a guess
+  — only a warm cache lets a blip degrade gracefully.
+- **Cached last-known** via real `Cache-Control`/`stale-while-revalidate`, not
+  a custom TTL field — the browser already does this for free.
 - **Public by nature.** It ships to a browser; anyone can read what a vendor
   collects. No secrets in it, ever.
 - **Versioned.** Every event carries its `cfg` version, or a mid-month schema
-  change makes the rollup uninterpretable after the fact.
+  change makes the rollup uninterpretable after the fact. `signals` ships now,
+  empty, purely so phase-2 doesn't force a breaking response-shape change
+  later — the one piece of forward design here that's free.
 
 ### Reliability
 
@@ -554,7 +597,7 @@ and carries the function signature the Letterstory RPC will have.
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | 🟡 Proposed |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
 | 9 | Consent — build named, ship anonymized | 🟡 Proposed |
-| 10 | Event schema and config endpoint shapes | 🟡 Proposed |
+| 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Billing/entitlements — isolated in Letterprove for the initial implementation | 🟡 Proposed, explicitly punted |
 | 12 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 
