@@ -110,27 +110,54 @@ flowchart LR
 
 | Trunk — **Letterstory** | Leaf — **Letterprove** |
 |---|---|
-| Staff identity / SSO | Vendors, their customers, consent state |
-| Anti-fraud scoring **+ the signing key** | Signal registry, per-vendor collection config |
-| Billing and entitlements | The script, collector, storage, rollups |
-| Cross-product customer record | Publishing, endpoints, proof surfaces |
+| Anti-fraud scoring **+ the signing key** | Auth, vendors, their customers, consent state |
+| Genuine cross-product concerns | Signal registry, per-vendor collection config |
+| | The script, collector, storage, rollups |
+| | Billing (isolated for now — see below) |
+| | Publishing, endpoints, proof surfaces |
 
-Four things in the trunk, all genuinely cross-service.
+**The test for the trunk is not "is it shared infrastructure" — it is
+*closed-source, or must-not-be-forgeable*.** Fraud heuristics can't be published
+without becoming an evasion manual, and the authority to say "this is true"
+can't sit with the service that computes the numbers. Nothing else qualifies
+today, and the test is deliberately hard to pass.
 
-### Identity
+### Identity — **auth lives entirely in Letterprove**
 
-Letterprove stands up its **own** vendor, customer, and org model rather than
-borrowing Letterstory's — and this is more necessary than it looks. Consent has
-no Letterstory analogue: when Acme approves their own attestation, that is the
-vendor's customer, someone who will never hold a Letterstory account. Modelling
-them in the trunk would be genuinely wrong.
+Letterprove ships its own auth with its own backend, **including staff access**.
+Coordinating with Letterstory's auth for an MVP buys nothing and costs weeks,
+and per-service auth is the pattern already working on other Letter Company
+services (`time`, `kernels`). A unified auth service is plausible eventually;
+it is explicitly not a concern for this stage.
 
-- **Letterprove owns outright** — vendors, their customers, consent state,
+It is also more necessary than it looks. Consent has no Letterstory analogue:
+when Acme approves their own attestation, that is the vendor's customer,
+someone who will never hold a Letterstory account. Modelling them in the trunk
+would be genuinely wrong.
+
+- **Letterprove owns outright** — auth, vendors, their customers, consent state,
   publishable keys.
-- **Letterstory federates in** — staff access only. One SSO hop.
+- **Letterstory holds no Letterprove identity at all.**
 
 End-customer orgs are never synced between the two. Two identity systems trying
 to mirror each other is the worst of both.
+
+**One auth surface still crosses**, and it needs an owner: the service-to-service
+credential Letterprove uses to call Letterstory for a countersignature. Since
+Letterstory is the party deciding whether to sign, it should hold and rotate
+that credential. Named here so it is settled at design time rather than
+discovered at wiring time.
+
+### Billing — isolated, and deliberately undecided
+
+Letterprove gets its own initial billing implementation. The larger question of
+a shared billing surface is punted.
+
+One thing not to punt: **do not model "the company that pays us" in Letterprove
+while that question is open.** Keep Letterprove's model to vendors, their
+customers, and consent — what it genuinely owns. A billing customer-of-record
+invented here now will contradict whatever cross-product one appears later, and
+reconciling two customer records after both have data is miserable.
 
 ### Open code, closed data
 
@@ -163,6 +190,12 @@ This is what makes the fraud check load-bearing instead of advisory. If
 Letterprove held the key, Letterstory's scoring would be a report nobody is
 obliged to obey, and a single compromise would mint arbitrary valid proofs.
 The leaf is autonomous for everything except the one irreversible act.
+
+**With auth and billing now in the leaf, countersigning is the _only_ runtime
+coupling between the two services.** That is a property worth defending: it
+means the boundary is a single, well-understood call rather than a web of
+dependencies, and any drift shows up as a second thing crossing. If you ever
+find yourself adding one, that is the moment to stop and re-argue the split.
 
 ### The test that keeps this honest
 
@@ -446,11 +479,13 @@ and carries the function signature the Letterstory RPC will have.
 | 3 | **Microservice split** — Letterprove owns storage, rollups, config and publishing; Letterstory is a minimal coordination trunk | ✅ **Decided** |
 | 4 | Domain only — the email local part never leaves the browser | ✅ **Decided** |
 | 5 | Provenance tier on every claim; identity hashed and retained, not published | ✅ **Decided** |
-| 6 | Letterprove owns its own vendor/customer/consent model; Letterstory federates staff only | ✅ **Decided** |
-| 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | 🟡 Proposed |
-| 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
-| 9 | Consent — build named, ship anonymized | 🟡 Proposed |
-| 10 | Event schema and config endpoint shapes | 🟡 Proposed |
+| 6 | **Auth lives entirely in Letterprove, staff included** — per-service auth, as on `time` and `kernels`. Supersedes the earlier "Letterstory federates staff only" | ✅ **Decided** 2026-08-12 |
+| 7 | **Trunk narrowed to fraud detection, key signing, and genuine cross-product concerns.** The test is *closed-source or must-not-be-forgeable*, not *shared infrastructure* | ✅ **Decided** 2026-08-12 |
+| 8 | **Billing gets an isolated initial implementation in Letterprove**; a shared billing surface is punted | ✅ **Decided** 2026-08-12 |
+| 9 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | 🟡 Proposed |
+| 10 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
+| 11 | Consent — build named, ship anonymized | 🟡 Proposed |
+| 12 | Event schema and config endpoint shapes | 🟡 Proposed |
 
 ### Open
 
@@ -460,6 +495,13 @@ and carries the function signature the Letterstory RPC will have.
   month; this is twenty minutes.
 - **Phase-1 signal list**, confirmed in writing: signups, logins, sessions,
   active accounts. Nothing else.
+- **Who holds the service-to-service credential for the countersign call?** With
+  auth now entirely in Letterprove, this is the one auth surface that still
+  crosses. Letterstory is the party deciding whether to sign, so it should hold
+  and rotate it — but it needs an owner and a mechanism (shared secret, mTLS).
+- **When does a unified auth service become worth building?** Acknowledged as
+  eventual, deliberately deferred. Worth a revisit trigger rather than a date —
+  e.g. the third service that needs cross-service staff access.
 
 ---
 
