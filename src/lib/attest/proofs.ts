@@ -1,21 +1,17 @@
 /**
- * The rollup — identity fixtures + live telemetry in, signed attestations out.
+ * The rollup — identity fixtures + live telemetry + persisted history in,
+ * signed attestations out.
  *
  * This is the module `method` points at, which makes it the one file in the
  * repo an evaluating agent is most likely to actually read. Keep it legible.
  */
 
+import { attestationBody, TTL_SECONDS } from "./body";
 import { buildChain, head } from "./chain";
-import { methodUrl } from "./method";
+import { GENESIS_HASH, snapshotHash } from "./verify";
 import { allVendors, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
-import { currentSnapshot } from "@/rollup/snapshots";
-import type { AttestationBody, SignedAttestation } from "./types";
-
-/** Repo-relative path of this file, for the `method` link. */
-const METHOD_PATH = "src/lib/attest/proofs.ts";
-
-/** How long an agent may cache a proof. One hour matches the publish cadence. */
-const TTL_SECONDS = 3600;
+import { loadPersistedChain } from "@/rollup/history";
+import type { SignedAttestation } from "./types";
 
 export interface CustomerProof {
 	/** The newest snapshot — what the customer endpoint serves. */
@@ -37,14 +33,17 @@ export interface VendorProof {
 }
 
 /**
- * `currentSnapshot` reads a live, growing table, so the chain it produces is
- * one signed entry — "as of now" — not a persisted history; there is no
- * multi-snapshot backfill yet (that needs its own storage/cadence design, not
- * just this query). Memoising still matters for cost, but keying by hour
- * bounds staleness to TTL_SECONDS instead of caching forever: a mismatch
- * between the proof page and the JSON endpoints within that hour would look
- * to a verifier exactly like tampering, so both must read the same cached
- * chain, not a fresh query each time.
+ * The hourly freeze (rollup/freeze.ts) is what makes history durable; this
+ * module only ever reads what it already wrote, plus — on top — one live
+ * entry for the current hour if that hour hasn't been frozen yet. So a
+ * chain is never stale by more than the freeze cadence, and never blank
+ * between deploy and the first cron tick either.
+ *
+ * Memoising the composed result still matters for cost, and keying by hour
+ * bounds staleness to TTL_SECONDS: a mismatch between the proof page and the
+ * JSON endpoints within that hour would look to a verifier exactly like
+ * tampering, so both must read the same cached chain, not a fresh query
+ * each time.
  */
 const chains = new Map<string, Promise<SignedAttestation[]>>();
 
@@ -52,25 +51,20 @@ function hourBucket(): number {
 	return Math.floor(Date.now() / (TTL_SECONDS * 1000));
 }
 
-async function bodiesFor(vendor: VendorFixture, customer: CustomerFixture): Promise<Omit<AttestationBody, "prev_hash">[]> {
-	const snapshot = await currentSnapshot(vendor.slug, customer.domain);
-	return [
-		{
-			vendor: vendor.slug,
-			customer: customer.slug,
-			customer_name: customer.name,
-			verified: customer.verified,
-			tier: customer.tier,
-			since: customer.since,
-			features: [...customer.features].sort(),
-			sessions_30d: snapshot.sessions_30d,
-			seats_active: snapshot.seats_active,
-			observed_through: snapshot.observed_through,
-			published_at: snapshot.published_at,
-			ttl: TTL_SECONDS,
-			method: methodUrl(METHOD_PATH),
-		},
-	];
+async function loadChain(vendor: VendorFixture, customer: CustomerFixture): Promise<SignedAttestation[]> {
+	const persisted = await loadPersistedChain(vendor.slug, customer.slug);
+	const bucket = hourBucket();
+
+	if (persisted.length && persisted.at(-1)!.hourBucket === bucket) {
+		return persisted.map((p) => p.attestation);
+	}
+
+	const tail = persisted.at(-1)?.attestation;
+	const prevHash = tail ? snapshotHash(tail) : GENESIS_HASH;
+	const body = await attestationBody(vendor, customer);
+	const [fresh] = await buildChain([body], prevHash);
+
+	return [...persisted.map((p) => p.attestation), fresh];
 }
 
 export async function customerChain(vendorSlug: string, customerSlug: string): Promise<SignedAttestation[] | null> {
@@ -82,7 +76,7 @@ export async function customerChain(vendorSlug: string, customerSlug: string): P
 	const key = `${vendorSlug}/${customerSlug}/${hourBucket()}`;
 	let chain = chains.get(key);
 	if (!chain) {
-		chain = bodiesFor(vendor, customer).then(buildChain);
+		chain = loadChain(vendor, customer);
 		chains.set(key, chain);
 	}
 	return chain;
