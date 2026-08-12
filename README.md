@@ -141,7 +141,7 @@ End-customer orgs are never synced between the two. Two identity systems trying
 to mirror each other is the worst of both. A unified auth service is plausible
 eventually; explicitly not now.
 
-### Open code, closed data
+### Open code, closed data — **Decided**
 
 Letterprove's computation is **open source**, and that is a product decision
 rather than housekeeping. The premise of the whole system is *don't take our
@@ -150,12 +150,33 @@ categorically better position than one that can only check a signature.
 
 So every attestation carries a `method` pointer: repo, path, and commit SHA of
 the rollup logic that computed it. **The attestation cites the code that made
-it.**
+it.** The link itself is already real —
+[`methodUrl()`](src/lib/attest/method.ts) builds it from the deployed commit
+SHA today.
 
 The inverse holds just as firmly. Open source is not open data — the
 observations Letterprove stores are never public. And **anti-fraud stays
 closed**, in Letterstory, because published detection logic is an evasion
 manual.
+
+**What "open source" requires that isn't true yet.** This repo is currently
+private, no license. Every `method` link an attestation ships today points
+somewhere an outside agent can't read — the mechanism is real, the claim
+behind it isn't. Three things close that gap:
+
+- **The repo goes public at or before Letterprove's own launch (target: Aug
+  25, 2026)** — ahead of the company-wide open-source date (Oct 23, 2026),
+  because Letterprove is the one product of the five making a
+  verify-the-code claim to customers on day one. Nothing here needs to wait
+  for that date: anti-fraud is already isolated in Letterstory, so nothing
+  sensitive lives in this repo.
+- **A real license** — MIT. Reading the code isn't the whole claim; a
+  skeptical agent or a competitor being able to actually clone and run it is.
+- **`main` never gets force-pushed or rebased once public.** Every published
+  attestation pins a commit SHA that has to stay resolvable indefinitely, or
+  the trust chain breaks retroactively for every attestation published before
+  the rewrite — silently, since nothing about an already-signed attestation
+  would flag it.
 
 ### The signing seam
 
@@ -594,7 +615,7 @@ and carries the function signature the Letterstory RPC will have.
 | 4 | Domain only — the email local part never leaves the browser | ✅ **Decided** |
 | 5 | Provenance tier on every claim; identity hashed and retained, not published | ✅ **Decided** |
 | 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
-| 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | 🟡 Proposed |
+| 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
 | 9 | Consent — build named, ship anonymized | 🟡 Proposed |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
