@@ -360,12 +360,13 @@ POST /v1/observe          // sendBeacon-safe, key-scoped, origin-pinned
 ```
 
 `ev` is a closed enum scoped to the phase-1 signal list — `session | signup |
-login`. It does **not** include a `feature`/named-event type: shipping one now
-would silently pre-empt the still-open "phase-1 signal list, confirmed in
-writing" item below. Named events ride on the config endpoint's `signals`
-registry once that's real, as a phase-2 addition — not wired speculatively
-today. "Active accounts" isn't a fourth event type either; it's derived
-server-side from session/login activity, so it needs no wire representation.
+login` — confirmed 08-11: signups, logins, sessions, active accounts. Nothing
+else this phase. It does **not** include a `feature`/named-event type: shipping
+one now would silently pre-empt that confirmed scope. Named events ride on the
+config endpoint's `signals` registry once that's real, as a phase-2 addition —
+not wired speculatively today. "Active accounts" isn't a fourth event type
+either; it's derived server-side from session/login activity, so it needs no
+wire representation.
 
 The client sends facts. **All counting happens server-side** — never trust a
 counter the page could inflate. `ts` is one of those facts, not a source of
@@ -629,8 +630,6 @@ and carries the function signature the Letterstory RPC will have.
   updating, machine-readable usage attestation, or is that a new grant?** The
   narrow legal question worth asking. Not *"is GDPR ok with this"* — that's a
   month; this is twenty minutes.
-- **Phase-1 signal list**, confirmed in writing: signups, logins, sessions,
-  active accounts. Nothing else.
 
 ---
 
