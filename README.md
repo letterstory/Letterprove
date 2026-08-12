@@ -543,16 +543,18 @@ copy of the observations. The leaf keeps its data whole; the trunk stays small.
 
 ---
 
-## Consent
+## Consent — **Decided**
 
 Publishing *"Acme runs SSO, 148 seats, 92% adoption"* discloses **Acme's** data.
 Acme is our customer's customer.
 
-**Proposed approach — build for named, ship anonymized, flip as consent lands.**
+**Build for named, ship anonymized, flip as consent lands.**
 Aggregate proof (*"12 attested customers, 4 features proven, 38k sessions/mo"*)
 carries almost no consent problem and is already meaningfully better than a logo
 wall. Named attestation is the part that needs Acme's say-so. This unblocks the
-entire pipeline today while the legal question runs in parallel.
+entire pipeline today, and doesn't wait on the legal question below — that
+question decides when a given customer flips to named, not whether the system
+ships.
 
 Design the consent step as the verification step: a customer who approves their
 own attestation has just produced a tier-4 counter-signature, the strongest
@@ -617,7 +619,7 @@ and carries the function signature the Letterstory RPC will have.
 | 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
-| 9 | Consent — build named, ship anonymized | 🟡 Proposed |
+| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided** — see [Consent](#consent--decided) |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Billing/entitlements — isolated in Letterprove for the initial implementation | 🟡 Proposed, explicitly punted |
 | 12 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
