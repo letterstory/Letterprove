@@ -1,37 +1,31 @@
 /**
- * Fixture data — a fictional vendor and its customers.
+ * Identity fixtures — a fictional vendor and its customers.
  *
  * The publishing half of Letterprove is entirely independent of collection, so
- * it is built and demonstrated against these until Steve's telemetry lands.
- * When it does, this module is replaced by a rollup over real observations and
- * nothing downstream of it changes: the routes, signing, chaining, JSON-LD and
- * verifier all consume the same shape.
+ * it was originally built and demonstrated against static snapshot numbers
+ * here too. Those are gone now: `sessions_30d`/`seats_active` come from
+ * `currentSnapshot` (src/rollup/snapshots.ts), a live query over `hot_rollups`,
+ * keyed by the `domain` below. What's left here — identity, tier, features — is
+ * still genuinely static: nothing in `hot_events` carries a customer name or a
+ * feature list (see events.ts), so there is no rollup that could replace it.
  *
- * Everything here is deliberately STATIC — fixed timestamps, fixed counts. A
- * signature covers the bytes, so a `Date.now()` anywhere in this file would
- * mint a different chain on every request and make the tests meaningless.
- *
- * NOTHING IN HERE IS EVIDENCE. Vantage does not exist.
+ * NOTHING IN HERE IS EVIDENCE. Vantage does not exist. Its customers' domains
+ * are not registered and will never emit real events; every proof this vendor
+ * publishes honestly shows sessions_30d: 0 until someone points a real
+ * attest.js at one of them.
  */
 
 import type { Tier } from "../attest/types";
 
-export interface SnapshotFixture {
-	observed_through: string;
-	published_at: string;
-	sessions_30d: number;
-	seats_active: number;
-}
-
 export interface CustomerFixture {
 	slug: string;
 	name: string;
+	/** Join key into hot_events/hot_rollups — the `domain` an observe payload carries. */
+	domain: string;
 	since: string;
 	tier: Tier;
 	verified: boolean;
 	features: string[];
-	/** Oldest first — the order the chain is built in. */
-	snapshots: SnapshotFixture[];
 }
 
 export interface VendorFixture {
@@ -57,32 +51,25 @@ const VANTAGE: VendorFixture = {
 		{
 			slug: "acme-corp",
 			name: "Acme Corp",
+			domain: "acme-corp.example",
 			since: "2023-03",
 			tier: 2,
 			verified: true,
 			features: ["sso", "api", "analytics"],
-			snapshots: [
-				{ observed_through: "2026-06-30T00:00:00Z", published_at: "2026-06-30T02:04:00Z", sessions_30d: 3908, seats_active: 141 },
-				{ observed_through: "2026-07-31T00:00:00Z", published_at: "2026-07-31T02:06:00Z", sessions_30d: 4055, seats_active: 145 },
-				{ observed_through: "2026-08-09T00:00:00Z", published_at: "2026-08-09T02:05:00Z", sessions_30d: 4182, seats_active: 148 },
-			],
 		},
 		{
 			slug: "northwind",
 			name: "Northwind",
+			domain: "northwind.example",
 			since: "2024-08",
 			tier: 2,
 			verified: true,
 			features: ["sso", "api", "analytics", "sla"],
-			snapshots: [
-				{ observed_through: "2026-06-30T00:00:00Z", published_at: "2026-06-30T02:04:00Z", sessions_30d: 1602, seats_active: 38 },
-				{ observed_through: "2026-07-31T00:00:00Z", published_at: "2026-07-31T02:06:00Z", sessions_30d: 1711, seats_active: 41 },
-				{ observed_through: "2026-08-09T00:00:00Z", published_at: "2026-08-09T02:05:00Z", sessions_30d: 1760, seats_active: 43 },
-			],
 		},
 		{
 			slug: "globex",
 			name: "Globex",
+			domain: "globex.example",
 			since: "2022-11",
 			// Tier 1 on purpose: observed in a browser, not yet bound to
 			// infrastructure facts. The proof page must be able to show a weaker
@@ -90,10 +77,6 @@ const VANTAGE: VendorFixture = {
 			tier: 1,
 			verified: false,
 			features: ["sso", "audit_log", "api"],
-			snapshots: [
-				{ observed_through: "2026-07-31T00:00:00Z", published_at: "2026-07-31T02:06:00Z", sessions_30d: 884, seats_active: 22 },
-				{ observed_through: "2026-08-09T00:00:00Z", published_at: "2026-08-09T02:05:00Z", sessions_30d: 903, seats_active: 23 },
-			],
 		},
 	],
 };
