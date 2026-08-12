@@ -39,6 +39,8 @@ export interface VendorFixture {
 	name: string;
 	domain: string;
 	category: string;
+	/** Publishable key `attest.js` sends on every event — origin-pinned to `domain`. */
+	key: string;
 	customers: CustomerFixture[];
 }
 
@@ -50,6 +52,7 @@ const VANTAGE: VendorFixture = {
 	name: "Vantage",
 	domain: "vantage.example",
 	category: "customer data platforms",
+	key: "lp_live_vantage_9f2c",
 	customers: [
 		{
 			slug: "acme-corp",
@@ -103,6 +106,10 @@ export function allVendors(): VendorFixture[] {
 
 export function findVendor(slug: string): VendorFixture | undefined {
 	return VENDORS.find((v) => v.slug === slug);
+}
+
+export function findVendorByKey(key: string): VendorFixture | undefined {
+	return VENDORS.find((v) => v.key === key);
 }
 
 export function findCustomer(vendor: VendorFixture, slug: string): CustomerFixture | undefined {

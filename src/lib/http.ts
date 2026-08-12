@@ -26,3 +26,35 @@ export function notFound(what: string): NextResponse {
 		{ status: 404, headers: { "access-control-allow-origin": "*", "x-letterprove": "on" } }
 	);
 }
+
+/**
+ * The only response `POST /v1/observe` ever sends — per Reliability, always
+ * `204`, even on a bad key or a malformed body. Status lives entirely in
+ * `x-letterprove`, never the body: a host page must never see a failure, so
+ * there is nothing here for it to parse.
+ */
+export function collectorResponse(accepted: boolean): NextResponse {
+	return new NextResponse(null, {
+		status: 204,
+		headers: {
+			"access-control-allow-origin": "*",
+			"x-letterprove": accepted ? "on" : "off",
+		},
+	});
+}
+
+/**
+ * `GET /v1/config` — cached via real `Cache-Control`/`stale-while-revalidate`
+ * so the browser does the work, not a custom TTL field. Short-lived on
+ * purpose: signals are meant to change without a script re-ship, and this is
+ * how fast that change actually reaches an already-loaded vendor page.
+ */
+export function configJson(body: unknown, maxAge = 300): NextResponse {
+	return NextResponse.json(body, {
+		headers: {
+			"cache-control": `public, max-age=${maxAge}, stale-while-revalidate=3600`,
+			"access-control-allow-origin": "*",
+			"x-letterprove": "on",
+		},
+	});
+}
