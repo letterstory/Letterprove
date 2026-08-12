@@ -1,7 +1,7 @@
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { collectorResponse } from "@/lib/http";
 import { parseObservePayload } from "@/lib/telemetry/events";
-import { logObservation } from "@/lib/telemetry/log";
+import { recordObservation } from "@/lib/telemetry/record";
 
 /**
  * `POST /v1/observe` — see README § Event schema.
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 	const origin = originHostname(request.headers.get("origin"));
 	if (!origin || origin !== vendor.domain) return collectorResponse(false);
 
-	logObservation({
+	await recordObservation({
 		vendor: vendor.slug,
 		domain: payload.domain,
 		ev: payload.ev,
