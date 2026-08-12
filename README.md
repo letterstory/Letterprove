@@ -616,7 +616,7 @@ and carries the function signature the Letterstory RPC will have.
 | 5 | Provenance tier on every claim; identity hashed and retained, not published | ✅ **Decided** |
 | 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
-| 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | 🟡 Proposed |
+| 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
 | 9 | Consent — build named, ship anonymized | 🟡 Proposed |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Billing/entitlements — isolated in Letterprove for the initial implementation | 🟡 Proposed, explicitly punted |
