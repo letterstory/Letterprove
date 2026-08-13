@@ -82,10 +82,19 @@ export function publicJwk(): PublicJwk {
  * public keys here forever. A proof issued in 2026 must still verify in 2031 —
  * dropping a retired key silently invalidates history that we have already told
  * the world is immutable.
+ *
+ * With `LETTERPROVE_PRODUCTION_JWK` configured, it — not the locally-derived
+ * `publicJwk()` — is served as the active key. This service never holds the
+ * real private key (see countersign.ts / the "signing seam"); the RPC signer
+ * publishes its public half here so this service can still serve JWKS for
+ * signatures it did not itself compute. Unset, `publicJwk()` is served, which
+ * matches whatever countersign.ts actually signs with in that mode too (the
+ * local dev key when the RPC isn't configured).
  */
 export function jwks(): Jwks {
 	const retired = parseRetired(process.env.LETTERPROVE_RETIRED_JWKS);
-	return { keys: [publicJwk(), ...retired] };
+	const production = parseProductionKey(process.env.LETTERPROVE_PRODUCTION_JWK);
+	return { keys: [production ?? publicJwk(), ...retired] };
 }
 
 function parseRetired(raw: string | undefined): PublicJwk[] {
@@ -97,6 +106,22 @@ function parseRetired(raw: string | undefined): PublicJwk[] {
 		// A malformed retired-key list must not take the endpoint down; it would
 		// break verification for current proofs too. Serve what we can.
 		return [];
+	}
+}
+
+function parseProductionKey(raw: string | undefined): PublicJwk | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw);
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as PublicJwk) : null;
+	} catch {
+		// Same failure posture as parseRetired: never take the endpoint down.
+		// Falling back to publicJwk() here is safe, not silently wrong — it's
+		// still a real, servable key, just not the one signatures were
+		// actually made with, which is exactly what an operator debugging a
+		// verification failure needs to see: a *working* endpoint serving the
+		// *wrong* key, not a 500.
+		return null;
 	}
 }
 
