@@ -42,6 +42,7 @@ describe("freezeSnapshots", () => {
 			published_at: "2026-08-12T22:00:00.000Z",
 			sessions_30d: 5,
 			seats_active: 0,
+			observed: true,
 		});
 		const db = mockDb({ selectResult: { data: null, error: null }, upsertResult: { error: null } });
 		vi.mocked(dbClient).mockReturnValue(db as never);
@@ -64,6 +65,7 @@ describe("freezeSnapshots", () => {
 			published_at: "2026-08-12T22:00:00.000Z",
 			sessions_30d: 5,
 			seats_active: 0,
+			observed: true,
 		});
 		const priorAttestation = { published_at: "2026-08-12T21:00:00.000Z", sessions_30d: 4 };
 		const expectedPrevHash = snapshotHash(priorAttestation as never);
@@ -96,6 +98,7 @@ describe("freezeSnapshots", () => {
 			published_at: "2026-08-12T22:00:00.000Z",
 			sessions_30d: 5,
 			seats_active: 0,
+			observed: true,
 		});
 		const db = mockDb({ selectResult: { data: null, error: null }, upsertResult: { error: { message: "upsert boom" } } });
 		vi.mocked(dbClient).mockReturnValue(db as never);

@@ -6,12 +6,18 @@
  * repo an evaluating agent is most likely to actually read. Keep it legible.
  */
 
-import { attestationBody, TTL_SECONDS } from "./body";
+import { attestationBody, earned, TTL_SECONDS } from "./body";
 import { buildChain, head } from "./chain";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import { allVendors, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
 import { loadPersistedChain } from "@/rollup/history";
 import type { SignedAttestation } from "./types";
+
+// Re-exported for proofs.test.ts, which exercises the tier-gating rule
+// directly — `earned` itself now lives in body.ts since it's shared with
+// rollup/freeze.ts (the persisted path must never publish an ungated claim
+// either, once frozen it's immutable).
+export { earned };
 
 export interface CustomerProof {
 	/** The newest snapshot — what the customer endpoint serves. */
