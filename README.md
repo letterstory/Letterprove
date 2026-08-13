@@ -322,8 +322,16 @@ territory on the end-user side.
 
 ### Identity resolution — **Decided**
 
-Account identity is **inferred from the email domain**, automatically, with no
-vendor integration work. Inference *proposes*; **the alias map decides.**
+Account identity is **inferred from the email domain**. Inference *proposes*;
+**the alias map decides.**
+
+> [!NOTE]
+> **Revised (08-13):** "no vendor integration work" originally meant no
+> *backend* integration — no server-side identity call, no webhook, no data
+> export. It never meant zero client-side wiring: nothing on a page hands a
+> script a user's email without being asked. The one line of integration that
+> remains is the vendor's app calling `Letterprove.identify(email)` once it
+> has rendered who's logged in — see [Client API](#client-api--decided).
 
 Letterprove holds a domain→account alias list per customer, because inference
 alone is wrong in three predictable ways, and a wrong answer here is not a
@@ -426,6 +434,31 @@ fetched cross-origin from the vendor's page.
   change makes the rollup uninterpretable after the fact. `signals` ships now,
   empty, purely so phase-2 doesn't force a breaking response-shape change
   later — the one piece of forward design here that's free.
+
+### Client API — **Decided**
+
+`attest.js` (`public/attest.js`, no dependencies, no build step) has exactly
+three calls, and never anything to configure beyond `data-key`:
+
+```js
+Letterprove.identify(email)  // establishes domain, fires one "session" per page load
+Letterprove.signup(email)    // identifies, then fires "signup"
+Letterprove.login(email)     // identifies, then fires "login"
+```
+
+`email` never crosses the wire — the script splits off the domain locally and
+discards the rest before any request is built; see [the one hard
+rule](#the-one-hard-rule-domain-only). `identify` alone is what a vendor calls
+on every authenticated page load; `signup`/`login` call it internally, so a
+vendor wiring up an auth success handler never has to call both.
+
+Calls made before the config fetch resolves are queued in memory and flushed
+once it does; a failed or absent config permanently drops the queue for that
+page load rather than guessing — the same fail-closed rule as
+[Configuration](#configuration--decided). Every public method is wrapped so
+nothing here can throw into the host page, and transport prefers
+`navigator.sendBeacon`, falling back to a `keepalive` `fetch` where it's
+unavailable.
 
 ### Reliability
 
@@ -673,6 +706,7 @@ and carries the function signature the Letterstory RPC will have.
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | 🟡 **Proposed (08-12)** — see [The evidence gate](#the-evidence-gate--proposed) |
+| 13 | **Client API** — `identify`/`signup`/`login`, one line of vendor integration to hand the script an email | ✅ **Decided (08-13)** — see [Client API](#client-api--decided) |
 
 ### Open
 
