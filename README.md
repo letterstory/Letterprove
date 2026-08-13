@@ -510,6 +510,49 @@ last quarter's numbers, and an agent or a skeptical competitor can prove it.
 Per-vendor keys and customer counter-signing (tier 4) are additive later,
 precisely because `key_id` is there from day one.
 
+### The evidence gate — **Proposed**
+
+The trust model says *never print the word verified where the tier doesn't earn
+it*. Until now nothing enforced that: `bodiesFor` copied `verified` and `tier`
+straight out of the customer record into a signed body, and no code path
+checked them against an observation.
+
+That was survivable while every number in the document came from the same
+fixture. It stopped being survivable when `sessions_30d` went live, because a
+document can now carry a **measured** zero next to an **asserted** tier 2 — and
+nothing in it tells an agent which field is which.
+
+So publication applies one rule, in
+[`earned()`](src/lib/attest/proofs.ts):
+
+> **The asserted tier is a ceiling, never a floor.** With no observation in the
+> window, every fact we hold about that customer came from the vendor — which
+> is tier 0 by definition — and `verified` is false at any tier.
+
+It fails toward the weaker claim: a missing datastore or a failed query leaves
+`observed` false, so an outage degrades a proof to vendor-asserted rather than
+publishing a tier nothing backs. `observed` is evidence *about* the claim, not
+part of it, and never enters the signed body.
+
+Two things this deliberately does **not** decide, both trust-model calls rather
+than publishing ones:
+
+- **Tier 1 vs 2 from what a fact is bound to.** `receipt_ts` and `origin` are
+  captured; ASN is not yet (see `telemetry/record.ts`). Whether two of the
+  three infrastructure facts earn tier 2 is a judgement this gate leaves to the
+  customer record.
+- **What an observation is worth over time.** The gate asks whether the 30-day
+  window contains anything at all, not whether it contains enough. A customer
+  last seen on day 29 currently publishes the same tier as one seen hourly.
+
+> [!NOTE]
+> One consequence to weigh before this is marked Decided: once snapshot history
+> is persisted rather than rebuilt hourly, a transient datastore outage would
+> write a genuine tier-0 snapshot into a customer's chain. That is honest at the
+> moment it is signed and looks like a downgrade forever after. Chains are
+> currently rebuilt each hour and always single-entry, so nothing is at risk
+> today — but persisted history and this gate need to be designed together.
+
 ---
 
 ## Published vs. retained
@@ -605,6 +648,12 @@ and nothing it publishes is evidence.** Everything downstream of it — the
 rollup, signing, chaining, the endpoints, the JSON-LD, the verifier — is the
 production path. When telemetry lands, only the input to `bodiesFor` changes.
 
+Identity, tier and `verified` are still fixture-asserted while `sessions_30d`
+is measured, so the two halves of a published document now come from different
+places. The [evidence gate](#the-evidence-gate--proposed) is what keeps that
+from becoming a false claim: an assertion with no observation behind it
+publishes at tier 0.
+
 The `countersign` seam in `src/lib/attest/countersign.ts` signs locally for now
 and carries the function signature the Letterstory RPC will have.
 
@@ -623,6 +672,7 @@ and carries the function signature the Letterstory RPC will have.
 | 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided** — see [Consent](#consent--decided) |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
+| 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | 🟡 **Proposed (08-12)** — see [The evidence gate](#the-evidence-gate--proposed) |
 
 ### Open
 

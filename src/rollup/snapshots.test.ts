@@ -21,6 +21,7 @@ describe("currentSnapshot", () => {
 		const snapshot = await currentSnapshot("vantage", "acme-corp.example");
 		expect(snapshot.sessions_30d).toBe(0);
 		expect(snapshot.seats_active).toBe(0);
+		expect(snapshot.observed).toBe(false);
 	});
 
 	it("sums sessions across matching hot_rollups rows", async () => {
@@ -31,6 +32,7 @@ describe("currentSnapshot", () => {
 		const snapshot = await currentSnapshot("vantage", "acme-corp.example");
 		expect(snapshot.sessions_30d).toBe(10);
 		expect(snapshot.seats_active).toBe(0);
+		expect(snapshot.observed).toBe(true);
 		expect(db.from).toHaveBeenCalledWith("hot_rollups");
 		expect(db.eq1).toHaveBeenCalledWith("vendor_slug", "vantage");
 		expect(db.eq2).toHaveBeenCalledWith("domain", "acme-corp.example");
@@ -42,6 +44,7 @@ describe("currentSnapshot", () => {
 
 		const snapshot = await currentSnapshot("vantage", "globex.example");
 		expect(snapshot.sessions_30d).toBe(0);
+		expect(snapshot.observed).toBe(false);
 	});
 
 	it("falls back to 0 rather than throwing when the query errors", async () => {
@@ -50,5 +53,24 @@ describe("currentSnapshot", () => {
 
 		const snapshot = await currentSnapshot("vantage", "acme-corp.example");
 		expect(snapshot.sessions_30d).toBe(0);
+		expect(snapshot.observed).toBe(false);
+	});
+
+	// The distinction the whole evidence gate rests on. A customer whose rollup
+	// rows exist but sum to zero HAS been observed; one with no rows has not.
+	// Both report sessions_30d: 0, so nothing downstream can tell them apart
+	// without this flag.
+	it("separates a measured zero from the absence of a measurement", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+
+		vi.mocked(dbClient).mockReturnValue(mockDb({ data: [{ sessions: 0 }], error: null }) as never);
+		const measured = await currentSnapshot("vantage", "acme-corp.example");
+
+		vi.mocked(dbClient).mockReturnValue(mockDb({ data: [], error: null }) as never);
+		const unmeasured = await currentSnapshot("vantage", "acme-corp.example");
+
+		expect(measured.sessions_30d).toBe(unmeasured.sessions_30d);
+		expect(measured.observed).toBe(true);
+		expect(unmeasured.observed).toBe(false);
 	});
 });

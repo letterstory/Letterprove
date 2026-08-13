@@ -34,9 +34,15 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 
 				{/* NOT "verified customers" — this list includes tier-1 observations,
 				    which are published and labelled as such. A heading that rounds
-				    them up to verified is the same lie the product exists to replace. */}
+				    them up to verified is the same lie the product exists to replace.
+				    Not "attested customers" either, for the same reason one tier
+				    further down: since the evidence gate in proofs.ts, an
+				    unobserved customer publishes at tier 0, and nothing has been
+				    attested about it at all. The summary tile above still counts
+				    genuinely attested customers, which is a narrower claim than
+				    the contents of this list. */}
 				<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
-					Attested customers
+					Published claims
 				</h2>
 				<div className="mt-4 grid gap-4 sm:grid-cols-2">
 					{proof.customers.map((c) => (
@@ -152,11 +158,13 @@ function CustomerCard({ proof, vendor }: { proof: CustomerProof; vendor: string 
 						✓ Verified · tier {a.tier}
 					</span>
 				) : (
-					// An unattested observation is still published, and labelled as
-					// what it is. Rounding tier 1 up to "verified" is the one thing
-					// that would make the whole surface worthless.
+					// An unattested claim is still published, and labelled as what it
+					// is. Rounding tier 1 up to "verified" is the one thing that would
+					// make the whole surface worthless — and tier 0 is not "observed"
+					// either: nothing was. Saying so is the same discipline applied one
+					// tier further down.
 					<span className="rounded-full border border-edge px-2.5 py-0.5 text-xs text-fog">
-						observed · tier {a.tier}
+						{a.tier === 0 ? "vendor-asserted" : "observed"} · tier {a.tier}
 					</span>
 				)}
 			</div>
@@ -186,7 +194,9 @@ function CustomerCard({ proof, vendor }: { proof: CustomerProof; vendor: string 
 				<a className="hover:text-mint" href={`/attest/${vendor}/${a.customer}.json`}>
 					{a.key_id} · {a.signature.slice(0, 16)}…
 				</a>
-				<span className="ml-2">· {proof.chain.length} snapshots chained</span>
+				<span className="ml-2">
+					· {proof.chain.length} snapshot{proof.chain.length === 1 ? "" : "s"} chained
+				</span>
 			</p>
 		</div>
 	);
