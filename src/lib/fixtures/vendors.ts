@@ -113,7 +113,43 @@ const VANTAGE: VendorFixture = {
 	],
 };
 
-const VENDORS: VendorFixture[] = [VANTAGE];
+/**
+ * The first REAL vendor. Everything above this line is fiction; this is not.
+ *
+ * `domain` is load-bearing rather than descriptive: `POST /v1/observe` pins the
+ * browser's `Origin` header to it, so this string has to match the host
+ * lettertrace is actually served from, exactly. `lettertrace.com` — not `www.`,
+ * not the `.vercel.app` alias, and not `localhost`, which is why the
+ * integration is inert in local development even with a key set.
+ *
+ * `key` is public by design. It ships in the HTML of every authenticated page
+ * and identifies the vendor; the origin pin is what stops anyone else using it.
+ * It is not a secret and must never be treated as one.
+ *
+ * **`customers` is deliberately empty.** We do not yet know which companies use
+ * lettertrace, and inventing entries here would publish claims about real
+ * businesses that nobody has observed and nobody has consented to. Collection
+ * does not need them — `recordObservation` writes `(vendor_slug, domain)` for
+ * whatever shows up, so events accumulate in `hot_events` from the moment the
+ * script loads. Publishing is what needs a customer record, so the order is:
+ * observe first, see which domains are real, then add each one with a consent
+ * decision attached. Discovery before assertion is the whole product thesis
+ * applied to ourselves.
+ *
+ * Note that free-mail domains (`gmail.com`, `me.com`, …) will land in
+ * `hot_events` too and must never become customer records — see README §
+ * Identity resolution. That bucket needs handling before any of this publishes.
+ */
+const LETTERTRACE: VendorFixture = {
+	slug: "lettertrace",
+	name: "Lettertrace",
+	domain: "lettertrace.com",
+	category: "AI brand monitoring",
+	key: "lp_live_lettertrace_5747b5e0f521",
+	customers: [],
+};
+
+const VENDORS: VendorFixture[] = [VANTAGE, LETTERTRACE];
 
 export function allVendors(): VendorFixture[] {
 	return VENDORS;
