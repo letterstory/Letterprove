@@ -2,7 +2,13 @@ import Link from "next/link";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { allVendors } from "@/lib/fixtures/vendors";
 
-export default function Home() {
+// This list is now DB-backed, not a hardcoded fixture — a vendor who signs
+// up should appear here without waiting for the next deploy, so this can't
+// be statically prerendered at build time.
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+	const vendors = await allVendors();
 	return (
 		<>
 			<DevKeyBanner />
@@ -21,7 +27,7 @@ export default function Home() {
 					Published proofs
 				</h2>
 				<ul className="mt-4 divide-y divide-edge border-y border-edge">
-					{allVendors().map((v) => (
+					{vendors.map((v) => (
 						<li key={v.slug}>
 							<Link
 								href={`/proofs/${v.slug}`}

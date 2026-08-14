@@ -66,7 +66,7 @@ export async function countersign(body: AttestationBody): Promise<Countersignatu
  * failure path here throws rather than falling back to local signing.
  */
 async function countersignRemote(url: string, secret: string, body: AttestationBody): Promise<Countersignature> {
-	const vendor = findVendor(body.vendor);
+	const vendor = await findVendor(body.vendor);
 	const customer = vendor && findCustomer(vendor, body.customer);
 	if (!vendor || !customer) {
 		throw new Error(

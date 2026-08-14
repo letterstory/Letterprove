@@ -80,7 +80,7 @@ async function loadChain(vendor: VendorFixture, customer: CustomerFixture): Prom
 }
 
 export async function customerChain(vendorSlug: string, customerSlug: string): Promise<SignedAttestation[] | null> {
-	const vendor = findVendor(vendorSlug);
+	const vendor = await findVendor(vendorSlug);
 	if (!vendor) return null;
 	const customer = findCustomer(vendor, customerSlug);
 	if (!customer) return null;
@@ -120,7 +120,7 @@ export async function customerChain(vendorSlug: string, customerSlug: string): P
  * Anonymous customers contribute to the aggregate and nothing else.
  */
 export async function customerProof(vendorSlug: string, customerSlug: string): Promise<CustomerProof | null> {
-	const vendor = findVendor(vendorSlug);
+	const vendor = await findVendor(vendorSlug);
 	const customer = vendor && findCustomer(vendor, customerSlug);
 	if (!customer || consentOf(customer) !== "named") return null;
 
@@ -130,7 +130,7 @@ export async function customerProof(vendorSlug: string, customerSlug: string): P
 }
 
 export async function vendorProof(vendorSlug: string): Promise<VendorProof | null> {
-	const vendor = findVendor(vendorSlug);
+	const vendor = await findVendor(vendorSlug);
 	if (!vendor) return null;
 
 	// Every customer is counted; only consenting ones are listed. README §
@@ -170,6 +170,6 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 	};
 }
 
-export function vendorSlugs(): string[] {
-	return allVendors().map((v) => v.slug);
+export async function vendorSlugs(): Promise<string[]> {
+	return (await allVendors()).map((v) => v.slug);
 }

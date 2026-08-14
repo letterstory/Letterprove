@@ -8,6 +8,36 @@ import type { SignedAttestation } from "./types";
 vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
 vi.mock("@/rollup/history", () => ({ loadPersistedChain: vi.fn() }));
 
+// Vendor/customer identity is DB-backed now (supabase/migrations/
+// 20260814230000_vendor_accounts.sql), but this suite is exercising chain
+// composition and consent gating, not the database — so mock the lookup at
+// the module boundary, holding it to the same two vendors/customers the
+// static fixture used to ship.
+vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("@/lib/fixtures/vendors")>();
+	const VENDORS: import("@/lib/fixtures/vendors").VendorFixture[] = [
+		{
+			slug: "vantage",
+			name: "Vantage",
+			domain: "vantage.example",
+			category: "customer data platforms",
+			key: "lp_live_vantage_9f2c",
+			customers: [
+				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api", "analytics"], consent: "named" },
+				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso", "api", "analytics", "sla"], consent: "anonymous" },
+				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
+			],
+		},
+		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", customers: [] },
+	];
+	return {
+		...original,
+		allVendors: async () => VENDORS,
+		findVendor: async (slug: string) => VENDORS.find((v) => v.slug === slug),
+		findVendorByKey: async (key: string) => VENDORS.find((v) => v.key === key),
+	};
+});
+
 const TTL_SECONDS = 3600;
 function currentHourBucket(): number {
 	return Math.floor(Date.now() / (TTL_SECONDS * 1000));

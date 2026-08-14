@@ -61,7 +61,7 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 	let frozen = 0;
 	const skipped: string[] = [];
 
-	for (const vendor of allVendors()) {
+	for (const vendor of await allVendors()) {
 		for (const customer of vendor.customers) {
 			const { data: last, error: lastError } = await db
 				.from("published_snapshots")

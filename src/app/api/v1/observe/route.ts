@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 	const payload = body === undefined ? null : parseObservePayload(body);
 	if (!payload) return collectorResponse(false);
 
-	const vendor = findVendorByKey(payload.k);
+	const vendor = await findVendorByKey(payload.k);
 	if (!vendor) return collectorResponse(false);
 
 	const origin = originHostname(request.headers.get("origin"));
