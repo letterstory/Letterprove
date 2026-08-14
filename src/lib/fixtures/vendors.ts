@@ -17,6 +17,20 @@
 
 import type { Tier } from "../attest/types";
 
+/**
+ * Whether this customer has agreed to be named in public.
+ *
+ * Publishing *"Acme runs SSO, 148 seats, 92% adoption"* discloses **Acme's**
+ * data, and Acme is our customer's customer — someone with no relationship to
+ * us. README § Consent settles the rule: build named, ship anonymized, flip as
+ * consent lands.
+ *
+ * `anonymous` is the default and must stay the default. A customer who has
+ * never been asked has not agreed, and the failure mode of guessing wrong here
+ * is a signed, immutable, public disclosure of a third party's usage.
+ */
+export type Consent = "named" | "anonymous";
+
 export interface CustomerFixture {
 	slug: string;
 	name: string;
@@ -26,6 +40,17 @@ export interface CustomerFixture {
 	tier: Tier;
 	verified: boolean;
 	features: string[];
+	/**
+	 * Omitted means `anonymous`. Consent is opt-in, so the absent case is the
+	 * private one — a new customer added without thinking about consent is
+	 * silently withheld, never silently published.
+	 */
+	consent?: Consent;
+}
+
+/** Consent, with the safe default applied. The only way publication should ask. */
+export function consentOf(customer: CustomerFixture): Consent {
+	return customer.consent ?? "anonymous";
 }
 
 export interface VendorFixture {
@@ -56,6 +81,9 @@ const VANTAGE: VendorFixture = {
 			tier: 2,
 			verified: true,
 			features: ["sso", "api", "analytics"],
+			// The one customer that has agreed to be named — and the reason
+			// /attest/vantage/acme-corp.json is the URL every doc cites.
+			consent: "named",
 		},
 		{
 			slug: "northwind",
@@ -65,6 +93,10 @@ const VANTAGE: VendorFixture = {
 			tier: 2,
 			verified: true,
 			features: ["sso", "api", "analytics", "sla"],
+			// Attested but NOT named: contributes every number to the vendor's
+			// aggregate and publishes no attestation of its own. This is the
+			// default state and the one the consent design has to get right.
+			consent: "anonymous",
 		},
 		{
 			slug: "globex",

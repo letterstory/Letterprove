@@ -674,6 +674,48 @@ Design the consent step as the verification step: a customer who approves their
 own attestation has just produced a tier-4 counter-signature, the strongest
 proof in the system.
 
+### How it is enforced — **Built (08-13)**
+
+`consent` on the customer record is `named | anonymous`, and **omitting it means
+`anonymous`**. Consent is opt-in, so the absent case has to be the private one:
+a customer added without anyone thinking about consent is silently withheld,
+never silently published.
+
+The gate sits at **publication only**, in `customerProof()`:
+
+| | Anonymous | Named |
+|---|---|---|
+| Chain computed | ✅ | ✅ |
+| Frozen to `published_snapshots` | ✅ | ✅ |
+| Counted in the vendor's aggregate | ✅ | ✅ |
+| `/attest/{vendor}/{customer}.json` | **404** | ✅ |
+| Named on the proof page | ✗ | ✅ |
+
+That split is what makes the slogan operational. History is *built named* the
+whole time — it just doesn't leave the building. So flipping a customer to
+`named` needs no backfill and no re-signing: their entire signed, chained
+history becomes publishable at once, which is the only reading of "flip as
+consent lands" that isn't a rewrite.
+
+Withheld customers get a **404, not a redacted document**. A pseudonymous
+attestation still says *"some customer of this vendor did X"*, and against a
+vendor with three customers that re-identifies immediately. They contribute to
+the aggregate and nothing else.
+
+The vendor summary publishes `attested_unnamed` alongside `attested_customers`,
+so an agent reading *"3 attested"* next to one named entry can tell the other
+two were **withheld**, not miscounted — and the proof page says so in words.
+`features_proven` and `sessions_30d` still cover every attested customer,
+because the aggregate is the consent-safe view and hiding from it would just
+make the numbers wrong.
+
+> [!IMPORTANT]
+> **Before pointing `attest.js` at a real site**, remember the customer domains
+> stop being fictional. Dogfooding on a Letter Company product means real
+> companies land in `hot_events`, and a vendor fixture that ships `consent:
+> "named"` would publish them. Add real vendors with consent omitted, and flip
+> individuals only once someone has actually asked them.
+
 ---
 
 ## Running it
@@ -739,7 +781,7 @@ and carries the function signature the Letterstory RPC will have.
 | 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
-| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided** — see [Consent](#consent--decided) |
+| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)** — see [Consent](#consent--decided) and [How it is enforced](#how-it-is-enforced--built-08-13) |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |

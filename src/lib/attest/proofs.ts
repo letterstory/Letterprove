@@ -9,7 +9,7 @@
 import { attestationBody, earned, TTL_SECONDS } from "./body";
 import { buildChain, head } from "./chain";
 import { GENESIS_HASH, snapshotHash } from "./verify";
-import { allVendors, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
+import { allVendors, consentOf, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
 import { loadPersistedChain } from "@/rollup/history";
 import type { SignedAttestation } from "./types";
 
@@ -31,6 +31,8 @@ export interface VendorProof {
 	customers: CustomerProof[];
 	summary: {
 		attested_customers: number;
+		/** Of `attested_customers`, how many are withheld pending consent. */
+		attested_unnamed: number;
 		features_proven: string[];
 		sessions_30d: number;
 		/** The most recent `published_at` across all customers. */
@@ -97,7 +99,31 @@ export async function customerChain(vendorSlug: string, customerSlug: string): P
 	return chain;
 }
 
+/**
+ * One customer's published attestation — **null unless they consented to be
+ * named.**
+ *
+ * This is the seam that makes "build named, ship anonymized" real. The chain
+ * itself is always computed and always frozen: `rollup/freeze.ts` writes the
+ * full named history for every customer, because that history is internal
+ * storage, not publication. What consent gates is whether it *leaves the
+ * building*.
+ *
+ * The consequence worth noticing is that flipping a customer to `named` needs
+ * no backfill and no re-signing — their entire signed history becomes
+ * publishable at once, already chained. That is precisely what "flip as
+ * consent lands" has to mean to be more than a slogan.
+ *
+ * Withholding is a 404 rather than a redacted document on purpose: a
+ * pseudonymous attestation still says "some customer of this vendor did X",
+ * and against a vendor with three customers that re-identifies trivially.
+ * Anonymous customers contribute to the aggregate and nothing else.
+ */
 export async function customerProof(vendorSlug: string, customerSlug: string): Promise<CustomerProof | null> {
+	const vendor = findVendor(vendorSlug);
+	const customer = vendor && findCustomer(vendor, customerSlug);
+	if (!customer || consentOf(customer) !== "named") return null;
+
 	const chain = await customerChain(vendorSlug, customerSlug);
 	if (!chain) return null;
 	return { current: head(chain), chain };
@@ -107,26 +133,39 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 	const vendor = findVendor(vendorSlug);
 	if (!vendor) return null;
 
-	const customers: CustomerProof[] = [];
+	// Every customer is counted; only consenting ones are listed. README §
+	// Consent: aggregate proof ("12 attested customers, 4 features proven, 38k
+	// sessions/mo") carries almost no consent problem and is already
+	// meaningfully better than a logo wall — it is the naming that needs
+	// permission. So the summary reads from all of them and `customers` from
+	// the named subset, and this uses customerChain (ungated) rather than
+	// customerProof (gated) to get there.
+	const all: { proof: CustomerProof; named: boolean }[] = [];
 	for (const c of vendor.customers) {
-		const proof = await customerProof(vendor.slug, c.slug);
-		if (proof) customers.push(proof);
+		const chain = await customerChain(vendor.slug, c.slug);
+		if (!chain) continue;
+		all.push({ proof: { current: head(chain), chain }, named: consentOf(c) === "named" });
 	}
 
 	// Only attested customers count toward the headline. A tier-1 observation is
 	// published and readable, but it is not something to advertise as proven.
-	const attested = customers.filter((c) => c.current.verified);
+	const attested = all.filter((c) => c.proof.current.verified);
 	const features = new Set<string>();
-	for (const c of attested) for (const f of c.current.features) features.add(f);
+	for (const c of attested) for (const f of c.proof.current.features) features.add(f);
 
 	return {
 		vendor: { slug: vendor.slug, name: vendor.name, domain: vendor.domain, category: vendor.category },
-		customers,
+		customers: all.filter((c) => c.named).map((c) => c.proof),
 		summary: {
 			attested_customers: attested.length,
+			// How much of the headline is standing behind a consent wall. Published
+			// so the aggregate can't be mistaken for the full list of customers —
+			// an agent that sees "3 attested" and one named entry should be able to
+			// tell that the other two were withheld, not that we miscounted.
+			attested_unnamed: attested.filter((c) => !c.named).length,
 			features_proven: [...features].sort(),
-			sessions_30d: attested.reduce((n, c) => n + c.current.sessions_30d, 0),
-			last_attested: customers.map((c) => c.current.published_at).sort().at(-1) ?? "",
+			sessions_30d: attested.reduce((n, c) => n + c.proof.current.sessions_30d, 0),
+			last_attested: all.map((c) => c.proof.current.published_at).sort().at(-1) ?? "",
 		},
 	};
 }
