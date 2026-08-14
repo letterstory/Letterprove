@@ -12,6 +12,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 
 	const host = (await headers()).get("host") ?? "localhost";
 	const origin = `${host.startsWith("localhost") ? "http" : "https"}://${host}`;
+	/** A customer whose attestation is actually fetchable — i.e. one who consented. */
+	const example = proof.customers[0]?.current.customer;
 
 	return (
 		<>
@@ -50,6 +52,25 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					))}
 				</div>
 
+				{/* Says the quiet part out loud. Without this the page looks like the
+				    vendor has one customer, when what it has is one customer who
+				    agreed to be named — a materially different claim, and the
+				    difference is the vendor's customers' to give, not ours to blur. */}
+				{proof.summary.attested_unnamed > 0 && (
+					<p className="mt-4 rounded-lg border border-edge bg-panel px-4 py-3 text-sm text-fog">
+						<span className="text-mint">+{proof.summary.attested_unnamed}</span> further attested{" "}
+						{proof.summary.attested_unnamed === 1 ? "customer is" : "customers are"} counted in the
+						totals above but not named here. Their attestations exist and are signed; publishing
+						a customer&rsquo;s name is theirs to agree to, not the vendor&rsquo;s.
+					</p>
+				)}
+
+				{/* The matrix names customers by definition, so it only ever covers the
+				    consenting ones. `features_proven` in the summary above still counts
+				    every attested customer's features — the aggregate is the
+				    consent-safe view and stays complete. */}
+				{proof.customers.length > 0 && (
+				<>
 				<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
 					Feature-level proof
 				</h2>
@@ -86,6 +107,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				<p className="mt-3 text-sm text-fog">
 					Every ✓ is an individually signed attestation — an agent can verify any single cell.
 				</p>
+				</>
+				)}
 
 				<section className="mt-14 rounded-lg border border-edge bg-panel p-6">
 					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Agent-readable</h2>
@@ -96,24 +119,26 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							</a>
 							<span className="ml-3 text-fog">— this report</span>
 						</li>
-						<li>
-							<a
-								className="text-mint hover:underline"
-								href={`/attest/${slug}/${proof.customers[0]?.current.customer}.json`}
-							>
-								GET /attest/{slug}/{proof.customers[0]?.current.customer}.json
-							</a>
-							<span className="ml-3 text-fog">— one attestation</span>
-						</li>
-						<li>
-							<a
-								className="text-mint hover:underline"
-								href={`/attest/${slug}/${proof.customers[0]?.current.customer}/chain`}
-							>
-								GET /attest/{slug}/{proof.customers[0]?.current.customer}/chain
-							</a>
-							<span className="ml-3 text-fog">— its full signed history</span>
-						</li>
+						{/* Only linkable when someone has consented to be named. With no
+						    named customer these rendered `/attest/vantage/undefined.json`
+						    — a broken link on the one surface whose entire job is being
+						    machine-fetchable. */}
+						{example && (
+							<>
+								<li>
+									<a className="text-mint hover:underline" href={`/attest/${slug}/${example}.json`}>
+										GET /attest/{slug}/{example}.json
+									</a>
+									<span className="ml-3 text-fog">— one attestation</span>
+								</li>
+								<li>
+									<a className="text-mint hover:underline" href={`/attest/${slug}/${example}/chain`}>
+										GET /attest/{slug}/{example}/chain
+									</a>
+									<span className="ml-3 text-fog">— its full signed history</span>
+								</li>
+							</>
+						)}
 					</ul>
 					<p className="mt-4 text-sm text-fog">
 						The same proof a buyer reads, at the same URL, in a form a machine can parse.

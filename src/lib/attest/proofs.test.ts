@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import { jwks } from "./keys";
-import { customerChain, customerProof, earned } from "./proofs";
+import { customerChain, customerProof, earned, vendorProof } from "./proofs";
 import { verifyAttestation } from "./verify";
 import type { SignedAttestation } from "./types";
 
@@ -81,8 +81,10 @@ describe("customerProof", () => {
 			readOk: true,
 		});
 
-		// globex's fixture asserts tier 1.
-		const proof = await customerProof("vantage", "globex");
+		// acme-corp's fixture asserts tier 2 / verified, and is the one customer
+		// with consent to be named — so it's also the only one customerProof
+		// will return at all.
+		const proof = await customerProof("vantage", "acme-corp");
 		expect(proof!.current.tier).toBe(0);
 		expect(proof!.current.verified).toBe(false);
 		// Still a well-formed, signed document — a weaker claim, not a broken one.
@@ -165,5 +167,70 @@ describe("earned", () => {
 	// about what a fact is bound to, not how much of it there is.
 	it("never raises a claim above what the vendor asserted", () => {
 		expect(earned(tier1, true)).toEqual({ tier: 1, verified: false });
+	});
+});
+
+describe("consent-gated publication", () => {
+	beforeEach(async () => {
+		const { currentSnapshot } = await import("@/rollup/snapshots");
+		const { loadPersistedChain } = await import("@/rollup/history");
+		vi.mocked(loadPersistedChain).mockReset().mockResolvedValue([]);
+		vi.mocked(currentSnapshot).mockReset().mockResolvedValue({
+			observed_through: "2026-08-20T00:00:00.000Z",
+			published_at: "2026-08-20T00:00:00.000Z",
+			sessions_30d: 100,
+			seats_active: 0,
+			observed: true,
+			readOk: true,
+		});
+		vi.useFakeTimers();
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("publishes an attestation for a customer who consented to be named", async () => {
+		vi.setSystemTime(new Date("2026-08-20T00:00:00.000Z"));
+		await expect(customerProof("vantage", "acme-corp")).resolves.not.toBeNull();
+	});
+
+	it("withholds one for a customer who has not, even though the chain exists", async () => {
+		vi.setSystemTime(new Date("2026-08-20T01:00:00.000Z"));
+
+		// northwind is attested and tier 2 — withheld for consent, not for lack
+		// of evidence. The chain is still computed and still frozen; only
+		// publication is gated, which is what makes flipping consent a no-op.
+		await expect(customerProof("vantage", "northwind")).resolves.toBeNull();
+		await expect(customerChain("vantage", "northwind")).resolves.toHaveLength(1);
+	});
+
+	it("treats a customer with no consent field as anonymous", async () => {
+		vi.setSystemTime(new Date("2026-08-20T02:00:00.000Z"));
+
+		// globex declares no consent at all. Opt-in means the absent case is
+		// private — a customer added without thinking about consent must never
+		// be published by default.
+		await expect(customerProof("vantage", "globex")).resolves.toBeNull();
+	});
+
+	it("counts every attested customer in the aggregate but lists only the named", async () => {
+		vi.setSystemTime(new Date("2026-08-20T03:00:00.000Z"));
+		const proof = await vendorProof("vantage");
+
+		// acme-corp + northwind are both attested; only acme-corp is named.
+		expect(proof!.summary.attested_customers).toBe(2);
+		expect(proof!.summary.attested_unnamed).toBe(1);
+		expect(proof!.customers.map((c) => c.current.customer)).toEqual(["acme-corp"]);
+
+		// The aggregate is the consent-safe view, so it stays complete: sla comes
+		// only from northwind, who is never named anywhere on the page.
+		expect(proof!.summary.features_proven).toContain("sla");
+		expect(proof!.summary.sessions_30d).toBe(200);
+	});
+
+	it("never leaks a withheld customer's name through the vendor report", async () => {
+		vi.setSystemTime(new Date("2026-08-20T04:00:00.000Z"));
+		const proof = await vendorProof("vantage");
+
+		expect(JSON.stringify(proof)).not.toContain("Northwind");
+		expect(JSON.stringify(proof)).not.toContain("northwind");
 	});
 });
