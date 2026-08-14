@@ -1,9 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
 /**
  * NOTE THE FILE NAME. Next 16 deprecated `middleware.ts` in favour of
  * `proxy.ts`, matching lettersprite. The export name follows the convention.
@@ -37,6 +34,9 @@ export async function proxy(request: NextRequest) {
 }
 
 async function staffAuthGate(request: NextRequest) {
+	const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+	const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
 	if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 		return NextResponse.json(
 			{ error: "Staff auth is not configured on this deployment" },

@@ -1,14 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
 // Landing point for the link in a Supabase email-confirmation (and any future
 // magic link / OAuth). Swaps `?code=` for a session cookie, then forwards to
 // the originally-requested /staff page. Outside the /staff matcher, so it's
 // reachable while signed out regardless of auth config.
 export async function GET(request: NextRequest) {
+	const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+	const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
 	const { searchParams, origin } = request.nextUrl;
 	const code = searchParams.get("code");
 
