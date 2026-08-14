@@ -20,7 +20,7 @@
 import { sign as edSign } from "node:crypto";
 import { canonicalBytes } from "./canonical";
 import { fraudFeatures } from "./fraud-features";
-import { signingKey } from "./keys";
+import { countersignConfigured, signingKey } from "./keys";
 import { findCustomer, findVendor } from "../fixtures/vendors";
 import type { AttestationBody } from "./types";
 
@@ -41,10 +41,16 @@ const RPC_TIMEOUT_MS = 20_000;
  * published, and every verification would fail.
  */
 export async function countersign(body: AttestationBody): Promise<Countersignature> {
-	const url = process.env.LETTERSTORY_COUNTERSIGN_URL;
-	const secret = process.env.LETTERSTORY_COUNTERSIGN_SECRET;
-
-	if (url && secret) return countersignRemote(url, secret, body);
+	// keys.ts owns this predicate so `signingMode()` and this branch can never
+	// disagree about which signer is live — the banner saying one thing while
+	// the signature says another is exactly the failure this consolidates.
+	if (countersignConfigured()) {
+		return countersignRemote(
+			process.env.LETTERSTORY_COUNTERSIGN_URL!,
+			process.env.LETTERSTORY_COUNTERSIGN_SECRET!,
+			body
+		);
+	}
 
 	// DEVELOPMENT: no RPC configured. See keys.ts — this signs with a key
 	// derived from a published, non-secret seed, so nothing produced this way

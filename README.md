@@ -536,6 +536,43 @@ Rotation is additive: mint the new key, sign with it, and **keep old public keys
 published forever** so previously issued proofs still verify. That last part is
 free to build now and painful to retrofit.
 
+> [!WARNING]
+> **The dev key counts as a key.** On 2026-08-13 the countersign RPC went live
+> and `LETTERPROVE_PRODUCTION_JWK` began serving Letterstory's public half.
+> That variable *replaces* the active key rather than appending to it, so
+> `dev-insecure-…` left the JWKS — and the four hours already frozen into
+> `published_snapshots` under it became permanently unverifiable. The rotation
+> rule above was written for exactly this and still didn't fire, because a
+> dev→production switch doesn't feel like a "rotation".
+>
+> Two defences, both now in place. `rollup/freeze.ts` **refuses to persist a
+> signature made in `development` mode**, so nothing signed by a key we intend
+> to stop publishing can enter immutable history in the first place — this is
+> the real fix, since `LETTERPROVE_RETIRED_JWKS` only helps for keys worth
+> keeping published, and a key derived from a public seed is not one. And any
+> future rotation between *real* keys must add the outgoing key to
+> `LETTERPROVE_RETIRED_JWKS` **before** the new one is promoted.
+
+### What is actually signing — **Decided (08-13)**
+
+`signingKey().isDev` answers "is the local key a dev key", and since the
+countersign RPC landed that is **no longer** the same question as "are these
+proofs real". This service never holds the production private key, so
+`LETTERPROVE_SIGNING_KEY` is correctly unset in production forever and `isDev`
+is permanently true there.
+
+Wired to the banner and the discovery warning, that inverted the product's core
+claim: production served genuinely countersigned attestations under *"signed
+with a published development key. These attestations are not evidence."* AEO
+run 1 already showed a model reading that exact warning and correctly
+discounting the proof, so this is not cosmetic.
+
+[`signingMode()`](src/lib/attest/keys.ts) reports what is really signing —
+`countersigned` | `local-key` | `development` — and `isDemonstration()` is the
+one predicate the banner, the discovery document and the freeze guard all ask.
+The discovery document now states `signing.mode` positively, so an agent can
+read who produced a signature instead of inferring it from a missing field.
+
 Each snapshot carries `prev_hash`, chaining it to its predecessor. That is what
 upgrades the system from *signed* to *auditable* — we cannot quietly rewrite
 last quarter's numbers, and an agent or a skeptical competitor can prove it.
@@ -543,7 +580,7 @@ last quarter's numbers, and an agent or a skeptical competitor can prove it.
 Per-vendor keys and customer counter-signing (tier 4) are additive later,
 precisely because `key_id` is there from day one.
 
-### The evidence gate — **Proposed**
+### The evidence gate — **Decided (08-13)**
 
 The trust model says *never print the word verified where the tier doesn't earn
 it*. Until now nothing enforced that: `bodiesFor` copied `verified` and `tier`
@@ -683,7 +720,7 @@ production path. When telemetry lands, only the input to `bodiesFor` changes.
 
 Identity, tier and `verified` are still fixture-asserted while `sessions_30d`
 is measured, so the two halves of a published document now come from different
-places. The [evidence gate](#the-evidence-gate--proposed) is what keeps that
+places. The [evidence gate](#the-evidence-gate--decided-08-13) is what keeps that
 from becoming a false claim: an assertion with no observation behind it
 publishes at tier 0.
 
@@ -705,8 +742,11 @@ and carries the function signature the Letterstory RPC will have.
 | 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided** — see [Consent](#consent--decided) |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
-| 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | 🟡 **Proposed (08-12)** — see [The evidence gate](#the-evidence-gate--proposed) |
+| 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |
 | 13 | **Client API** — `identify`/`signup`/`login`, one line of vendor integration to hand the script an email | ✅ **Decided (08-13)** — see [Client API](#client-api--decided) |
+| 14 | Tier 2 needs `receipt_ts` + `origin`; ASN is not required for now | ✅ **Decided (08-13)** |
+| 15 | **Nothing signed in `development` mode is ever persisted** — the freeze refuses it, so immutable history only ever holds keys we intend to publish forever | ✅ **Decided (08-13)** — see [Signing](#signing--proposed) |
+| 16 | `signingMode()`, not `isDev`, decides whether proofs are labelled a demonstration | ✅ **Decided (08-13)** — see [What is actually signing](#what-is-actually-signing--decided-08-13) |
 
 ### Open
 

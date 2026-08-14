@@ -40,10 +40,22 @@ describe("loadPersistedChain", () => {
 		expect(db.order).toHaveBeenCalledWith("hour_bucket", { ascending: true });
 	});
 
-	it("falls back to an empty history rather than throwing when the query errors", async () => {
+	// Deliberately NOT an empty-array fallback. An empty history is a real
+	// answer that sends the caller back to GENESIS_HASH; returning it after a
+	// failed read would silently drop published history and republish a chain
+	// that contradicts the one already served — indistinguishable from us
+	// rewriting the record.
+	it("throws rather than reporting an empty history when the query errors", async () => {
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(mockDb({ data: null, error: { message: "boom" } }) as never);
 
-		await expect(loadPersistedChain("vantage", "acme-corp")).resolves.toEqual([]);
+		await expect(loadPersistedChain("vantage", "acme-corp")).rejects.toThrow(/cannot read published history/);
+	});
+
+	it("distinguishes a read failure from a customer that genuinely has no history", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(mockDb({ data: [], error: null }) as never);
+
+		await expect(loadPersistedChain("vantage", "globex")).resolves.toEqual([]);
 	});
 });

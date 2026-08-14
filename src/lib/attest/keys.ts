@@ -68,6 +68,44 @@ function defaultKeyId(privateKey: KeyObject, isDev: boolean): string {
 	return `${isDev ? "dev-insecure" : "lp"}-${thumb}`;
 }
 
+/**
+ * What is actually producing signatures right now.
+ *
+ * `signingKey().isDev` answers a narrower question — "is the LOCAL key a dev
+ * key" — and since the countersign RPC landed, that is no longer the same
+ * question as "are the attestations we publish real". This service never holds
+ * the production private key (see countersign.ts / the signing seam), so
+ * `LETTERPROVE_SIGNING_KEY` is *correctly* unset in production forever, and
+ * `isDev` is true there permanently. Anything user-facing that means "this is a
+ * demonstration" must ask this instead, or production tells every agent to
+ * discount proofs that are in fact real.
+ *
+ * - `countersigned` — Letterstory signs, with a key this service cannot reach.
+ * - `local-key`     — a real key is configured here (LETTERPROVE_SIGNING_KEY).
+ * - `development`   — the published, non-secret dev seed. Not evidence.
+ */
+export type SigningMode = "countersigned" | "local-key" | "development";
+
+/** Single source of truth for whether the RPC is wired; countersign.ts branches on it too. */
+export function countersignConfigured(): boolean {
+	return Boolean(process.env.LETTERSTORY_COUNTERSIGN_URL && process.env.LETTERSTORY_COUNTERSIGN_SECRET);
+}
+
+export function signingMode(): SigningMode {
+	if (countersignConfigured()) return "countersigned";
+	return signingKey().isDev ? "development" : "local-key";
+}
+
+/**
+ * Is what we publish a demonstration rather than evidence?
+ *
+ * The one question the banner, the discovery warning and the freeze guard all
+ * actually care about.
+ */
+export function isDemonstration(): boolean {
+	return signingMode() === "development";
+}
+
 /** The public half of the active key, ready to serve. */
 export function publicJwk(): PublicJwk {
 	const { privateKey, keyId } = signingKey();

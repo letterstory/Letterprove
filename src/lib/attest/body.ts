@@ -7,7 +7,7 @@
 
 import { methodUrl } from "./method";
 import type { CustomerFixture, VendorFixture } from "../fixtures/vendors";
-import { currentSnapshot } from "@/rollup/snapshots";
+import { currentSnapshot, type CustomerSnapshot } from "@/rollup/snapshots";
 import type { AttestationBody, Tier } from "./types";
 
 const METHOD_PATH = "src/lib/attest/proofs.ts";
@@ -29,13 +29,22 @@ export function earned(customer: CustomerFixture, observed: boolean): { tier: Ti
 	return { tier: customer.tier, verified: customer.verified };
 }
 
+/**
+ * Returns the snapshot alongside the body, not just the body.
+ *
+ * The snapshot carries `readOk`/`observed`, which are evidence *about* the
+ * claim and never part of it. They can't be recovered from the finished body —
+ * a tier-0 body looks identical whether it came from a clean read of an empty
+ * table or from a query that failed — and rollup/freeze.ts has to tell those
+ * apart before writing an immutable row.
+ */
 export async function attestationBody(
 	vendor: VendorFixture,
 	customer: CustomerFixture
-): Promise<Omit<AttestationBody, "prev_hash">> {
+): Promise<{ body: Omit<AttestationBody, "prev_hash">; snapshot: CustomerSnapshot }> {
 	const snapshot = await currentSnapshot(vendor.slug, customer.domain);
 	const { tier, verified } = earned(customer, snapshot.observed);
-	return {
+	const body = {
 		vendor: vendor.slug,
 		customer: customer.slug,
 		customer_name: customer.name,
@@ -50,4 +59,5 @@ export async function attestationBody(
 		ttl: TTL_SECONDS,
 		method: methodUrl(METHOD_PATH),
 	};
+	return { body, snapshot };
 }

@@ -1,4 +1,4 @@
-import { signingKey } from "@/lib/attest/keys";
+import { isDemonstration, signingMode } from "@/lib/attest/keys";
 import { methodUrl } from "@/lib/attest/method";
 import { vendorSlugs } from "@/lib/attest/proofs";
 import { proofJson } from "@/lib/http";
@@ -12,7 +12,6 @@ import { proofJson } from "@/lib/http";
  */
 export async function GET(request: Request) {
 	const origin = new URL(request.url).origin;
-	const { isDev } = signingKey();
 
 	return proofJson({
 		name: "Letterprove",
@@ -22,12 +21,17 @@ export async function GET(request: Request) {
 			crv: "Ed25519",
 			jwks_uri: `${origin}/.well-known/letterprove-jwks.json`,
 			canonicalization: methodUrl("src/lib/attest/canonical.ts"),
+			// Stated positively, not only as a warning-when-bad: an agent
+			// deciding how much weight to give a signature should be able to
+			// read who produced it without inferring it from the absence of a
+			// warning field.
+			mode: signingMode(),
 		},
 		verifier: methodUrl("scripts/verify.mjs"),
 		proofs: vendorSlugs().map((slug) => ({ vendor: slug, url: `${origin}/proofs/${slug}` })),
 		// Said in the machine-readable surface, not only on the page: anything
 		// signed by the development key is a demonstration, not evidence.
-		...(isDev && {
+		...(isDemonstration() && {
 			warning: "DEVELOPMENT DEPLOYMENT — signed with a published development key. These attestations are not evidence.",
 		}),
 	});

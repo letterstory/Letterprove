@@ -13,9 +13,28 @@ export interface PersistedEntry {
 	attestation: SignedAttestation;
 }
 
-/** Oldest first, matching the chain's own ordering. */
+/**
+ * Oldest first, matching the chain's own ordering.
+ *
+ * THROWS on a read failure rather than returning an empty history. The two are
+ * not interchangeable here: an empty array means "this customer has no frozen
+ * history yet", which sends proofs.ts back to GENESIS_HASH and publishes a
+ * fresh single-entry chain. Doing that after a transient query error would
+ * silently discard real published history — an agent that fetched the chain
+ * before and after sees entries disappear and `prev_hash` change, which is
+ * indistinguishable from us quietly rewriting the record. That is the exact
+ * accusation the chain exists to refute, and the composed result is cached for
+ * the hour, so one unlucky read would poison what we serve for a full hour
+ * rather than a moment.
+ *
+ * Failing loudly follows countersign.ts: "an unsigned snapshot must never be
+ * published, so let it throw." A 500 is a transient, honest outage; a
+ * contradicted chain is a permanent credibility problem.
+ */
 export async function loadPersistedChain(vendorSlug: string, customerSlug: string): Promise<PersistedEntry[]> {
 	const db = dbClient();
+	// No datastore is a configuration state, not a failure: nothing was ever
+	// frozen, so an empty history is the truth.
 	if (!db) return [];
 
 	const { data, error } = await db
@@ -27,7 +46,7 @@ export async function loadPersistedChain(vendorSlug: string, customerSlug: strin
 
 	if (error) {
 		console.error("[letterprove:history] query failed", error.message);
-		return [];
+		throw new Error(`cannot read published history for ${vendorSlug}/${customerSlug}: ${error.message}`);
 	}
 
 	return (data ?? []).map((row: { hour_bucket: number; attestation: SignedAttestation }) => ({

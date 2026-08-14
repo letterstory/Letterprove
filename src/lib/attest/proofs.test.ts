@@ -41,6 +41,7 @@ describe("customerProof", () => {
 			sessions_30d: 42,
 			seats_active: 0,
 			observed: true,
+			readOk: true,
 		});
 
 		const proof = await customerProof("vantage", "acme-corp");
@@ -77,6 +78,7 @@ describe("customerProof", () => {
 			sessions_30d: 0,
 			seats_active: 0,
 			observed: false,
+			readOk: true,
 		});
 
 		// globex's fixture asserts tier 1.
@@ -96,6 +98,7 @@ describe("customerProof", () => {
 			sessions_30d: 7,
 			seats_active: 0,
 			observed: true,
+			readOk: true,
 		});
 
 		const [a, b] = await Promise.all([customerChain("vantage", "northwind"), customerChain("vantage", "northwind")]);
@@ -113,6 +116,7 @@ describe("customerProof", () => {
 			sessions_30d: 9,
 			seats_active: 0,
 			observed: true,
+			readOk: true,
 		});
 		const priorAttestation = { published_at: "2026-08-03T23:00:00.000Z", sessions_30d: 4 } as unknown as SignedAttestation;
 		vi.mocked(loadPersistedChain).mockResolvedValue([{ hourBucket: currentHourBucket() - 1, attestation: priorAttestation }]);

@@ -35,6 +35,19 @@ export interface CustomerSnapshot {
 	 * never enters the signed body.
 	 */
 	observed: boolean;
+	/**
+	 * Whether the telemetry read actually succeeded.
+	 *
+	 * `observed: false` still conflates two things one level up: "the query ran
+	 * and found nothing" and "the query never ran". The live path can treat
+	 * those alike, because it recomputes next hour and self-heals. The freeze
+	 * path cannot — it writes an immutable row, so persisting a tier-0 claim
+	 * derived from a failed query records a permanent downgrade for a customer
+	 * that may have been fine.
+	 *
+	 * Also NOT published, for the same reason as `observed`.
+	 */
+	readOk: boolean;
 }
 
 const WINDOW_DAYS = 30;
@@ -50,6 +63,7 @@ export async function currentSnapshot(vendorSlug: string, domain: string): Promi
 		sessions_30d: 0,
 		seats_active: 0,
 		observed: false,
+		readOk: false,
 	};
 
 	const db = dbClient();
@@ -70,5 +84,5 @@ export async function currentSnapshot(vendorSlug: string, domain: string): Promi
 
 	const rows = data ?? [];
 	const sessions_30d = rows.reduce((sum: number, row: { sessions: number }) => sum + row.sessions, 0);
-	return { ...fallback, sessions_30d, observed: rows.length > 0 };
+	return { ...fallback, sessions_30d, observed: rows.length > 0, readOk: true };
 }
