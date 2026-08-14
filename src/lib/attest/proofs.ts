@@ -67,7 +67,11 @@ async function loadChain(vendor: VendorFixture, customer: CustomerFixture): Prom
 
 	const tail = persisted.at(-1)?.attestation;
 	const prevHash = tail ? snapshotHash(tail) : GENESIS_HASH;
-	const body = await attestationBody(vendor, customer);
+	// The live path deliberately ignores `snapshot.readOk`: this entry is
+	// recomputed every hour and never persisted, so a failed read degrades one
+	// hour's published claim and then self-heals. freeze.ts, which writes an
+	// immutable row, must not be so relaxed.
+	const { body } = await attestationBody(vendor, customer);
 	const [fresh] = await buildChain([body], prevHash);
 
 	return [...persisted.map((p) => p.attestation), fresh];
@@ -83,6 +87,11 @@ export async function customerChain(vendorSlug: string, customerSlug: string): P
 	let chain = chains.get(key);
 	if (!chain) {
 		chain = loadChain(vendor, customer);
+		// Evict a rejected load so the next request retries. Without this the
+		// failed promise stays memoised for the rest of the hour, turning one
+		// transient history-read error into an hour of 500s long after the
+		// datastore recovered.
+		chain.catch(() => chains.delete(key));
 		chains.set(key, chain);
 	}
 	return chain;

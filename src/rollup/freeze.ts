@@ -15,6 +15,7 @@
 
 import { dbClient } from "@/lib/db/client";
 import { attestationBody } from "@/lib/attest/body";
+import { isDemonstration } from "@/lib/attest/keys";
 import { signAttestation } from "@/lib/attest/sign";
 import { GENESIS_HASH, snapshotHash } from "@/lib/attest/verify";
 import { allVendors } from "@/lib/fixtures/vendors";
@@ -29,16 +30,36 @@ function hourBucket(): number {
 export interface FreezeResult {
 	ok: boolean;
 	frozen: number;
+	/**
+	 * Customers deliberately not frozen this run because their telemetry read
+	 * failed. Not an error — see the skip in the loop below.
+	 */
+	skipped?: string[];
 	/** Present when ok is false. */
 	detail?: string;
 }
 
 export async function freezeSnapshots(): Promise<FreezeResult> {
+	// Ephemeral dev signing is how this repo is developed; PERSISTING it is a
+	// different act. A row written here is chained and immutable, so a
+	// dev-key signature frozen into history stays in history — and the moment
+	// the real key goes live and the JWKS stops publishing the dev key, every
+	// one of those entries fails verification forever. That is not
+	// hypothetical: it happened on 2026-08-13, when four frozen hours went
+	// permanently unverifiable the instant LETTERPROVE_PRODUCTION_JWK was set.
+	// Refusing to freeze is the guard that makes the rotation rule in keys.ts
+	// ("keep retired public keys forever") survivable, because it means nothing
+	// in the chain was ever signed by a key we intend to stop publishing.
+	if (isDemonstration()) {
+		return { ok: false, frozen: 0, detail: "refusing to freeze development-key signatures into immutable history" };
+	}
+
 	const db = dbClient();
 	if (!db) return { ok: false, frozen: 0, detail: "no datastore configured" };
 
 	const bucket = hourBucket();
 	let frozen = 0;
+	const skipped: string[] = [];
 
 	for (const vendor of allVendors()) {
 		for (const customer of vendor.customers) {
@@ -54,8 +75,21 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 
 			if (lastError) return { ok: false, frozen, detail: lastError.message };
 
+			const { body, snapshot } = await attestationBody(vendor, customer);
+
+			// A failed telemetry read produces a body indistinguishable from a
+			// genuine tier-0: same zeros, same gated tier. Freezing it would
+			// record a permanent downgrade for a customer that may have been
+			// perfectly healthy, and the chain is immutable, so there is no
+			// correcting it afterwards. Skipping leaves this hour unfrozen —
+			// the live path still serves a current entry, and the next run
+			// picks the hour up if the read recovers.
+			if (!snapshot.readOk) {
+				skipped.push(`${vendor.slug}/${customer.slug}`);
+				continue;
+			}
+
 			const prevHash = last ? snapshotHash(last.attestation as SignedAttestation) : GENESIS_HASH;
-			const body = await attestationBody(vendor, customer);
 			const signed = await signAttestation({ ...body, prev_hash: prevHash });
 
 			const { error: upsertError } = await db.from("published_snapshots").upsert(
@@ -73,5 +107,5 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 		}
 	}
 
-	return { ok: true, frozen };
+	return { ok: true, frozen, ...(skipped.length && { skipped }) };
 }

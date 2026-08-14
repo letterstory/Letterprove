@@ -1,14 +1,21 @@
 import Link from "next/link";
-import { signingKey } from "@/lib/attest/keys";
+import { isDemonstration } from "@/lib/attest/keys";
 
 /**
  * A banner that cannot be missed when proofs are signed with the development
  * key. The single worst outcome for this product is a demonstration being
  * mistaken for evidence, so the warning lives on the page, in the discovery
  * document, and in the key id itself.
+ *
+ * The second-worst outcome is the inverse, and it is the one that actually
+ * happened: this asked `signingKey().isDev`, which stays true in production
+ * forever now that Letterstory holds the key, so real countersigned proofs
+ * were served under a "not evidence" banner. `isDemonstration()` asks what is
+ * really signing. Getting this backwards is not a cosmetic bug — an agent that
+ * reads the warning discounts the proof, which is the whole product.
  */
 export function DevKeyBanner() {
-	if (!signingKey().isDev) return null;
+	if (!isDemonstration()) return null;
 
 	return (
 		<div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2.5 text-center text-sm text-amber-200">

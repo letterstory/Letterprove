@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { jwks, publicJwk } from "./keys";
+import { isDemonstration, jwks, publicJwk, signingMode } from "./keys";
 
-const ENV_KEYS = ["LETTERPROVE_PRODUCTION_JWK", "LETTERPROVE_RETIRED_JWKS"] as const;
+const ENV_KEYS = [
+	"LETTERPROVE_PRODUCTION_JWK",
+	"LETTERPROVE_RETIRED_JWKS",
+	"LETTERSTORY_COUNTERSIGN_URL",
+	"LETTERSTORY_COUNTERSIGN_SECRET",
+] as const;
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
@@ -66,5 +71,33 @@ describe("jwks — LETTERPROVE_PRODUCTION_JWK override", () => {
 		expect(keys).toHaveLength(2);
 		expect(keys[0].kid).toBe("lp-real-1");
 		expect(keys[1].kid).toBe("lp-retired-1");
+	});
+});
+
+describe("signingMode", () => {
+	// The production bug this exists to prevent: `signingKey().isDev` stays
+	// true forever once Letterstory holds the key, because this service is
+	// never given LETTERPROVE_SIGNING_KEY. Anything asking "is this a
+	// demonstration" via isDev therefore mislabels real countersigned proofs
+	// as "not evidence" — which is precisely what an evaluating agent reads
+	// and discounts.
+	it("reports countersigned — not development — when the RPC is configured", () => {
+		process.env.LETTERSTORY_COUNTERSIGN_URL = "https://letterstory.example/api/letterprove/countersign";
+		process.env.LETTERSTORY_COUNTERSIGN_SECRET = "shh";
+
+		expect(signingMode()).toBe("countersigned");
+		expect(isDemonstration()).toBe(false);
+	});
+
+	it("needs both halves of the RPC config before it counts as countersigned", () => {
+		process.env.LETTERSTORY_COUNTERSIGN_URL = "https://letterstory.example/api/letterprove/countersign";
+
+		expect(signingMode()).toBe("development");
+		expect(isDemonstration()).toBe(true);
+	});
+
+	it("reports development when nothing is configured, so the warning still shows", () => {
+		expect(signingMode()).toBe("development");
+		expect(isDemonstration()).toBe(true);
 	});
 });
