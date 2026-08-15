@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabaseClient } from "@/lib/auth/server";
 
@@ -88,11 +88,13 @@ async function insertVendor(
 	category: string,
 	key: string,
 ): Promise<string | "conflict" | null> {
-	const { data, error } = await supabase
-		.from("vendors")
-		.insert({ slug, name, domain, category, key })
-		.select("id")
-		.single();
+	// id is generated here, not left to the column default, so we don't need
+	// `.select()` back afterward — the RLS select policy on vendors only
+	// grants access via an existing vendor_members row, which doesn't exist
+	// yet for a brand-new vendor. `.insert().select()` would 42501 on the
+	// implicit RETURNING even though the insert itself is allowed.
+	const id = randomUUID();
+	const { error } = await supabase.from("vendors").insert({ id, slug, name, domain, category, key });
 
 	if (error) {
 		// Postgres unique_violation
@@ -100,5 +102,5 @@ async function insertVendor(
 		return null;
 	}
 
-	return data.id;
+	return id;
 }
