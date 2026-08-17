@@ -1,6 +1,11 @@
 import { getUser } from "@/lib/auth/server";
 import { SignOutButton } from "./SignOutButton";
 
+// getUser() reads the request's cookies, so this route can't be statically
+// prerendered — without this, Next bakes one build-time (signed-out) render
+// and serves it to everyone (see the same fix on `/` and `/vendor/*`).
+export const dynamic = "force-dynamic";
+
 // Placeholder landing for the staff area — proves the auth wall end-to-end
 // (middleware.ts redirects here only when signed in). No staff feature lives
 // here yet; the first real one (e.g. vendor/customer/consent management,
