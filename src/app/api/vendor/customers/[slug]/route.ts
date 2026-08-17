@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/auth/server";
 import { currentVendor } from "@/lib/vendors/session";
 import { FEATURES, type Consent } from "@/lib/fixtures/vendors";
+import { classifyDomain } from "@/lib/identity/domains";
 
 const FEATURE_SET: readonly string[] = FEATURES;
 
@@ -26,7 +27,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ sl
 
 	const update: Record<string, unknown> = {};
 	if (typeof body.name === "string" && body.name.trim()) update.name = body.name.trim();
-	if (typeof body.domain === "string" && body.domain.trim()) update.domain = body.domain.trim();
+	if (typeof body.domain === "string" && body.domain.trim()) {
+		// Same refusal as creation. Gating only the create path would leave the
+		// rule trivially bypassable — make a customer on a real domain, then
+		// edit it to gmail.com.
+		const domain = body.domain.trim();
+		const { kind, reason } = classifyDomain(domain);
+		if (kind !== "company") {
+			return NextResponse.json({ error: `"${domain}" cannot be a customer`, reason, kind }, { status: 422 });
+		}
+		update.domain = domain;
+	}
 	if (typeof body.since === "string" && body.since.trim()) update.since = body.since.trim();
 	if (body.consent === "named" || body.consent === "anonymous") {
 		update.consent = body.consent as Consent;

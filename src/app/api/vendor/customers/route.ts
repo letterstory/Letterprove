@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/auth/server";
 import { currentVendor } from "@/lib/vendors/session";
 import type { Consent } from "@/lib/fixtures/vendors";
+import { classifyDomain } from "@/lib/identity/domains";
 
 /** GET /api/vendor/customers — every customer row for the signed-in vendor. */
 export async function GET() {
@@ -55,6 +56,31 @@ export async function POST(request: Request) {
 		);
 	}
 
+	// A customer record on a domain that can never name a company is not a
+	// data-entry slip — it is a signed, immutable claim that "Gmail is a
+	// verified customer", and the chain cannot be rewritten afterwards. Both
+	// halves of that domain are already in real telemetry: free-mail addresses
+	// show up within an hour of any install, and dogfooding puts our own
+	// domains in the same table as customers.
+	//
+	// Refused here rather than filtered later, because the honest fix is
+	// upstream: whoever typed it needs to know it was wrong, not to wonder
+	// later why the record never publishes. classifyDomain proposes generously
+	// — anything it cannot place is allowed through, since real customers are
+	// exactly the domains no list can enumerate.
+	const domain = body.domain.trim();
+	const kind = classifyDomain(domain).kind;
+	if (kind !== "company") {
+		return NextResponse.json(
+			{
+				error: `"${domain}" cannot be a customer`,
+				reason: classifyDomain(domain).reason,
+				kind,
+			},
+			{ status: 422 },
+		);
+	}
+
 	const consent: Consent = body.consent === "named" ? "named" : "anonymous";
 
 	const supabase = await createServerSupabaseClient();
@@ -64,7 +90,7 @@ export async function POST(request: Request) {
 			vendor_id: vendor.id,
 			slug: body.slug.trim(),
 			name: body.name.trim(),
-			domain: body.domain.trim(),
+			domain,
 			since: body.since.trim(),
 			consent,
 			tier: 1,

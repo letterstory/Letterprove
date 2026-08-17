@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getUser } from "@/lib/auth/server";
 import { SignOutButton } from "./SignOutButton";
 
@@ -6,11 +7,9 @@ import { SignOutButton } from "./SignOutButton";
 // and serves it to everyone (see the same fix on `/` and `/vendor/*`).
 export const dynamic = "force-dynamic";
 
-// Placeholder landing for the staff area — proves the auth wall end-to-end
-// (middleware.ts redirects here only when signed in). No staff feature lives
-// here yet; the first real one (e.g. vendor/customer/consent management,
-// currently done by hand-editing src/lib/fixtures/vendors.ts) is a product
-// decision, not an auth-infra one.
+// Landing for the staff area. The auth wall itself is middleware.ts, which
+// redirects here only when signed in; getUser() below re-checks rather than
+// trusting that it did.
 export default async function StaffHome() {
 	const user = await getUser();
 
@@ -18,6 +17,14 @@ export default async function StaffHome() {
 		<main style={{ maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
 			<h1>Letterprove staff</h1>
 			<p>Signed in as {user?.email}.</p>
+
+			<ul style={{ margin: "2rem 0", paddingLeft: "1.1rem" }}>
+				<li>
+					<Link href="/staff/tiers">Verification tiers</Link> — what has been observed, and
+					what is stopping each domain from being a published claim.
+				</li>
+			</ul>
+
 			<SignOutButton />
 		</main>
 	);
