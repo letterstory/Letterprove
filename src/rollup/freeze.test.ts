@@ -6,6 +6,37 @@ import { freezeSnapshots } from "./freeze";
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
 
+// allVendors() now reads through the same dbClient mocked above, but this
+// suite's mockDb() below stubs the query chain freeze.ts itself issues
+// (`published_snapshots`), not the `vendors`/`vendor_customers` reads
+// vendors.ts makes. Mock the vendor identity lookup at the module boundary
+// instead, holding it to the same two vendors/customers the static fixture
+// used to ship, so the rest of this suite's assertions stay unchanged.
+vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("@/lib/fixtures/vendors")>();
+	const VENDORS: import("@/lib/fixtures/vendors").VendorFixture[] = [
+		{
+			slug: "vantage",
+			name: "Vantage",
+			domain: "vantage.example",
+			category: "customer data platforms",
+			key: "lp_live_vantage_9f2c",
+			customers: [
+				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api", "analytics"], consent: "named" },
+				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso", "api", "analytics", "sla"], consent: "anonymous" },
+				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
+			],
+		},
+		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", customers: [] },
+	];
+	return {
+		...original,
+		allVendors: async () => VENDORS,
+		findVendor: async (slug: string) => VENDORS.find((v) => v.slug === slug),
+		findVendorByKey: async (key: string) => VENDORS.find((v) => v.key === key),
+	};
+});
+
 // Only `isDemonstration` is stubbed — the rest of keys.ts stays real so
 // signAttestation still produces genuine signatures here. Unstubbed, the whole
 // suite would hit the dev-key guard, since a test process has neither the

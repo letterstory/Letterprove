@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 			mode: signingMode(),
 		},
 		verifier: methodUrl("scripts/verify.mjs"),
-		proofs: vendorSlugs().map((slug) => ({ vendor: slug, url: `${origin}/proofs/${slug}` })),
+		proofs: (await vendorSlugs()).map((slug) => ({ vendor: slug, url: `${origin}/proofs/${slug}` })),
 		// Said in the machine-readable surface, not only on the page: anything
 		// signed by the development key is a demonstration, not evidence.
 		...(isDemonstration() && {

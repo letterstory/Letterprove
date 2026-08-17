@@ -13,7 +13,7 @@ import { CURRENT_CONFIG_VERSION } from "@/lib/telemetry/events";
  */
 export async function GET(request: Request) {
 	const key = new URL(request.url).searchParams.get("k");
-	const vendor = key ? findVendorByKey(key) : undefined;
+	const vendor = key ? await findVendorByKey(key) : undefined;
 	if (!vendor) return notFound("unknown key");
 
 	return configJson({

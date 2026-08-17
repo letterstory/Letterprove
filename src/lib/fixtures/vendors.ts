@@ -1,21 +1,31 @@
 /**
- * Identity fixtures — a fictional vendor and its customers.
+ * Vendor/customer identity — DB-backed (supabase/migrations/20260814230000_vendor_accounts.sql).
  *
- * The publishing half of Letterprove is entirely independent of collection, so
- * it was originally built and demonstrated against static snapshot numbers
- * here too. Those are gone now: `sessions_30d`/`seats_active` come from
- * `currentSnapshot` (src/rollup/snapshots.ts), a live query over `hot_rollups`,
- * keyed by the `domain` below. What's left here — identity, tier, features — is
- * still genuinely static: nothing in `hot_events` carries a customer name or a
- * feature list (see events.ts), so there is no rollup that could replace it.
+ * This module used to be static fixtures. It kept the same file path and the
+ * same exported function signatures (now async) on purpose: every call site
+ * that read `allVendors()`/`findVendor()`/etc. only had to gain an `await`,
+ * not a rewrite, and the two identities that existed as fixtures — `vantage`
+ * (fictional demo data) and `lettertrace` (a REAL, LIVE integration —
+ * `lettertrace.com`'s `domain` is what `POST /v1/observe` pins the browser's
+ * `Origin` header against) — were seeded into the `vendors` table at the
+ * exact same slug/domain/key values, so nothing that already depends on them
+ * changed behavior.
  *
- * NOTHING IN HERE IS EVIDENCE. Vantage does not exist. Its customers' domains
+ * Reads go through the service-role client (`dbClient`, src/lib/db/client.ts)
+ * and bypass RLS — every caller of this module today is trusted server code
+ * (the collector, the rollup, the proof/attest pipeline), the same trust
+ * level static fixtures had. RLS on these tables exists for the vendor
+ * dashboard (anon key + user session), added alongside this file — see
+ * src/lib/vendors/dashboard.ts.
+ *
+ * NOTHING IN VANTAGE IS EVIDENCE. It does not exist. Its customers' domains
  * are not registered and will never emit real events; every proof this vendor
  * publishes honestly shows sessions_30d: 0 until someone points a real
  * attest.js at one of them.
  */
 
 import type { Tier } from "../attest/types";
+import { dbClient } from "../db/client";
 
 /**
  * Whether this customer has agreed to be named in public.
@@ -66,101 +76,130 @@ export interface VendorFixture {
 /** Every feature we know how to attest, in display order. */
 export const FEATURES = ["sso", "audit_log", "api", "analytics", "sla"] as const;
 
-const VANTAGE: VendorFixture = {
-	slug: "vantage",
-	name: "Vantage",
-	domain: "vantage.example",
-	category: "customer data platforms",
-	key: "lp_live_vantage_9f2c",
-	customers: [
-		{
-			slug: "acme-corp",
-			name: "Acme Corp",
-			domain: "acme-corp.example",
-			since: "2023-03",
-			tier: 2,
-			verified: true,
-			features: ["sso", "api", "analytics"],
-			// The one customer that has agreed to be named — and the reason
-			// /attest/vantage/acme-corp.json is the URL every doc cites.
-			consent: "named",
-		},
-		{
-			slug: "northwind",
-			name: "Northwind",
-			domain: "northwind.example",
-			since: "2024-08",
-			tier: 2,
-			verified: true,
-			features: ["sso", "api", "analytics", "sla"],
-			// Attested but NOT named: contributes every number to the vendor's
-			// aggregate and publishes no attestation of its own. This is the
-			// default state and the one the consent design has to get right.
-			consent: "anonymous",
-		},
-		{
-			slug: "globex",
-			name: "Globex",
-			domain: "globex.example",
-			since: "2022-11",
-			// Tier 1 on purpose: observed in a browser, not yet bound to
-			// infrastructure facts. The proof page must be able to show a weaker
-			// claim honestly rather than rounding everything up to "verified".
-			tier: 1,
-			verified: false,
-			features: ["sso", "audit_log", "api"],
-		},
-	],
-};
+interface VendorRow {
+	slug: string;
+	name: string;
+	domain: string;
+	category: string;
+	key: string;
+}
+
+interface CustomerRow {
+	vendor_id: string;
+	slug: string;
+	name: string;
+	domain: string;
+	since: string;
+	tier: Tier;
+	verified: boolean;
+	features: string[];
+	consent: Consent;
+}
+
+function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
+	return {
+		slug: row.slug,
+		name: row.name,
+		domain: row.domain,
+		category: row.category,
+		key: row.key,
+		customers: customers.map((c) => ({
+			slug: c.slug,
+			name: c.name,
+			domain: c.domain,
+			since: c.since,
+			tier: c.tier,
+			verified: c.verified,
+			features: c.features,
+			consent: c.consent,
+		})),
+	};
+}
 
 /**
- * The first REAL vendor. Everything above this line is fiction; this is not.
- *
- * `domain` is load-bearing rather than descriptive: `POST /v1/observe` pins the
- * browser's `Origin` header to it, so this string has to match the host
- * lettertrace is actually served from, exactly. `lettertrace.com` — not `www.`,
- * not the `.vercel.app` alias, and not `localhost`, which is why the
- * integration is inert in local development even with a key set.
- *
- * `key` is public by design. It ships in the HTML of every authenticated page
- * and identifies the vendor; the origin pin is what stops anyone else using it.
- * It is not a secret and must never be treated as one.
- *
- * **`customers` is deliberately empty.** We do not yet know which companies use
- * lettertrace, and inventing entries here would publish claims about real
- * businesses that nobody has observed and nobody has consented to. Collection
- * does not need them — `recordObservation` writes `(vendor_slug, domain)` for
- * whatever shows up, so events accumulate in `hot_events` from the moment the
- * script loads. Publishing is what needs a customer record, so the order is:
- * observe first, see which domains are real, then add each one with a consent
- * decision attached. Discovery before assertion is the whole product thesis
- * applied to ourselves.
- *
- * Note that free-mail domains (`gmail.com`, `me.com`, …) will land in
- * `hot_events` too and must never become customer records — see README §
- * Identity resolution. That bucket needs handling before any of this publishes.
+ * There is no service-role DB in local dev without env set up, and this
+ * module's callers (the live collector included) must not throw on a config
+ * gap — same failure posture the collector already has for an unknown key.
+ * An empty vendor list is the correct answer to "who is registered" when we
+ * can't reach the database, not a thrown error.
  */
-const LETTERTRACE: VendorFixture = {
-	slug: "lettertrace",
-	name: "Lettertrace",
-	domain: "lettertrace.com",
-	category: "AI brand monitoring",
-	key: "lp_live_lettertrace_5747b5e0f521",
-	customers: [],
-};
+export async function allVendors(): Promise<VendorFixture[]> {
+	const db = dbClient();
+	if (!db) return [];
 
-const VENDORS: VendorFixture[] = [VANTAGE, LETTERTRACE];
+	const { data: rows } = await db.from("vendors").select("id, slug, name, domain, category, key");
+	if (!rows || rows.length === 0) return [];
 
-export function allVendors(): VendorFixture[] {
-	return VENDORS;
+	const { data: customerRows } = await db
+		.from("vendor_customers")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
+		.in(
+			"vendor_id",
+			rows.map((r) => r.id),
+		);
+
+	const customersByVendor = new Map<string, CustomerRow[]>();
+	for (const c of (customerRows ?? []) as unknown as (CustomerRow & { vendor_id: string })[]) {
+		const list = customersByVendor.get(c.vendor_id) ?? [];
+		list.push(c);
+		customersByVendor.set(c.vendor_id, list);
+	}
+
+	return rows.map((row) =>
+		toFixture(
+			{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
+			customersByVendor.get(row.id) ?? [],
+		),
+	);
 }
 
-export function findVendor(slug: string): VendorFixture | undefined {
-	return VENDORS.find((v) => v.slug === slug);
+export async function findVendor(slug: string): Promise<VendorFixture | undefined> {
+	const db = dbClient();
+	if (!db) return undefined;
+
+	const { data: row } = await db
+		.from("vendors")
+		.select("id, slug, name, domain, category, key")
+		.eq("slug", slug)
+		.maybeSingle();
+	if (!row) return undefined;
+
+	const { data: customerRows } = await db
+		.from("vendor_customers")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
+		.eq("vendor_id", row.id);
+
+	return toFixture(
+		{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
+		(customerRows ?? []) as unknown as CustomerRow[],
+	);
 }
 
-export function findVendorByKey(key: string): VendorFixture | undefined {
-	return VENDORS.find((v) => v.key === key);
+/**
+ * Keyed lookup for the live collector (`POST /v1/observe`, `GET /v1/config`)
+ * — `key` is not a secret (it ships in every page's HTML) but it is unique,
+ * so this stays a direct equality lookup rather than a table scan.
+ */
+export async function findVendorByKey(key: string): Promise<VendorFixture | undefined> {
+	const db = dbClient();
+	if (!db) return undefined;
+
+	const { data: row } = await db
+		.from("vendors")
+		.select("id, slug, name, domain, category, key")
+		.eq("key", key)
+		.maybeSingle();
+	if (!row) return undefined;
+
+	const { data: customerRows } = await db
+		.from("vendor_customers")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
+		.eq("vendor_id", row.id);
+
+	return toFixture(
+		{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
+		(customerRows ?? []) as unknown as CustomerRow[],
+	);
 }
 
 export function findCustomer(vendor: VendorFixture, slug: string): CustomerFixture | undefined {

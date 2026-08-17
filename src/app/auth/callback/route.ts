@@ -3,8 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Landing point for the link in a Supabase email-confirmation (and any future
 // magic link / OAuth). Swaps `?code=` for a session cookie, then forwards to
-// the originally-requested /staff page. Outside the /staff matcher, so it's
-// reachable while signed out regardless of auth config.
+// the originally-requested page. Shared between the /staff and /vendor auth
+// walls — both login pages pass their own `?redirect=`, so the destination
+// (and, on failure, which login page to bounce back to) come from that
+// param rather than being hardcoded to one wall. Outside both matchers, so
+// it's reachable while signed out regardless of auth config.
 export async function GET(request: NextRequest) {
 	const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 	const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -14,9 +17,10 @@ export async function GET(request: NextRequest) {
 
 	const redirect = searchParams.get("redirect") || "/staff";
 	const dest = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/staff";
+	const loginPage = dest.startsWith("/vendor") ? "/vendor/login" : "/staff/login";
 
 	if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !code) {
-		return NextResponse.redirect(new URL("/staff/login", origin));
+		return NextResponse.redirect(new URL(loginPage, origin));
 	}
 
 	const response = NextResponse.redirect(new URL(dest, origin));
@@ -36,7 +40,7 @@ export async function GET(request: NextRequest) {
 
 	const { error } = await supabase.auth.exchangeCodeForSession(code);
 	if (error) {
-		return NextResponse.redirect(new URL("/staff/login?error=auth", origin));
+		return NextResponse.redirect(new URL(`${loginPage}?error=auth`, origin));
 	}
 
 	return response;
