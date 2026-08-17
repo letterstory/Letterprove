@@ -159,24 +159,31 @@ observations Letterprove stores are never public. And **anti-fraud stays
 closed**, in Letterstory, because published detection logic is an evasion
 manual.
 
-**What "open source" requires that isn't true yet.** This repo is currently
-private, no license. Every `method` link an attestation ships today points
-somewhere an outside agent can't read — the mechanism is real, the claim
-behind it isn't. Three things close that gap:
+**What "open source" requires.** Every `method` link an attestation ships
+points at this repo. While it is private, an outside agent cannot follow that
+link — the mechanism is real, the claim behind it is not. Three things close
+that gap, and only one is still outstanding:
 
-- **The repo goes public at or before Letterprove's own launch (target: Aug
-  25, 2026)** — ahead of the company-wide open-source date (Oct 23, 2026),
-  because Letterprove is the one product of the five making a
-  verify-the-code claim to customers on day one. Nothing here needs to wait
-  for that date: anti-fraud is already isolated in Letterstory, so nothing
-  sensitive lives in this repo.
-- **A real license** — MIT. Reading the code isn't the whole claim; a
-  skeptical agent or a competitor being able to actually clone and run it is.
-- **`main` never gets force-pushed or rebased once public.** Every published
-  attestation pins a commit SHA that has to stay resolvable indefinitely, or
-  the trust chain breaks retroactively for every attestation published before
-  the rewrite — silently, since nothing about an already-signed attestation
-  would flag it.
+- ✅ **A real license** — MIT, in [LICENSE](LICENSE). Reading the code isn't
+  the whole claim; a skeptical agent or a competitor being able to actually
+  clone and run it is.
+- ✅ **Nothing sensitive in the history.** Verified across all commits: no
+  credential has ever been committed, and `.env*` has been ignored since the
+  first one. Anti-fraud lives in Letterstory, so the closed half was never
+  here to leak. `scripts/set-cron-secret.sh` generates its secret at runtime
+  and hardcodes none.
+- ⬜ **Flip the repo to public** — target Aug 25, 2026, ahead of the
+  company-wide open-source date (Oct 23, 2026), because Letterprove is the one
+  product of the five making a verify-the-code claim to customers on day one.
+  This is an owner action, not a code change; everything else is ready.
+
+And one rule that starts the moment it flips:
+
+> **`main` never gets force-pushed or rebased once public.** Every published
+> attestation pins a commit SHA that has to stay resolvable indefinitely, or
+> the trust chain breaks retroactively for every attestation published before
+> the rewrite — silently, since nothing about an already-signed attestation
+> would flag it.
 
 ### The signing seam
 
