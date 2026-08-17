@@ -33,10 +33,18 @@ export interface FraudFeatures {
 
 const WINDOW_DAYS = 30;
 
+/**
+ * @param domain one customer's join key, or `null` to score the vendor as a
+ *   whole. The vendor-wide form backs the aggregate attestation, which makes
+ *   a claim about every observed company at once and so has no single domain
+ *   to filter on. Burst detection is arguably sharper there: traffic
+ *   concentrated in one hour across *all* of a vendor's domains is a better
+ *   spoofing tell than the same shape for one customer.
+ */
 export async function fraudFeatures(
 	vendorSlug: string,
 	customerSlug: string,
-	domain: string
+	domain: string | null
 ): Promise<FraudFeatures> {
 	const now = new Date();
 	const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -59,11 +67,12 @@ export async function fraudFeatures(
 	const db = dbClient();
 	if (!db) return empty;
 
-	const { data, error } = await db
+	let query = db
 		.from("hot_rollups")
 		.select("sessions, signups, logins")
-		.eq("vendor_slug", vendorSlug)
-		.eq("domain", domain)
+		.eq("vendor_slug", vendorSlug);
+	if (domain !== null) query = query.eq("domain", domain);
+	const { data, error } = await query
 		.gte("window_start", since.toISOString())
 		.order("window_start", { ascending: true });
 
