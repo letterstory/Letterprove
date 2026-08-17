@@ -1,11 +1,10 @@
 name: Deploy Migrations to Production
 
+# Manual/emergency path only. Automatic migration application now happens as
+# a `prebuild` step in the Vercel production build (scripts/db-push.sh), so
+# it's atomic with the deploy that needs it. Dispatch this by hand if you
+# need to apply migrations without shipping a code deploy.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "supabase/migrations/**"
   workflow_dispatch:
 
 jobs:

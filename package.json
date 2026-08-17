@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "next dev -p ${PORT:-9100}",
+    "prebuild": "bash scripts/db-push.sh",
     "build": "next build",
     "start": "next start -p ${PORT:-9100}",
     "lint": "eslint",
