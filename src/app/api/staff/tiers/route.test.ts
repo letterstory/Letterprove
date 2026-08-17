@@ -41,7 +41,7 @@ describe("GET /api/staff/tiers", () => {
 		await signedIn(true);
 		const { vendorSlugs } = await import("@/lib/attest/proofs");
 		const { tierReport } = await import("@/lib/tiers/report");
-		vi.mocked(vendorSlugs).mockReturnValue(["vantage", "lettertrace"]);
+		vi.mocked(vendorSlugs).mockResolvedValue(["vantage", "lettertrace"]);
 		vi.mocked(tierReport).mockImplementation(
 			async (slug: string) => ({ vendor: slug, observed: 1, attributable: 1, unpublishedEvidence: 1, published: 0, rows: [] }) as never,
 		);
@@ -58,7 +58,7 @@ describe("GET /api/staff/tiers", () => {
 		await signedIn(true);
 		const { vendorSlugs } = await import("@/lib/attest/proofs");
 		const { tierReport } = await import("@/lib/tiers/report");
-		vi.mocked(vendorSlugs).mockReturnValue(["vantage", "broken"]);
+		vi.mocked(vendorSlugs).mockResolvedValue(["vantage", "broken"]);
 		vi.mocked(tierReport).mockImplementation(async (slug: string) =>
 			slug === "broken" ? null : ({ vendor: slug, observed: 0, attributable: 0, unpublishedEvidence: 0, published: 0, rows: [] } as never),
 		);
@@ -84,7 +84,7 @@ describe("GET /api/staff/tiers", () => {
 	it("is never cached", async () => {
 		await signedIn(true);
 		const { vendorSlugs } = await import("@/lib/attest/proofs");
-		vi.mocked(vendorSlugs).mockReturnValue([]);
+		vi.mocked(vendorSlugs).mockResolvedValue([]);
 
 		const res = await GET(REQ);
 		expect(res.headers.get("cache-control")).toBe("no-store");
