@@ -1,7 +1,57 @@
 import { describe, expect, it, vi } from "vitest";
 import { classifyRow, tierReport } from "./report";
+import type { CustomerFixture } from "@/lib/fixtures/vendors";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
+
+// The vendor/customer catalogue is mocked rather than read through the real
+// module. These tests are about the tier decision, not about where identity is
+// stored — and that storage is moving from static fixtures to Postgres, at
+// which point a test that leans on the fixtures would start failing for a
+// reason that has nothing to do with what it asserts. `consentOf` stays real
+// because it IS part of the decision under test.
+vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
+	allVendors: vi.fn(),
+}));
+
+function customer(over: Partial<CustomerFixture> & Pick<CustomerFixture, "slug" | "domain">): CustomerFixture {
+	return {
+		name: over.slug,
+		since: "2024-01",
+		tier: 2,
+		verified: true,
+		features: [],
+		...over,
+	};
+}
+
+const VANTAGE = {
+	slug: "vantage",
+	name: "Vantage",
+	domain: "vantage.example",
+	category: "demo",
+	key: "lp_live_vantage",
+	customers: [
+		customer({ slug: "acme-corp", domain: "acme-corp.example", consent: "named" }),
+		customer({ slug: "northwind", domain: "northwind.example", consent: "anonymous" }),
+		customer({ slug: "globex", domain: "globex.example", tier: 1, verified: false }),
+	],
+};
+
+const LETTERTRACE = {
+	slug: "lettertrace",
+	name: "Lettertrace",
+	domain: "lettertrace.com",
+	category: "real",
+	key: "lp_live_lettertrace",
+	customers: [],
+};
+
+async function withVendors() {
+	const { allVendors } = await import("@/lib/fixtures/vendors");
+	vi.mocked(allVendors).mockResolvedValue([VANTAGE, LETTERTRACE] as never);
+}
 
 /** Mimics the chainable `.from().select().eq().gte()` shape the query uses. */
 function mockDb(result: { data: unknown; error: unknown }) {
@@ -17,6 +67,7 @@ function rollup(domain: string, sessions: number, signups = 0, logins = 0) {
 }
 
 async function withRollups(rows: unknown[]) {
+	await withVendors();
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(mockDb({ data: rows, error: null }) as never);
 }
@@ -32,12 +83,14 @@ describe("tierReport", () => {
 	// records for domains that already have them, or concluding collection is
 	// broken when it isn't.
 	it("returns null when telemetry cannot be read, rather than reporting no evidence", async () => {
+		await withVendors();
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(mockDb({ data: null, error: { message: "boom" } }) as never);
 		expect(await tierReport("vantage")).toBeNull();
 	});
 
 	it("returns null when no datastore is configured", async () => {
+		await withVendors();
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(null);
 		expect(await tierReport("vantage")).toBeNull();
