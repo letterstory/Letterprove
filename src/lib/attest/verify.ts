@@ -14,12 +14,14 @@ import type { Jwks, SignedAttestation, VerifyResult } from "./types";
 export const GENESIS_HASH = "0".repeat(64);
 
 /**
- * Hash of a signed snapshot, hex — the value its successor carries as
- * `prev_hash`. The signature is inside the hash on purpose: chaining over the
+ * Hash of any signed document, hex — the value its successor carries as
+ * `prev_hash`. Typed on `object` rather than SignedAttestation because the
+ * vendor-level aggregate chains the same way with a different body shape, and
+ * this function only canonicalises and hashes; it reads no field by name. The signature is inside the hash on purpose: chaining over the
  * body alone would let a snapshot be re-signed with different key material
  * without breaking the chain.
  */
-export function snapshotHash(signed: SignedAttestation): string {
+export function snapshotHash(signed: object): string {
 	return createHash("sha256").update(canonicalize(signed), "utf8").digest("hex");
 }
 

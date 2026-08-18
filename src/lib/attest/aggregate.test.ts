@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { aggregateBody, vendorAggregate } from "./aggregate";
+import { aggregateBody, vendorAggregate, vendorAggregateChain } from "./aggregate";
 import { jwks } from "./keys";
-import { verifyAttestation } from "./verify";
+import { snapshotHash, verifyAttestation } from "./verify";
 import type { SignedAttestation } from "./types";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
+vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
 	findVendor: vi.fn(),
@@ -32,6 +33,9 @@ function row(domain: string, sessions: number, signups = 0, logins = 0) {
 async function withRollups(rows: unknown[]) {
 	const { dbClient } = await import("@/lib/db/client");
 	const { findVendor } = await import("@/lib/fixtures/vendors");
+	const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
+	// No frozen history by default, so the chain is one live entry from genesis.
+	vi.mocked(loadAggregateHistory).mockResolvedValue([]);
 	vi.mocked(findVendor).mockResolvedValue({
 		slug: "lettertrace",
 		name: "Lettertrace",
@@ -135,5 +139,57 @@ describe("vendorAggregate", () => {
 		await withRollups([row("acme.com", 5)]);
 		const [a, b] = await Promise.all([vendorAggregate("lettertrace"), vendorAggregate("lettertrace")]);
 		expect(a!.signature).toBe(b!.signature);
+	});
+});
+
+// vendorAggregateChain memoises per vendor/hour in a module-level Map that is
+// never reset, so each test uses its own slug. findVendor is mocked to answer
+// for any slug, so the argument only has to be unique — same footgun the
+// customer chain tests hit.
+describe("vendorAggregateChain", () => {
+	// The whole point of persisting: a chain that can be walked. Without frozen
+	// rows every request republished a lone entry from genesis, so there was
+	// nothing to audit — signed, but not auditable.
+	it("appends a live entry onto frozen history, linked by prev_hash", async () => {
+		await withRollups([row("acme.com", 5)]);
+		const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
+		const frozen = {
+			vendor: "lettertrace", kind: "aggregate", companies_observed: 9,
+			published_at: "2026-08-18T00:00:00.000Z", signature: "s", key_id: "k",
+		};
+		vi.mocked(loadAggregateHistory).mockResolvedValue([{ hourBucket: 1, attestation: frozen as never }]);
+
+		const chain = (await vendorAggregateChain("chain-append"))!;
+		expect(chain).toHaveLength(2);
+		expect(chain[0]).toBe(frozen);
+		// The live entry commits to its predecessor, which is what makes a
+		// rewrite of the earlier one detectable.
+		expect(chain[1].prev_hash).toBe(snapshotHash(frozen));
+	});
+
+	it("serves exactly the frozen chain once this hour is already frozen", async () => {
+		await withRollups([row("acme.com", 5)]);
+		const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
+		const { aggregateBody } = await import("./aggregate");
+		const nowBucket = Math.floor(Date.now() / 3_600_000);
+		const frozenNow = { vendor: "lettertrace", kind: "aggregate", published_at: "x" };
+		vi.mocked(loadAggregateHistory).mockResolvedValue([
+			{ hourBucket: nowBucket, attestation: frozenNow as never },
+		]);
+		vi.mocked(aggregateBody).mockClear?.();
+
+		const chain = (await vendorAggregateChain("chain-frozen"))!;
+		expect(chain).toEqual([frozenNow]);
+	});
+
+	// A failed history read must not republish a one-entry chain from genesis —
+	// an agent that fetched before and after would see history vanish, which is
+	// indistinguishable from us rewriting the record.
+	it("propagates a history read failure rather than restarting from genesis", async () => {
+		await withRollups([row("acme.com", 5)]);
+		const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
+		vi.mocked(loadAggregateHistory).mockRejectedValue(new Error("cannot read published aggregate history"));
+
+		await expect(vendorAggregateChain("chain-fails")).rejects.toThrow(/cannot read/);
 	});
 });

@@ -31,10 +31,11 @@ import { canonicalBytes } from "./canonical";
 import { fraudFeatures } from "./fraud-features";
 import { methodUrl } from "./method";
 import { signAttestation } from "./sign";
-import { GENESIS_HASH } from "./verify";
+import { GENESIS_HASH, snapshotHash } from "./verify";
 import { partitionDomains } from "@/lib/identity/domains";
 import { findVendor } from "@/lib/fixtures/vendors";
 import { dbClient } from "@/lib/db/client";
+import { loadAggregateHistory } from "@/rollup/aggregate-history";
 import type { Tier } from "./types";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
@@ -159,13 +160,23 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
  * endpoint must serve byte-identical documents, or the difference reads to a
  * verifier exactly like tampering.
  */
-const cache = new Map<string, Promise<SignedAggregate | null>>();
+const chainCache = new Map<string, Promise<SignedAggregate[] | null>>();
 
 function hourBucket(): number {
 	return Math.floor(Date.now() / (TTL_SECONDS * 1000));
 }
 
-async function build(vendorSlug: string): Promise<SignedAggregate | null> {
+/**
+ * Sign one aggregate onto whatever precedes it.
+ *
+ * Shared with the hourly freeze so the live entry and the frozen one are built
+ * the same way — if they diverged, the document an agent reads before the
+ * freeze would not be the document it reads after.
+ */
+export async function signAggregate(
+	vendorSlug: string,
+	prevHash: string
+): Promise<SignedAggregate | null> {
 	const body = await aggregateBody(vendorSlug);
 	if (!body) return null;
 
@@ -175,20 +186,47 @@ async function build(vendorSlug: string): Promise<SignedAggregate | null> {
 	// label on the scorer's side, never a key, so it names the claim instead.
 	const features = await fraudFeatures(vendorSlug, "*aggregate*", null);
 
-	return signAttestation({ ...body, prev_hash: GENESIS_HASH }, features);
+	return signAttestation({ ...body, prev_hash: prevHash }, features);
+}
+
+/**
+ * The published chain: everything frozen so far, plus one live entry for the
+ * current hour when that hour has not been frozen yet.
+ *
+ * Same composition as customer chains in proofs.ts, and for the same reason —
+ * a chain that went blank between a deploy and the first cron tick would look
+ * to a verifier like history had been withdrawn.
+ */
+async function buildChainFor(vendorSlug: string): Promise<SignedAggregate[] | null> {
+	const persisted = await loadAggregateHistory(vendorSlug);
+	const bucket = hourBucket();
+
+	if (persisted.length && persisted.at(-1)!.hourBucket === bucket) {
+		return persisted.map((p) => p.attestation);
+	}
+
+	const tail = persisted.at(-1)?.attestation;
+	const fresh = await signAggregate(vendorSlug, tail ? snapshotHash(tail) : GENESIS_HASH);
+	if (!fresh) return null;
+
+	return [...persisted.map((p) => p.attestation), fresh];
+}
+
+/** A vendor's full aggregate history, oldest first. */
+export async function vendorAggregateChain(vendorSlug: string): Promise<SignedAggregate[] | null> {
+	const key = `${vendorSlug}/${hourBucket()}`;
+	let entry = chainCache.get(key);
+	if (!entry) {
+		entry = buildChainFor(vendorSlug);
+		entry.catch(() => chainCache.delete(key));
+		chainCache.set(key, entry);
+	}
+	return entry;
 }
 
 export async function vendorAggregate(vendorSlug: string): Promise<SignedAggregate | null> {
-	const key = `${vendorSlug}/${hourBucket()}`;
-	let entry = cache.get(key);
-	if (!entry) {
-		entry = build(vendorSlug);
-		// Evict a rejection so the next request retries rather than serving an
-		// hour of failures after the cause has cleared.
-		entry.catch(() => cache.delete(key));
-		cache.set(key, entry);
-	}
-	return entry;
+	const chain = await vendorAggregateChain(vendorSlug);
+	return chain ? chain[chain.length - 1] : null;
 }
 
 /** The bytes a verifier checks — exposed so tests can assert the signed form. */

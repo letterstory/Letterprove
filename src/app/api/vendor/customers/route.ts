@@ -4,6 +4,9 @@ import { currentVendor } from "@/lib/vendors/session";
 import type { Consent } from "@/lib/fixtures/vendors";
 import { classifyDomain } from "@/lib/identity/domains";
 
+/** Slugs that would publish to an unreachable URL — see attest/[vendor]/chain. */
+const RESERVED_CUSTOMER_SLUGS = new Set(["chain"]);
+
 /** GET /api/vendor/customers — every customer row for the signed-in vendor. */
 export async function GET() {
 	const vendor = await currentVendor();
@@ -68,6 +71,19 @@ export async function POST(request: Request) {
 	// later why the record never publishes. classifyDomain proposes generously
 	// — anything it cannot place is allowed through, since real customers are
 	// exactly the domains no list can enumerate.
+	// "chain" is a static route segment beside [customer] in the attest tree
+	// (/attest/{vendor}/chain serves the aggregate history), and Next resolves
+	// static before dynamic. A customer with that slug would publish to a URL
+	// nobody can reach. Refused here rather than discovered later as a proof
+	// that silently 404s.
+	const slug = body.slug.trim();
+	if (RESERVED_CUSTOMER_SLUGS.has(slug.toLowerCase())) {
+		return NextResponse.json(
+			{ error: `"${slug}" is a reserved slug`, reason: "it collides with a published route" },
+			{ status: 422 }
+		);
+	}
+
 	const domain = body.domain.trim();
 	const kind = classifyDomain(domain).kind;
 	if (kind !== "company") {
@@ -88,7 +104,7 @@ export async function POST(request: Request) {
 		.from("vendor_customers")
 		.insert({
 			vendor_id: vendor.id,
-			slug: body.slug.trim(),
+			slug,
 			name: body.name.trim(),
 			domain,
 			since: body.since.trim(),
