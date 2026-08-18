@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
 		return [
 			{ source: "/.well-known/letterprove.json", destination: "/api/well-known/letterprove" },
 			{ source: "/.well-known/letterprove-jwks.json", destination: "/api/well-known/jwks" },
+			// RFC 8414 fixes this path exactly — a client appends it to the issuer
+			// and expects the document there, so it is not ours to name.
+			{
+				source: "/.well-known/oauth-authorization-server",
+				destination: "/api/well-known/oauth-authorization-server",
+			},
 		];
 	},
 };
