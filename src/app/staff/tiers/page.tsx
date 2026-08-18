@@ -1,6 +1,7 @@
 import { getUser } from "@/lib/auth/server";
 import { vendorSlugs } from "@/lib/attest/proofs";
 import { tierReport, type DomainTierRow, type TierStatus, type VendorTierReport } from "@/lib/tiers/report";
+import { PromoteButton } from "./PromoteButton";
 
 // getUser() reads the request's cookies, so this can't be statically
 // prerendered — the same reason /staff and /vendor/* carry it.
@@ -97,7 +98,7 @@ function VendorSection({ report }: { report: VendorTierReport }) {
 						</thead>
 						<tbody className="divide-y divide-edge">
 							{report.rows.map((row) => (
-								<Row key={row.domain} row={row} />
+								<Row key={row.domain} row={row} vendor={report.vendor} />
 							))}
 						</tbody>
 					</table>
@@ -107,7 +108,7 @@ function VendorSection({ report }: { report: VendorTierReport }) {
 	);
 }
 
-function Row({ row }: { row: DomainTierRow }) {
+function Row({ row, vendor }: { row: DomainTierRow; vendor: string }) {
 	const events = row.sessions + row.signups + row.logins;
 
 	return (
@@ -143,7 +144,20 @@ function Row({ row }: { row: DomainTierRow }) {
 					{STATUS_LABEL[row.status]}
 				</span>
 			</td>
-			<td className="px-4 py-3 text-fog">{row.detail}</td>
+			<td className="px-4 py-3 text-fog">
+				{row.detail}
+				{/* The only row anyone can act on from here. Everything else needs a
+				    decision made outside this system — consent from the customer,
+				    or an install that produces evidence. */}
+				{row.status === "no-customer-record" && (
+					<div className="mt-2">
+						<PromoteButton vendor={vendor} domain={row.domain} />
+						<p className="mt-1 text-xs text-fog/70">
+							Creates an anonymous record — counted in the aggregate, not named publicly.
+						</p>
+					</div>
+				)}
+			</td>
 		</tr>
 	);
 }
