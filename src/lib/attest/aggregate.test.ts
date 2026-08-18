@@ -1,0 +1,139 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { aggregateBody, vendorAggregate } from "./aggregate";
+import { jwks } from "./keys";
+import { verifyAttestation } from "./verify";
+import type { SignedAttestation } from "./types";
+
+vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
+vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
+	findVendor: vi.fn(),
+}));
+
+/**
+ * Two different chains hit this mock: the aggregate awaits `.gte()` directly,
+ * while fraud-features calls `.gte().order()`. So `gte` returns a promise that
+ * also carries `.order`, satisfying both without branching on the caller.
+ */
+function mockDb(result: { data: unknown; error: unknown }) {
+	const settled = Object.assign(Promise.resolve(result), {
+		order: vi.fn().mockResolvedValue(result),
+	});
+	const gte = vi.fn().mockReturnValue(settled);
+	const eq: ReturnType<typeof vi.fn> = vi.fn(() => ({ gte, eq }));
+	const select = vi.fn().mockReturnValue({ eq });
+	return { from: vi.fn().mockReturnValue({ select }) };
+}
+
+function row(domain: string, sessions: number, signups = 0, logins = 0) {
+	return { domain, sessions, signups, logins };
+}
+
+async function withRollups(rows: unknown[]) {
+	const { dbClient } = await import("@/lib/db/client");
+	const { findVendor } = await import("@/lib/fixtures/vendors");
+	vi.mocked(findVendor).mockResolvedValue({
+		slug: "lettertrace",
+		name: "Lettertrace",
+		domain: "lettertrace.com",
+		category: "x",
+		key: "k",
+		customers: [],
+	} as never);
+	vi.mocked(dbClient).mockReturnValue(mockDb({ data: rows, error: null }) as never);
+}
+
+beforeEach(() => vi.clearAllMocks());
+
+describe("aggregateBody", () => {
+	// The claim exists so a vendor can publish something real before any
+	// customer has agreed to be named.
+	it("counts companies and sums their events", async () => {
+		await withRollups([row("tenevents.com", 3, 1), row("juvare.com", 2), row("o3world.com", 1, 0, 4)]);
+
+		const b = (await aggregateBody("lettertrace"))!;
+		expect(b.companies_observed).toBe(3);
+		expect(b.sessions).toBe(6);
+		expect(b.signups).toBe(1);
+		expect(b.logins).toBe(4);
+		expect(b.domains_excluded).toBe(0);
+		expect(b.tier).toBe(2);
+	});
+
+	// Free-mail is a person and our own domains are us. Counting either as a
+	// company would inflate the one number the whole claim rests on.
+	it("excludes unattributable domains from the count AND the totals", async () => {
+		await withRollups([
+			row("tenevents.com", 2),
+			row("gmail.com", 50),
+			row("lettertrace.com", 40),
+			row("probe.invalid", 5),
+		]);
+
+		const b = (await aggregateBody("lettertrace"))!;
+		expect(b.companies_observed).toBe(1);
+		expect(b.domains_excluded).toBe(3);
+		// 95 excluded sessions must not reach the headline.
+		expect(b.sessions).toBe(2);
+	});
+
+	// Published rather than dropped: an agent seeing "1 company" next to 4
+	// observed domains can tell the difference between filtering and
+	// under-counting.
+	it("publishes how many domains were set aside", async () => {
+		await withRollups([row("gmail.com", 1), row("acme.com", 1)]);
+		expect((await aggregateBody("lettertrace"))!.domains_excluded).toBe(1);
+	});
+
+	it("caps the tier at 0 when nothing attributable was observed", async () => {
+		await withRollups([row("gmail.com", 99)]);
+
+		const b = (await aggregateBody("lettertrace"))!;
+		expect(b.companies_observed).toBe(0);
+		expect(b.tier).toBe(0);
+	});
+
+	// A failed read must never publish as "0 companies observed" — a signed
+	// zero is a claim, and a wrong one.
+	it("returns null when telemetry cannot be read, rather than claiming zero", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		const { findVendor } = await import("@/lib/fixtures/vendors");
+		vi.mocked(findVendor).mockResolvedValue({ slug: "lettertrace", customers: [] } as never);
+		vi.mocked(dbClient).mockReturnValue(mockDb({ data: null, error: { message: "boom" } }) as never);
+
+		expect(await aggregateBody("lettertrace")).toBeNull();
+	});
+
+	it("returns null for an unknown vendor", async () => {
+		const { findVendor } = await import("@/lib/fixtures/vendors");
+		vi.mocked(findVendor).mockResolvedValue(undefined as never);
+		expect(await aggregateBody("nope")).toBeNull();
+	});
+
+	// "Companies observed" is what the evidence supports. "Customers" is a
+	// commercial fact we do not hold, and the gap between those two sentences
+	// is the reason this product exists.
+	it("never uses the word customer in the published body", async () => {
+		await withRollups([row("acme.com", 1)]);
+		expect(JSON.stringify(await aggregateBody("lettertrace"))).not.toMatch(/customer/i);
+	});
+});
+
+describe("vendorAggregate", () => {
+	it("signs a verifiable document", async () => {
+		await withRollups([row("acme.com", 5)]);
+
+		const signed = (await vendorAggregate("lettertrace"))!;
+		expect(signed.kind).toBe("aggregate");
+		expect(signed.key_id).toBeTruthy();
+		// Verified with the same routine an outside agent uses on any other
+		// attestation — the aggregate is not a second, weaker format.
+		expect(verifyAttestation(signed as unknown as SignedAttestation, jwks())).toEqual({ ok: true });
+	});
+
+	it("serves the same bytes for the same hour, so page and JSON cannot disagree", async () => {
+		await withRollups([row("acme.com", 5)]);
+		const [a, b] = await Promise.all([vendorAggregate("lettertrace"), vendorAggregate("lettertrace")]);
+		expect(a!.signature).toBe(b!.signature);
+	});
+});

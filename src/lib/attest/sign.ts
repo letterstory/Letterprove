@@ -1,5 +1,5 @@
 import { countersign } from "./countersign";
-import type { AttestationBody, SignedAttestation } from "./types";
+import type { FraudFeatures } from "./fraud-features";
 
 /**
  * Sign one attestation body.
@@ -9,7 +9,10 @@ import type { AttestationBody, SignedAttestation } from "./types";
  * which that was. A caller-stamped id is a lie waiting to happen at the first
  * rotation.
  */
-export async function signAttestation(body: AttestationBody): Promise<SignedAttestation> {
+export async function signAttestation<T extends object>(
+	body: T,
+	features?: FraudFeatures
+): Promise<T & { key_id: string; signature: string }> {
 	// Re-signing an already-signed document is an easy mistake — spread a
 	// SignedAttestation, change a number, sign again — and it produces a
 	// document that can NEVER verify, because the stale `signature` and
@@ -21,6 +24,6 @@ export async function signAttestation(body: AttestationBody): Promise<SignedAtte
 		}
 	}
 
-	const { signature, key_id } = await countersign(body);
+	const { signature, key_id } = await countersign(body, features);
 	return { ...body, key_id, signature };
 }

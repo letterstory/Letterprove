@@ -22,7 +22,7 @@ import { canonicalBytes } from "./canonical";
 import { fraudFeatures } from "./fraud-features";
 import { countersignConfigured, signingKey } from "./keys";
 import { findCustomer, findVendor } from "../fixtures/vendors";
-import type { AttestationBody } from "./types";
+import type { FraudFeatures } from "./fraud-features";
 
 export interface Countersignature {
 	signature: string;
@@ -40,7 +40,16 @@ const RPC_TIMEOUT_MS = 20_000;
  * pre-serialised would be signing a document that differs from the one
  * published, and every verification would fail.
  */
-export async function countersign(body: AttestationBody): Promise<Countersignature> {
+/**
+ * @param features pre-computed fraud features. Supplied by callers whose body
+ *   is not customer-shaped — the vendor-level aggregate, which has no
+ *   `customer` to look up. Omitted, they are derived from the body's
+ *   vendor/customer as before.
+ */
+export async function countersign(
+	body: object,
+	features?: FraudFeatures
+): Promise<Countersignature> {
 	// keys.ts owns this predicate so `signingMode()` and this branch can never
 	// disagree about which signer is live — the banner saying one thing while
 	// the signature says another is exactly the failure this consolidates.
@@ -48,7 +57,8 @@ export async function countersign(body: AttestationBody): Promise<Countersignatu
 		return countersignRemote(
 			process.env.LETTERSTORY_COUNTERSIGN_URL!,
 			process.env.LETTERSTORY_COUNTERSIGN_SECRET!,
-			body
+			body,
+			features
 		);
 	}
 
@@ -65,16 +75,27 @@ export async function countersign(body: AttestationBody): Promise<Countersignatu
  * error to swallow — an unsigned snapshot must never be published, so every
  * failure path here throws rather than falling back to local signing.
  */
-async function countersignRemote(url: string, secret: string, body: AttestationBody): Promise<Countersignature> {
-	const vendor = await findVendor(body.vendor);
-	const customer = vendor && findCustomer(vendor, body.customer);
-	if (!vendor || !customer) {
-		throw new Error(
-			`countersign: unknown vendor/customer "${body.vendor}/${body.customer}" — cannot resolve domain for fraud-feature extraction`
-		);
+async function countersignRemote(
+	url: string,
+	secret: string,
+	body: object,
+	supplied?: FraudFeatures
+): Promise<Countersignature> {
+	// Only customer-shaped bodies need the lookup. The vendor-level aggregate
+	// makes a claim about every observed company at once, so it has no
+	// `customer` to resolve and supplies its own vendor-scoped features.
+	let features = supplied;
+	if (!features) {
+		const shaped = body as { vendor?: string; customer?: string };
+		const vendor = shaped.vendor ? await findVendor(shaped.vendor) : undefined;
+		const customer = vendor && shaped.customer ? findCustomer(vendor, shaped.customer) : undefined;
+		if (!vendor || !customer) {
+			throw new Error(
+				`countersign: unknown vendor/customer "${shaped.vendor}/${shaped.customer}" — cannot resolve domain for fraud-feature extraction`
+			);
+		}
+		features = await fraudFeatures(vendor.slug, customer.slug, customer.domain);
 	}
-
-	const features = await fraudFeatures(vendor.slug, customer.slug, customer.domain);
 
 	const res = await fetch(url, {
 		method: "POST",
