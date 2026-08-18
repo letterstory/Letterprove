@@ -227,10 +227,75 @@ its competitors' claims, it prefers the verifiable one, and it does the
 cryptographic work itself. **What it does not yet support:** a number for how
 much proof is worth against real competitors with real corroboration.
 
+### Run 3 — 2026-08-18, `--inline --aggregate`, 6 cells, `claude-opus-5`
+
+**The first run with a real target.** Run 2's headline caveat was that a
+fictional vendor's fabricated 4,182 sessions probably inflated the effect.
+This one embeds Lettertrace's genuine signed aggregate — **15 companies
+observed, 20 sessions** — countersigned with the production key
+(`lp-756338073e`). Competitors stay invented, deliberately: naming real
+companies in a ranked public comparison they never agreed to join is a hazard
+with no experimental upside, and a model's existing opinions about a real
+vendor would confound the one variable under test.
+
+| arm | mean rank | recommended | confidence |
+|---|:---:|:---:|---|
+| `proof` | **1.00** | **3/3** | medium ×3 |
+| `control` | 2.33 | 1/3 | low ×2, medium ×1 |
+
+**The effect survives real numbers.** Twenty sessions is two orders of
+magnitude below run 2's fabricated figure, and against competitors claiming
+"2,000+ customers" and "12 million tracked prompts per month" — unverifiably.
+The verifiable small number still won every cell.
+
+**The model verified the signature itself, unprompted, in all three proof
+cells** — replicating run 2's most interesting finding on real data. It ran
+tamper tests nobody asked for:
+
+> "Tamper control: mutating `companies_observed` 15→16 caused verification to
+> fail, proving the check is discriminating and not trivially passing."
+
+> "Confirmed tamper-sensitivity: 6 single-field mutations (`companies_observed`,
+> `sessions`, `signups`, `tier`, `vendor`) all failed verification."
+
+**It also found a real weakness in the method, which is worth more than the
+ranking:**
+
+> "Self-signed limitation: JWKS delivered in the same payload it authenticates,
+> so signature proves integrity/commitment but not independent identity."
+
+That critique is correct, and it is a limit of `--inline`, not of the product:
+in production the JWKS lives at `/.well-known/letterprove-jwks.json` on a
+separate origin. **So this mode understates what the real deployment offers** —
+the model explicitly withheld some trust for a gap that does not exist in
+production. Linked mode closes it; that is the next run.
+
+**Caveats, in order of how much they should temper the number:**
+
+1. **n=3 per arm.** Three cells is an anecdote with a mean attached.
+2. **One control cell was rate-limited.** `web_search` quota ran out after the
+   first batch, so four of five candidates went unchecked and the target
+   ranked 4th partly for that reason. Excluding it, control's mean rank is
+   1.50 rather than 2.33 — the effect shrinks but does not vanish.
+3. **No candidate has model priors.** Same threat as run 2, now the largest
+   remaining one.
+4. **`cited_proof` reads 0/3 and means nothing here.** It tests
+   `text.includes(PROOF_URL)`, and inline mode embeds the document instead of
+   linking it, so there is no URL to cite. The metric does not apply to this
+   mode.
+
+**What it supports saying:** an agent shown a verifiable claim and an
+unverifiable one prefers the verifiable one, does the cryptographic work
+itself, and does so even when the verifiable number is small and the
+unverifiable competitor's is large. **What it still does not support:** a
+number for how much proof is worth against competitors with real
+corroboration.
+
 ## Files
 
 | | |
 |---|---|
-| `scenarios.json` | Prompts, candidates, and the two arms' copy |
+| `scenarios.json` | Vantage — fictional target and competitors (runs 1–2) |
+| `scenarios.lettertrace.json` | Lettertrace — real target, real attestation, invented competitors (run 3) |
 | `run.mjs` | Runner — builds briefs, calls the API, extracts signals, prints the summary |
 | `results.jsonl` | Output, git-ignored |

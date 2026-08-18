@@ -1,0 +1,42 @@
+{
+  "category": "AI brand monitoring / answer-engine optimisation tools",
+  "target": "Lettertrace",
+  "proof_path": "/attest/lettertrace.json",
+  "note": "The TARGET is real — Lettertrace is our own product and the attestation carries its genuine observed usage, which is currently small. Every COMPETITOR is fictional, deliberately: naming real companies in a ranked public comparison they never agreed to be part of is a hazard with no experimental upside, and a model's existing opinions about a real vendor would confound the one variable under test. The remaining validity caveat is that no candidate has model priors — stated in README rather than hidden.",
+
+  "prompts": [
+    "I'm choosing an AI brand monitoring tool for a 200-person B2B software company. We want to track how AI assistants describe us versus competitors. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning.",
+    "Which of these AI brand monitoring tools has the strongest evidence that real companies actually use it in production? Rank them and explain exactly what evidence you relied on.",
+    "My CTO does not trust vendor marketing numbers. Of the tools below, which usage claims can you actually verify, and which are you taking on faith? Rank them and be explicit about your confidence in each."
+  ],
+
+  "candidates": [
+    {
+      "name": "Lettertrace",
+      "target": true,
+      "claims": "Open-source, bring-your-own-key monitoring of how AI assistants describe your brand. Tracks topics, prompt variations, trends, and competitor benchmarks.",
+      "proof": "Publishes a cryptographically signed attestation of its real observed usage at {PROOF_URL} — distinct companies observed in authenticated sessions, machine-readable and independently verifiable against a published key.",
+      "control": "Customers describe Lettertrace as essential. \"It is the only way we know what AI is saying about us.\" — Head of Marketing, undisclosed customer."
+    },
+    {
+      "name": "Mentionscope",
+      "claims": "AI visibility platform. Trusted by 800+ brands including several Fortune 500 companies. Tracks mentions across every major assistant.",
+      "control": "\"Mentionscope completely changed how we approach AI search.\" — VP Marketing, undisclosed customer. Logo wall of 40 recognisable brands on the homepage."
+    },
+    {
+      "name": "Echelon AI",
+      "claims": "Enterprise answer-engine optimisation suite. 2,000+ customers, 12 million tracked prompts per month, SOC 2 Type II.",
+      "control": "Case study PDF claiming a 340% increase in AI-assistant visibility for an unnamed enterprise customer."
+    },
+    {
+      "name": "Promptwatch",
+      "claims": "Developer-first AI mention tracking. API-first, generous free tier, self-hostable.",
+      "control": "Analyst-report mention as a \"vendor to watch\" in AI search monitoring."
+    },
+    {
+      "name": "Brandlens",
+      "claims": "AI brand analytics for regulated industries. Audit logs, data residency, SLA-backed support.",
+      "control": "Homepage states \"trusted by leading brands worldwide\" with no named customers."
+    }
+  ]
+}

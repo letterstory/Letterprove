@@ -52,6 +52,7 @@ const AGGREGATE = has("aggregate");
 const STIMULUS_BASE = flag("stimulus-base", "http://localhost:9100");
 const ROUNDS = Number(flag("rounds", "1"));
 const ARMS = (flag("arms", "proof,control") ?? "").split(",");
+const SCENARIO_FILE = flag("scenario", join(HERE, "scenarios.json"));
 const OUT = flag("out", join(HERE, "results.jsonl"));
 const DRY = has("dry-run");
 
@@ -72,6 +73,9 @@ if (!BASE) {
                       (default http://localhost:9100). Must be running with a
                       real LETTERPROVE_SIGNING_KEY, or the development warning
                       confounds the run exactly as it did the first time.
+    --scenario <path> scenario file (default experiments/aeo/scenarios.json).
+                      scenarios.lettertrace.json targets our own product with
+                      its real attestation and invented competitors.
     --model <id>      default claude-opus-5
     --rounds <n>      repeats per prompt/arm (default 1). Model output varies;
                       one round per cell is an anecdote, not a measurement.
@@ -82,7 +86,7 @@ if (!BASE) {
 	process.exit(2);
 }
 
-const scenario = JSON.parse(readFileSync(join(HERE, "scenarios.json"), "utf8"));
+const scenario = JSON.parse(readFileSync(SCENARIO_FILE, "utf8"));
 const PROOF_URL = `${BASE.replace(/\/$/, "")}${scenario.proof_path}`;
 
 // -------------------------------------------------------------- the request
@@ -173,6 +177,21 @@ async function loadStimulus() {
 		);
 		if (!aggregate) {
 			console.error(`\n  ✗ no aggregate attestation published for ${scenario.target}\n`);
+			process.exit(1);
+		}
+		// The dev-key check above only inspects the per-customer document. The
+		// aggregate is fetched from a different endpoint and would sail past
+		// it — reintroducing exactly the confound that invalidated run 1, where
+		// the model read "dev-insecure-…" and correctly refused to credit the
+		// proof.
+		const devKey = JSON.stringify(aggregate).match(/dev-insecure-[0-9a-f]+/);
+		if (devKey) {
+			console.error(
+				`\n  ✗ the aggregate is signed with ${devKey[0]} — it announces itself as not\n` +
+					`    evidence, which is what invalidated run 1.\n\n` +
+					`    Point --stimulus-base at a deployment signing with a real key:\n` +
+					`      --stimulus-base https://app.letterprove.com\n`
+			);
 			process.exit(1);
 		}
 		if (aggregate.companies_observed === 0) {
@@ -378,7 +397,13 @@ function signals(blocks) {
 
 const stimulus = INLINE ? await loadStimulus() : null;
 if (stimulus) {
-	console.log(`\n  inline mode — ${stimulus.count} attestations embedded from ${STIMULUS_BASE}`);
+	console.log(
+		AGGREGATE
+			// One attestation covering N companies, not N attestations — the
+			// distinction matters when reading the results back.
+			? `\n  inline mode — 1 aggregate attestation over ${stimulus.count} companies, from ${STIMULUS_BASE}`
+			: `\n  inline mode — ${stimulus.count} attestations embedded from ${STIMULUS_BASE}`
+	);
 }
 
 const cells = [];

@@ -12,5 +12,5 @@ tsconfig.tsbuildinfo
 coverage
 
 # experiment output
-experiments/**/results.jsonl
+experiments/**/results*.jsonl
 .env*
