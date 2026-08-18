@@ -9,10 +9,10 @@ set -euo pipefail
 MIGRATIONS_DIR="supabase/migrations"
 [ -d "$MIGRATIONS_DIR" ] || exit 0
 
-if ! git fetch --depth=1 origin main -q 2>/dev/null; then
-	echo "check-migration-order: couldn't fetch origin/main, skipping"
+fetch_err=$(git fetch --depth=1 origin main -q 2>&1) || {
+	echo "check-migration-order: couldn't fetch origin/main, skipping ($fetch_err)"
 	exit 0
-fi
+}
 
 main_files=$(git ls-tree -r --name-only origin/main -- "$MIGRATIONS_DIR" 2>/dev/null | xargs -n1 basename 2>/dev/null || true)
 local_files=$(ls "$MIGRATIONS_DIR" 2>/dev/null || true)
