@@ -49,7 +49,7 @@ evaluating agent can check rather than take on faith.
 | **03** | **Attest** | We publish dynamic, machine-readable customer success reports that agents can fetch, verify, and quote. Always current, always signed. |
 
 ```html
-<script src="https://cdn.letterprove.com/attest.js" data-key="lp_live_9f2c…"></script>
+<script src="https://app.letterprove.com/attest.js" data-key="lp_live_9f2c…"></script>
 ```
 
 ---

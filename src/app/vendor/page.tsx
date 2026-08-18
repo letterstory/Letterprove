@@ -1,5 +1,7 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { currentVendor } from "@/lib/vendors/session";
+import { installSnippet, originFromHeaders } from "@/lib/vendors/install";
 import { SignOutButton } from "./SignOutButton";
 import { StatusIndicator } from "./StatusIndicator";
 
@@ -14,7 +16,11 @@ export default async function VendorHome() {
 	// users out of /vendor, but this page doesn't assume that held.
 	if (!vendor) redirect("/vendor/login");
 
-	const snippet = `<script src="https://cdn.letterprove.com/attest.js" data-key="${vendor.key}"></script>`;
+	// Built from the origin serving this page, never a written-down host: this
+	// snippet used to point at cdn.letterprove.com, which has never existed.
+	// See lib/vendors/install.ts.
+	const origin = originFromHeaders(await headers()) ?? "https://app.letterprove.com";
+	const snippet = installSnippet(origin, vendor.key);
 
 	return (
 		<main style={{ maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
