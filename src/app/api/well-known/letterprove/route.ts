@@ -28,7 +28,18 @@ export async function GET(request: Request) {
 			mode: signingMode(),
 		},
 		verifier: methodUrl("scripts/verify.mjs"),
-		proofs: (await vendorSlugs()).map((slug) => ({ vendor: slug, url: `${origin}/proofs/${slug}` })),
+		// The aggregate is listed beside the report on purpose. It is the only
+		// claim most vendors will ever publish — naming a customer needs that
+		// customer's consent — so an agent that only found `report` would miss
+		// the one thing that is actually signed for them. `chain` is what makes
+		// it auditable rather than merely signed: walk it and you can prove no
+		// earlier figure was restated.
+		proofs: (await vendorSlugs()).map((slug) => ({
+			vendor: slug,
+			url: `${origin}/proofs/${slug}`,
+			aggregate: `${origin}/attest/${slug}.json`,
+			aggregate_chain: `${origin}/attest/${slug}/chain`,
+		})),
 		// Said in the machine-readable surface, not only on the page: anything
 		// signed by the development key is a demonstration, not evidence.
 		...(isDemonstration() && {

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentVendor } from "@/lib/vendors/session";
 import { vendorProof } from "@/lib/attest/proofs";
+import { vendorAggregate } from "@/lib/attest/aggregate";
 
 // Reads the signed-in vendor's session and live proof data per request;
 // without this it gets prerendered once at build time with no vendor, same
@@ -19,12 +20,49 @@ export default async function VendorProofPage() {
 	const vendor = await currentVendor();
 	if (!vendor) redirect("/vendor/login");
 
-	const proof = await vendorProof(vendor.slug);
+	const [proof, aggregate] = await Promise.all([
+		vendorProof(vendor.slug),
+		vendorAggregate(vendor.slug),
+	]);
 
 	return (
 		<main style={{ maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
 			<a href="/vendor">&larr; Dashboard</a>
 			<h1>Your proof page</h1>
+
+			{/* Shown FIRST and outside the !proof branch, because for most vendors
+			    it is the only thing they publish. Naming a customer needs that
+			    customer's consent, so a vendor with none still has a live, signed
+			    claim here — and previously this page told them "No proof published
+			    yet" while that claim was being served publicly. */}
+			<h2 style={{ marginTop: "2rem" }}>Published now</h2>
+			{!aggregate ? (
+				<p>Nothing is being published — no usage has been observed yet.</p>
+			) : aggregate.companies_observed === 0 ? (
+				<p>
+					No companies observed yet, so the attestation publishes a tier-0 claim. It fills in on
+					its own once the script sees authenticated sessions.
+				</p>
+			) : (
+				<>
+					<p>
+						<strong>{aggregate.companies_observed}</strong> companies observed,{" "}
+						<strong>{aggregate.sessions}</strong> sessions over the last{" "}
+						{aggregate.window_days} days — signed, tier {aggregate.tier}. This names nobody, so
+						it needs no one&rsquo;s consent.
+					</p>
+					<ul>
+						<li>
+							<a href={`/attest/${vendor.slug}.json`}>/attest/{vendor.slug}.json</a> — the signed
+							attestation
+						</li>
+						<li>
+							<a href={`/attest/${vendor.slug}/chain`}>/attest/{vendor.slug}/chain</a> — its full
+							history, each entry chained to the one before it
+						</li>
+					</ul>
+				</>
+			)}
 
 			{!proof ? (
 				<p>No proof published yet.</p>

@@ -119,6 +119,23 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							</a>
 							<span className="ml-3 text-fog">— this report</span>
 						</li>
+						{/* Listed before the per-customer endpoints, not after. Naming a
+						    customer needs that customer's consent, so for most vendors
+						    these two are the ONLY signed things on offer — and the
+						    per-customer links below may not render at all. An agent that
+						    stopped at the report would miss what is actually attested. */}
+						<li>
+							<a className="text-mint hover:underline" href={`/attest/${slug}.json`}>
+								GET /attest/{slug}.json
+							</a>
+							<span className="ml-3 text-fog">— the vendor-level attestation</span>
+						</li>
+						<li>
+							<a className="text-mint hover:underline" href={`/attest/${slug}/chain`}>
+								GET /attest/{slug}/chain
+							</a>
+							<span className="ml-3 text-fog">— its full signed history</span>
+						</li>
 						{/* Only linkable when someone has consented to be named. With no
 						    named customer these rendered `/attest/vantage/undefined.json`
 						    — a broken link on the one surface whose entire job is being
