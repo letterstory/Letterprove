@@ -1,0 +1,75 @@
+name: Publish CLI
+
+# Publishes @letterstory/letterprove-cli to npm when a new version lands on main.
+#
+# The merge to main IS the human approval gate (main is protected; every merge
+# is approved), so a merged version bump auto-publishes — no one runs `npm
+# publish` by hand. The version guard makes it idempotent: a merge that doesn't
+# change cli/package.json's version is a no-op, and a re-run never double-
+# publishes a version already on npm.
+#
+# Auth is npm Trusted Publishing (OIDC) — NOT a stored token. GitHub Actions
+# mints a short-lived OIDC token per run (id-token: write) that npm exchanges
+# for publish rights, so there is no NPM_TOKEN secret to create, leak, or let
+# expire. Provenance attestations are generated automatically.
+#
+# One-time setup on npmjs.com (manual — needs an npm account with publish
+# rights on the @letterstory org, e.g. Steve's): create the @letterstory/letterprove-cli
+# package (first publish must be manual or via `npm publish` locally with 2FA,
+# since Trusted Publisher config can only be added to a package that already
+# exists), then on that package → Settings → Trusted Publisher → add GitHub
+# Actions with
+#   Organization or user: letterstory
+#   Repository:           Letterprove
+#   Workflow filename:    publish-cli.yml   (filename only, no path)
+#   Environment:          (leave blank)
+#   Allowed actions:      npm publish
+#
+# workflow_dispatch publishes the current cli/package.json version on demand —
+# useful to backfill the first release once the package exists on npm.
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "cli/**"
+    workflow_dispatch:
+
+# id-token: write is what lets the job request the OIDC token npm verifies.
+permissions:
+    contents: read
+    id-token: write
+
+# Serialize publishes; never cancel one mid-flight.
+concurrency:
+    group: publish-cli
+    cancel-in-progress: false
+
+jobs:
+    publish:
+        name: Publish to npm
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version-file: ".nvmrc"
+                  registry-url: "https://registry.npmjs.org"
+
+            - name: Ensure npm supports trusted publishing
+              run: npm install -g npm@11.6.2
+
+            - name: Publish @letterstory/letterprove-cli if the version is new
+              working-directory: cli
+              run: |
+                  name="$(node -p "require('./package.json').name")"
+                  local="$(node -p "require('./package.json').version")"
+                  published="$(npm view "$name" version 2>/dev/null || echo none)"
+                  echo "name=$name local=$local published=$published"
+                  if [ "$local" = "$published" ]; then
+                      echo "$name@$local is already on npm — nothing to publish."
+                      exit 0
+                  fi
+                  npm publish
+                  echo "Published $name@$local"
