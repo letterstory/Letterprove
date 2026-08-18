@@ -1,7 +1,5 @@
-import Link from "next/link";
 import { getUser } from "@/lib/auth/server";
 import { collectionHealth, type CollectionStatus, type VendorHealth } from "@/lib/staff/health";
-import { SignOutButton } from "./SignOutButton";
 
 // getUser() reads the request's cookies, so this route can't be statically
 // prerendered — without this, Next bakes one build-time (signed-out) render
@@ -43,31 +41,14 @@ function ago(hours: number | null): string {
 }
 
 export default async function StaffHome() {
-	const user = await getUser();
-	if (!user) return null;
+	if (!(await getUser())) return null;
 
 	const health = await collectionHealth();
 
 	return (
-		<main className="mx-auto max-w-5xl px-6 py-12">
-			<div className="flex items-baseline justify-between gap-4">
-				<div>
-					<p className="font-mono text-sm text-mint">staff</p>
-					<h1 className="mt-2 text-3xl font-semibold tracking-tight">Collection</h1>
-				</div>
-				<div className="flex items-center gap-4 text-sm">
-					<Link href="/staff/vendors" className="text-fog hover:text-mint">
-						vendors
-					</Link>
-					<Link href="/staff/tiers" className="text-fog hover:text-mint">
-						tiers
-					</Link>
-					<SignOutButton />
-				</div>
-			</div>
-			<p className="mt-3 max-w-2xl text-fog">
-				Whether anything is arriving, per vendor. Signed in as {user.email}.
-			</p>
+		<>
+			<h1 className="text-3xl font-semibold tracking-tight">Collection</h1>
+			<p className="mt-3 max-w-2xl text-fog">Whether anything is arriving, per vendor.</p>
 
 			{health === null ? (
 				/* Not the same as "nothing arrived" — one of those is an outage. */
@@ -105,7 +86,7 @@ export default async function StaffHome() {
 				prompt to look, not a verdict — a quiet weekend produces the same number as a broken
 				install, which is why the automated check probes the script URL instead of the volume.
 			</p>
-		</main>
+		</>
 	);
 }
 
@@ -113,8 +94,12 @@ function Row({ v }: { v: VendorHealth }) {
 	return (
 		<tr>
 			<td className="px-4 py-3">
+				{/* An explicit separator, not a margin. These are two text nodes and
+				    the gap is meaning, not decoration — without CSS they otherwise
+				    run together as "lettertracelettertrace.com". */}
 				<span className="font-medium">{v.vendor}</span>
-				<span className="ml-2 font-mono text-xs text-fog">{v.domain}</span>
+				<span className="text-fog"> · </span>
+				<span className="font-mono text-xs text-fog">{v.domain}</span>
 			</td>
 			<td className="px-4 py-3 text-fog">{ago(v.hoursSinceLastEvent)}</td>
 			<td className="px-4 py-3 tabular-nums">{v.events24h || <span className="text-fog/40">—</span>}</td>

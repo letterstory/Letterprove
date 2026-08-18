@@ -19,27 +19,13 @@ export const dynamic = "force-dynamic";
  * assuming it held.
  */
 export default async function StaffVendorsPage() {
-	const user = await getUser();
-	if (!user) return null;
+	if (!(await getUser())) return null;
 
 	const roster = await vendorRoster();
 
 	return (
-		<main className="mx-auto max-w-5xl px-6 py-12">
-			<div className="flex items-baseline justify-between gap-4">
-				<div>
-					<p className="font-mono text-sm text-mint">staff</p>
-					<h1 className="mt-2 text-3xl font-semibold tracking-tight">Vendors</h1>
-				</div>
-				<nav className="flex items-center gap-4 text-sm text-fog">
-					<Link href="/staff" className="hover:text-mint">
-						collection
-					</Link>
-					<Link href="/staff/tiers" className="hover:text-mint">
-						tiers
-					</Link>
-				</nav>
-			</div>
+		<>
+			<h1 className="text-3xl font-semibold tracking-tight">Vendors</h1>
 			<p className="mt-3 max-w-2xl text-fog">
 				Who is on the platform, who owns each account, and what each one publishes today.
 			</p>
@@ -58,7 +44,7 @@ export default async function StaffVendorsPage() {
 					))}
 				</div>
 			)}
-		</main>
+		</>
 	);
 }
 

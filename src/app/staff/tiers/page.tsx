@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getUser } from "@/lib/auth/server";
 import { vendorSlugs } from "@/lib/attest/proofs";
 import { tierReport, type DomainTierRow, type TierStatus, type VendorTierReport } from "@/lib/tiers/report";
@@ -38,8 +37,7 @@ function statusTone(status: TierStatus): string {
 }
 
 export default async function StaffTiersPage() {
-	const user = await getUser();
-	if (!user) return null;
+	if (!(await getUser())) return null;
 
 	const slugs = await vendorSlugs();
 	const reports = await Promise.all(slugs.map((s) => tierReport(s)));
@@ -47,21 +45,8 @@ export default async function StaffTiersPage() {
 	const vendors = reports.filter((r): r is VendorTierReport => r !== null);
 
 	return (
-		<main className="mx-auto max-w-5xl px-6 py-12">
-			<div className="flex items-baseline justify-between gap-4">
-				<div>
-					<p className="font-mono text-sm text-mint">staff</p>
-					<h1 className="mt-2 text-3xl font-semibold tracking-tight">Verification tiers</h1>
-				</div>
-				<nav className="flex items-center gap-4 text-sm text-fog">
-					<Link href="/staff" className="hover:text-mint">
-						collection
-					</Link>
-					<Link href="/staff/vendors" className="hover:text-mint">
-						vendors
-					</Link>
-				</nav>
-			</div>
+		<>
+			<h1 className="text-3xl font-semibold tracking-tight">Verification tiers</h1>
 			<p className="mt-3 max-w-2xl text-fog">
 				What has been observed, who is on record, and the one thing stopping each domain from
 				being a published claim.
@@ -80,7 +65,7 @@ export default async function StaffTiersPage() {
 			{vendors.map((v) => (
 				<VendorSection key={v.vendor} report={v} />
 			))}
-		</main>
+		</>
 	);
 }
 
