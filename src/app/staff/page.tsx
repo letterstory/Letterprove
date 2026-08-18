@@ -56,8 +56,11 @@ export default async function StaffHome() {
 					<h1 className="mt-2 text-3xl font-semibold tracking-tight">Collection</h1>
 				</div>
 				<div className="flex items-center gap-4 text-sm">
+					<Link href="/staff/vendors" className="text-fog hover:text-mint">
+						vendors
+					</Link>
 					<Link href="/staff/tiers" className="text-fog hover:text-mint">
-						verification tiers →
+						tiers
 					</Link>
 					<SignOutButton />
 				</div>

@@ -53,9 +53,14 @@ export default async function StaffTiersPage() {
 					<p className="font-mono text-sm text-mint">staff</p>
 					<h1 className="mt-2 text-3xl font-semibold tracking-tight">Verification tiers</h1>
 				</div>
-				<Link href="/staff" className="text-sm text-fog hover:text-mint">
-					← staff
-				</Link>
+				<nav className="flex items-center gap-4 text-sm text-fog">
+					<Link href="/staff" className="hover:text-mint">
+						collection
+					</Link>
+					<Link href="/staff/vendors" className="hover:text-mint">
+						vendors
+					</Link>
+				</nav>
 			</div>
 			<p className="mt-3 max-w-2xl text-fog">
 				What has been observed, who is on record, and the one thing stopping each domain from
