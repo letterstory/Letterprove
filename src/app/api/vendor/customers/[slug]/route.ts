@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/auth/server";
 import { currentVendor } from "@/lib/vendors/session";
-import { FEATURES, type Consent } from "@/lib/fixtures/vendors";
-import { classifyDomain } from "@/lib/identity/domains";
-
-const FEATURE_SET: readonly string[] = FEATURES;
+import { updateCustomer, deleteCustomer } from "@/lib/vendors/customers";
 
 /**
  * PATCH /api/vendor/customers/{slug} — update name/domain/since/consent/features
@@ -16,6 +13,9 @@ const FEATURE_SET: readonly string[] = FEATURES;
  * ownership check. A match on zero rows reads as 404 — that covers both "no
  * such customer" and "not yours", which is the correct conflation (see
  * feedback_rls_trust_pattern): nothing here distinguishes the two on purpose.
+ *
+ * Validation and the domain gate live in src/lib/vendors/customers.ts, shared
+ * with the bearer-token tool dispatcher (src/lib/tools/registry.ts).
  */
 export async function PATCH(request: Request, { params }: { params: Promise<{ slug: string }> }) {
 	const vendor = await currentVendor();
@@ -25,46 +25,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ sl
 	const body = await request.json().catch(() => null);
 	if (!body) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-	const update: Record<string, unknown> = {};
-	if (typeof body.name === "string" && body.name.trim()) update.name = body.name.trim();
-	if (typeof body.domain === "string" && body.domain.trim()) {
-		// Same refusal as creation. Gating only the create path would leave the
-		// rule trivially bypassable — make a customer on a real domain, then
-		// edit it to gmail.com.
-		const domain = body.domain.trim();
-		const { kind, reason } = classifyDomain(domain);
-		if (kind !== "company") {
-			return NextResponse.json({ error: `"${domain}" cannot be a customer`, reason, kind }, { status: 422 });
-		}
-		update.domain = domain;
-	}
-	if (typeof body.since === "string" && body.since.trim()) update.since = body.since.trim();
-	if (body.consent === "named" || body.consent === "anonymous") {
-		update.consent = body.consent as Consent;
-	}
-	if (Array.isArray(body.features)) {
-		update.features = body.features.filter(
-			(f: unknown): f is string => typeof f === "string" && FEATURE_SET.includes(f),
-		);
-	}
-
-	if (Object.keys(update).length === 0) {
-		return NextResponse.json({ error: "no updatable fields provided" }, { status: 400 });
-	}
-
 	const supabase = await createServerSupabaseClient();
-	const { data, error } = await supabase
-		.from("vendor_customers")
-		.update(update)
-		.eq("vendor_id", vendor.id)
-		.eq("slug", slug)
-		.select("id, slug, name, domain, since, tier, verified, features, consent")
-		.maybeSingle();
+	const result = await updateCustomer(supabase, vendor.id, slug, body);
+	if (!result.ok) return NextResponse.json(result.body, { status: result.status });
 
-	if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-	if (!data) return NextResponse.json({ error: "not_found" }, { status: 404 });
-
-	return NextResponse.json({ customer: data });
+	return NextResponse.json({ customer: result.data });
 }
 
 /** DELETE /api/vendor/customers/{slug} — same trust-RLS, 404-on-empty pattern as PATCH. */
@@ -74,16 +39,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
 	const { slug } = await params;
 	const supabase = await createServerSupabaseClient();
-	const { data, error } = await supabase
-		.from("vendor_customers")
-		.delete()
-		.eq("vendor_id", vendor.id)
-		.eq("slug", slug)
-		.select("id")
-		.maybeSingle();
-
-	if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-	if (!data) return NextResponse.json({ error: "not_found" }, { status: 404 });
+	const result = await deleteCustomer(supabase, vendor.id, slug);
+	if (!result.ok) return NextResponse.json(result.body, { status: result.status });
 
 	return new NextResponse(null, { status: 204 });
 }

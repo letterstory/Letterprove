@@ -147,4 +147,18 @@ export class LetterproveClient {
 	async whoami() {
 		return this.request("/api/v1/whoami");
 	}
+
+	/** What this session's token is allowed to call — GET /api/v1/tools. */
+	async listTools() {
+		return this.request("/api/v1/tools");
+	}
+
+	/**
+	 * Every vendor-automation command (customers, status, ...) goes through
+	 * this one call — POST /api/v1/tools/{name} — rather than each command
+	 * hand-rolling its own endpoint and error shape.
+	 */
+	async callTool(name, args = {}) {
+		return this.request(`/api/v1/tools/${name}`, { method: "POST", body: args });
+	}
 }
