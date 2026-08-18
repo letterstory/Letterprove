@@ -1,21 +1,17 @@
 set -euo pipefail
-# Runs as part of `prebuild` on EVERY Vercel build (preview and production) --
-# unlike db-push.sh's apply step, which only runs on production. Ordering
-# errors were previously invisible until the post-merge production build,
-# where they hard-fail the deploy (Letterprove #40/#41: a migration
-# timestamped before one merged from a sibling PR broke prod because no
-# preview build ever ran db-push to catch it first). This gives PR authors
-# and reviewers the same signal before merge instead of after.
+# Runs in CI (.github/workflows/migration-order.yml) on every PR that touches
+# supabase/migrations. Vercel's preview build can't do this check itself --
+# its build sandbox has no git remotes configured and no token to fetch with
+# (confirmed live: `git remote -v` is empty in that environment) -- so the
+# only prior signal was the production build itself, after merge (Letterprove
+# #40/#41: a migration timestamped before one merged from a sibling PR broke
+# prod because nothing checked ordering before then).
 MIGRATIONS_DIR="supabase/migrations"
 [ -d "$MIGRATIONS_DIR" ] || exit 0
 
-echo "check-migration-order: DEBUG remotes: $(git remote -v 2>&1 | tr '\n' ';')"
-echo "check-migration-order: DEBUG shallow: $(git rev-parse --is-shallow-repository 2>&1)"
-echo "check-migration-order: DEBUG VERCEL_GIT_*: $(env | grep -c '^VERCEL_GIT_')"
-
 fetch_err=$(git fetch --depth=1 origin main -q 2>&1) || {
-	echo "check-migration-order: couldn't fetch origin/main, skipping ($fetch_err)"
-	exit 0
+	echo "check-migration-order: couldn't fetch origin/main ($fetch_err)"
+	exit 1
 }
 
 main_files=$(git ls-tree -r --name-only origin/main -- "$MIGRATIONS_DIR" 2>/dev/null | xargs -n1 basename 2>/dev/null || true)
