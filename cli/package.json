@@ -1,0 +1,21 @@
+{
+	"name": "@letterprove/cli",
+	"version": "0.0.1",
+	"description": "Install, configure, and manage Letterprove from your terminal.",
+	"type": "module",
+	"license": "MIT",
+	"author": "The Letter Company",
+	"bin": {
+		"letterprove": "bin/letterprove.mjs"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"files": [
+		"bin",
+		"lib"
+	],
+	"publishConfig": {
+		"access": "public"
+	}
+}
