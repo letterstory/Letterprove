@@ -35,6 +35,9 @@ Usage:
   letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
   letterprove customers delete <slug>
 
+  letterprove staff tiers [--vendor <slug>]     Per-domain tier status (every vendor, or one)
+  letterprove staff record <vendor> <domain>    Turn an observed domain into a customer record
+
   letterprove help
 
 Flags:
@@ -103,6 +106,8 @@ export async function run(argv, { io = defaultIo() } = {}) {
 				return await cmdStatus({ config, flags, io });
 			case "customers":
 				return await cmdCustomers({ config, flags, io, positional: positional.slice(1) });
+			case "staff":
+				return await cmdStaff({ config, flags, io, positional: positional.slice(1) });
 			case undefined:
 			case "help":
 				io.log(USAGE);
@@ -275,6 +280,45 @@ async function cmdCustomers({ config, flags, io, positional }) {
 		}
 		default:
 			io.error(`Unknown "customers" subcommand: ${sub ?? "(none)"}\n`);
+			io.error(USAGE);
+			return 1;
+	}
+}
+
+async function cmdStaff({ config, flags, io, positional }) {
+	const [sub, ...rest] = positional;
+	const client = newClient(config);
+
+	switch (sub) {
+		case "tiers": {
+			const args = typeof flags.vendor === "string" ? { vendor: flags.vendor } : {};
+			const result = await client.callTool("tier_report", args);
+			if (flags.json) {
+				io.log(JSON.stringify(result, null, 2));
+				return 0;
+			}
+			for (const report of result.vendors ?? []) {
+				io.log(
+					`${report.vendor}  observed=${report.observed} attributable=${report.attributable} unpublished=${report.unpublishedEvidence} published=${report.published}`,
+				);
+				for (const row of report.rows) {
+					io.log(`  ${row.domain.padEnd(28)} ${row.status.padEnd(20)} ${row.detail}`);
+				}
+			}
+			if (result.unreadable?.length) {
+				io.log(`(unreadable: ${result.unreadable.join(", ")})`);
+			}
+			return 0;
+		}
+		case "record": {
+			const [vendor, domain] = rest;
+			if (!vendor || !domain) throw new CliError("Usage: letterprove staff record <vendor> <domain>");
+			const { customer } = await client.callTool("record_customer", { vendor, domain });
+			io.log(flags.json ? JSON.stringify(customer, null, 2) : `Recorded ${customer.slug} (${customer.domain}) for ${vendor}.`);
+			return 0;
+		}
+		default:
+			io.error(`Unknown "staff" subcommand: ${sub ?? "(none)"}\n`);
 			io.error(USAGE);
 			return 1;
 	}

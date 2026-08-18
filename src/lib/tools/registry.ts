@@ -10,6 +10,9 @@ import {
 	type UpdateCustomerInput,
 } from "@/lib/vendors/customers";
 import { getVendorStatus } from "@/lib/vendors/status";
+import { promoteDomain, type PromoteFailure } from "@/lib/staff/promote";
+import { tierReport } from "@/lib/tiers/report";
+import { vendorSlugs } from "@/lib/attest/proofs";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -44,15 +47,40 @@ function asRecord(args: unknown): Record<string, unknown> {
 	return args && typeof args === "object" ? (args as Record<string, unknown>) : {};
 }
 
+// vendorId is only null for a staff-only grant (see OAuthPrincipal), which
+// never carries a vendor:* capability — dispatchTool's capability gate means a
+// vendor:* tool handler is unreachable with a null vendorId in practice. This
+// turns that invariant into a typed, checked value instead of a `!` assertion,
+// so a future bug in the gate fails as a clean 500 rather than a bad query.
+function requireVendorId(principal: OAuthPrincipal): string | ToolResult {
+	if (principal.vendorId) return principal.vendorId;
+	return { ok: false, status: 500, body: { error: "vendor_scope_without_vendor" } };
+}
+
+// Mirrors src/app/api/staff/customers/route.ts's STATUS map — kept in this
+// file too rather than exported/shared, since a route and a tool handler
+// diverging on one status code is a smaller risk than the coupling of a
+// shared import for a five-entry constant.
+const PROMOTE_STATUS: Record<PromoteFailure, number> = {
+	vendor_unreadable: 404,
+	not_attributable: 422,
+	not_observed: 422,
+	already_exists: 409,
+	storage_unavailable: 503,
+	write_failed: 500,
+};
+
 export const TOOLS: ToolDef[] = [
 	{
 		name: "list_customers",
 		description: "List every customer recorded for the caller's vendor.",
 		capability: "vendor:read",
 		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const result = await listCustomers(db, principal.vendorId);
+			const result = await listCustomers(db, vendorId);
 			if (!result.ok) return result;
 			return { ok: true, body: { customers: result.data } };
 		},
@@ -62,9 +90,11 @@ export const TOOLS: ToolDef[] = [
 		description: "Create a customer for the caller's vendor. Args: slug, name, domain, since, consent?.",
 		capability: "vendor:write",
 		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const result = await createCustomer(db, principal.vendorId, asRecord(args) as CreateCustomerInput);
+			const result = await createCustomer(db, vendorId, asRecord(args) as CreateCustomerInput);
 			if (!result.ok) return result;
 			return { ok: true, status: 201, body: { customer: result.data } };
 		},
@@ -78,9 +108,11 @@ export const TOOLS: ToolDef[] = [
 			const slug = typeof record.slug === "string" ? record.slug : "";
 			if (!slug) return { ok: false, status: 400, body: { error: "slug is required" } };
 
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const result = await updateCustomer(db, principal.vendorId, slug, record as UpdateCustomerInput);
+			const result = await updateCustomer(db, vendorId, slug, record as UpdateCustomerInput);
 			if (!result.ok) return result;
 			return { ok: true, body: { customer: result.data } };
 		},
@@ -94,9 +126,11 @@ export const TOOLS: ToolDef[] = [
 			const slug = typeof record.slug === "string" ? record.slug : "";
 			if (!slug) return { ok: false, status: 400, body: { error: "slug is required" } };
 
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const result = await deleteCustomer(db, principal.vendorId, slug);
+			const result = await deleteCustomer(db, vendorId, slug);
 			if (!result.ok) return result;
 			// Not 204: this seam always answers with a JSON body (see
 			// LetterproveClient.request(), which calls res.json() on every
@@ -109,9 +143,55 @@ export const TOOLS: ToolDef[] = [
 		description: "Whether the caller's vendor has received any events in the last 24h, and how many.",
 		capability: "vendor:read",
 		handler: async (_args, principal) => {
-			const result = await getVendorStatus(principal.vendorId);
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const result = await getVendorStatus(vendorId);
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
 			return { ok: true, body: { receiving: result.receiving, count: result.count } };
+		},
+	},
+	{
+		name: "record_customer",
+		description:
+			"Turn a domain observed for a vendor into a customer record (anonymous, tier-1 ceiling). Args: vendor (slug), domain.",
+		capability: "staff:write",
+		// Staff tools act across vendors by slug, not principal.vendorId — a
+		// staff-only grant has no vendor of its own (see requireVendorId).
+		handler: async (args) => {
+			const record = asRecord(args);
+			const vendor = typeof record.vendor === "string" ? record.vendor.trim() : "";
+			const domain = typeof record.domain === "string" ? record.domain.trim() : "";
+			if (!vendor || !domain) return { ok: false, status: 400, body: { error: "vendor and domain are required" } };
+
+			const result = await promoteDomain(vendor, domain);
+			if (!result.ok) {
+				return { ok: false, status: PROMOTE_STATUS[result.reason], body: { error: result.reason, detail: result.detail } };
+			}
+			return { ok: true, status: 201, body: { customer: result } };
+		},
+	},
+	{
+		name: "tier_report",
+		description:
+			"Per-domain tier status for a vendor: what's observed, what's a customer record, what's actually published. Args: vendor (slug, optional — every vendor if omitted).",
+		capability: "staff:read",
+		handler: async (args) => {
+			const record = asRecord(args);
+			const requested = typeof record.vendor === "string" && record.vendor.trim() ? record.vendor.trim() : null;
+			const slugs = requested ? [requested] : await vendorSlugs();
+
+			const reports = await Promise.all(slugs.map((slug) => tierReport(slug)));
+			const unreadable = slugs.filter((_, i) => reports[i] === null);
+			const vendors = reports.filter((r) => r !== null);
+
+			return {
+				ok: true,
+				body: {
+					generated_at: new Date().toISOString(),
+					vendors,
+					...(unreadable.length > 0 && { unreadable }),
+				},
+			};
 		},
 	},
 ];
