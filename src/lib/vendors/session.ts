@@ -45,3 +45,26 @@ export async function currentVendor(): Promise<CurrentVendor | null> {
 
 	return data?.vendors ?? null;
 }
+
+/**
+ * Every vendor the signed-in user belongs to, not just the first.
+ *
+ * currentVendor() above answers "which vendor is this dashboard for" and takes
+ * limit 1 because the dashboard has one. The OAuth consent screen has to ask
+ * instead of assume: a CLI token is minted for exactly one vendor, so if the
+ * user belongs to several, picking silently would hand the terminal a
+ * credential for a vendor they did not choose. Same RLS-scoped select, no
+ * manual ownership check (see feedback_rls_trust_pattern).
+ */
+export async function vendorMemberships(): Promise<{ id: string; name: string }[]> {
+	const user = await getUser();
+	if (!user) return [];
+
+	const supabase = await createServerSupabaseClient();
+	const { data } = await supabase
+		.from("vendor_members")
+		.select("vendors(id, name)")
+		.returns<{ vendors: { id: string; name: string } | null }[]>();
+
+	return (data ?? []).flatMap((row) => (row.vendors ? [row.vendors] : []));
+}
