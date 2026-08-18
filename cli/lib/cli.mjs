@@ -1,9 +1,12 @@
 // Command dispatch for the Letterprove CLI.
 //
-// Step 1 of the CLI is auth and nothing else: login, logout, whoami, config.
-// The install/configure/manage surface comes later, over the same Bearer token
-// this file obtains — the point of shipping auth alone first is that the
-// credential path is proven before anything is built on top of it.
+// Step 1 of the CLI was auth and nothing else: login, logout, whoami, config.
+// This is step 2 — customers and status — built over the same Bearer token,
+// routed through the one server-side seam (POST /api/v1/tools/{name}, see
+// src/lib/tools/registry.ts) rather than each command growing its own
+// endpoint. Vendor creation is not here: it is a one-time, cookie-session
+// signup step a token cannot bootstrap itself (see the registry's own
+// comment on why it has no tool entry).
 
 import {
 	LetterproveClient,
@@ -19,15 +22,27 @@ import { browserLogin, revokeToken } from "./oauth.mjs";
 const USAGE = `letterprove — Letterprove from your terminal
 
 Usage:
-  letterprove login [--url <url>]   Sign in through your browser
-  letterprove logout               Revoke this machine's session and clear it
-  letterprove whoami               Show which vendor the saved session acts for
-  letterprove config               Show the resolved configuration
+  letterprove login [--url <url>]              Sign in through your browser
+  letterprove logout                           Revoke this machine's session and clear it
+  letterprove whoami                           Show which vendor the saved session acts for
+  letterprove config                           Show the resolved configuration
+  letterprove tools                            List what this session's token can call
+
+  letterprove status                           Is this vendor receiving events right now?
+
+  letterprove customers list                   List this vendor's customers
+  letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
+  letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
+  letterprove customers delete <slug>
+
   letterprove help
 
+Flags:
+  --json                                       Machine-readable output, where supported
+
 Environment:
-  LETTERPROVE_API_URL              Override the API base URL
-  LETTERPROVE_CONFIG_HOME          Override the home dir holding .letterprove/
+  LETTERPROVE_API_URL                          Override the API base URL
+  LETTERPROVE_CONFIG_HOME                      Override the home dir holding .letterprove/
 `;
 
 function parseArgs(argv) {
@@ -48,7 +63,7 @@ function parseArgs(argv) {
 			positional.push(arg);
 		}
 	}
-	return { command: positional[0], flags };
+	return { command: positional[0], positional, flags };
 }
 
 function defaultIo() {
@@ -58,8 +73,17 @@ function defaultIo() {
 	};
 }
 
+/** A saved-but-unverified session should still let a silent refresh persist. */
+function newClient(config) {
+	return new LetterproveClient({
+		url: config.url,
+		oauth: config.oauth,
+		onTokensRefreshed: (oauth) => writeConfigFile({ ...readConfigFile(), oauth }),
+	});
+}
+
 export async function run(argv, { io = defaultIo() } = {}) {
-	const { command, flags } = parseArgs(argv);
+	const { command, positional, flags } = parseArgs(argv);
 	const url = typeof flags.url === "string" ? flags.url : undefined;
 	const config = resolveConfig({ url });
 
@@ -73,6 +97,12 @@ export async function run(argv, { io = defaultIo() } = {}) {
 				return await cmdWhoami({ config, flags, io });
 			case "config":
 				return cmdConfig({ config, flags, io });
+			case "tools":
+				return await cmdTools({ config, flags, io });
+			case "status":
+				return await cmdStatus({ config, flags, io });
+			case "customers":
+				return await cmdCustomers({ config, flags, io, positional: positional.slice(1) });
 			case undefined:
 			case "help":
 				io.log(USAGE);
@@ -135,13 +165,7 @@ async function cmdLogout({ config, io }) {
 }
 
 async function cmdWhoami({ config, flags, io }) {
-	const client = new LetterproveClient({
-		url: config.url,
-		oauth: config.oauth,
-		// Re-read on write so a silent refresh preserves any other keys already in
-		// the file (a pinned url) instead of truncating it to just the tokens.
-		onTokensRefreshed: (oauth) => writeConfigFile({ ...readConfigFile(), oauth }),
-	});
+	const client = newClient(config);
 	const result = await client.whoami();
 
 	if (flags.json) {
@@ -168,4 +192,90 @@ function cmdConfig({ config, flags, io }) {
 		io.log(`config file: ${value.config_file}`);
 	}
 	return 0;
+}
+
+async function cmdTools({ config, flags, io }) {
+	const client = newClient(config);
+	const { tools } = await client.listTools();
+
+	if (flags.json) {
+		io.log(JSON.stringify(tools, null, 2));
+		return 0;
+	}
+	for (const t of tools ?? []) {
+		const mark = t.available ? " " : "x";
+		io.log(`[${mark}] ${t.name.padEnd(20)} ${t.description}`);
+	}
+	return 0;
+}
+
+async function cmdStatus({ config, flags, io }) {
+	const client = newClient(config);
+	const result = await client.callTool("get_status");
+
+	if (flags.json) {
+		io.log(JSON.stringify(result, null, 2));
+		return 0;
+	}
+	io.log(result.receiving ? `receiving events (${result.count} in the last 24h)` : "no events in the last 24h");
+	return 0;
+}
+
+async function cmdCustomers({ config, flags, io, positional }) {
+	const [sub, ...rest] = positional;
+	const client = newClient(config);
+
+	switch (sub) {
+		case "list": {
+			const { customers } = await client.callTool("list_customers");
+			if (flags.json) {
+				io.log(JSON.stringify(customers, null, 2));
+				return 0;
+			}
+			if (!customers?.length) {
+				io.log("(no customers)");
+				return 0;
+			}
+			for (const c of customers) {
+				io.log(`${c.slug.padEnd(24)} ${c.name.padEnd(24)} ${c.domain}`);
+			}
+			return 0;
+		}
+		case "create": {
+			const args = {
+				slug: flags.slug,
+				name: flags.name,
+				domain: flags.domain,
+				since: flags.since,
+				...(flags.consent ? { consent: flags.consent } : {}),
+			};
+			const { customer } = await client.callTool("create_customer", args);
+			io.log(flags.json ? JSON.stringify(customer, null, 2) : `Created ${customer.slug}.`);
+			return 0;
+		}
+		case "update": {
+			const slug = rest[0];
+			if (!slug) throw new CliError("Usage: letterprove customers update <slug> [--name ...] [--domain ...] ...");
+			const args = { slug };
+			if (typeof flags.name === "string") args.name = flags.name;
+			if (typeof flags.domain === "string") args.domain = flags.domain;
+			if (typeof flags.since === "string") args.since = flags.since;
+			if (typeof flags.consent === "string") args.consent = flags.consent;
+			if (typeof flags.features === "string") args.features = flags.features.split(",").map((f) => f.trim());
+			const { customer } = await client.callTool("update_customer", args);
+			io.log(flags.json ? JSON.stringify(customer, null, 2) : `Updated ${customer.slug}.`);
+			return 0;
+		}
+		case "delete": {
+			const slug = rest[0];
+			if (!slug) throw new CliError("Usage: letterprove customers delete <slug>");
+			await client.callTool("delete_customer", { slug });
+			io.log(`Deleted ${slug}.`);
+			return 0;
+		}
+		default:
+			io.error(`Unknown "customers" subcommand: ${sub ?? "(none)"}\n`);
+			io.error(USAGE);
+			return 1;
+	}
 }
