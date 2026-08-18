@@ -9,6 +9,10 @@ set -euo pipefail
 MIGRATIONS_DIR="supabase/migrations"
 [ -d "$MIGRATIONS_DIR" ] || exit 0
 
+echo "check-migration-order: DEBUG remotes: $(git remote -v 2>&1 | tr '\n' ';')"
+echo "check-migration-order: DEBUG shallow: $(git rev-parse --is-shallow-repository 2>&1)"
+echo "check-migration-order: DEBUG VERCEL_GIT_*: $(env | grep -c '^VERCEL_GIT_')"
+
 fetch_err=$(git fetch --depth=1 origin main -q 2>&1) || {
 	echo "check-migration-order: couldn't fetch origin/main, skipping ($fetch_err)"
 	exit 0
