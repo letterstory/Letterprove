@@ -11,6 +11,12 @@ import { NextResponse } from "next/server";
 export function proofJson(body: unknown, ttl = 3600): NextResponse {
 	return NextResponse.json(body, {
 		headers: {
+			// JSON is UTF-8 by definition (RFC 8259) so this is redundant to a
+			// correct client — but a signature is over UTF-8 BYTES, and a consumer
+			// that guesses latin-1 recomputes different bytes and fails to verify
+			// a perfectly good document. Non-ASCII is unavoidable here: customer
+			// names are company names. Being explicit costs nothing.
+			"content-type": "application/json; charset=utf-8",
 			"cache-control": `public, max-age=${ttl}, stale-while-revalidate=86400`,
 			"access-control-allow-origin": "*",
 			// Diagnostics across a distributed install: one curl answers "is this
@@ -52,6 +58,7 @@ export function collectorResponse(accepted: boolean): NextResponse {
 export function configJson(body: unknown, maxAge = 300): NextResponse {
 	return NextResponse.json(body, {
 		headers: {
+			"content-type": "application/json; charset=utf-8",
 			"cache-control": `public, max-age=${maxAge}, stale-while-revalidate=3600`,
 			"access-control-allow-origin": "*",
 			"x-letterprove": "on",
