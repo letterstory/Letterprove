@@ -53,16 +53,37 @@ export type PromoteResult =
 	| { ok: false; reason: PromoteFailure; detail: string };
 
 /**
- * `acme-corp.example` → `acme-corp`. The registrable label only: the TLD is
- * noise in a slug, and two customers differing only by TLD is a naming problem
- * a human should resolve rather than something to silently disambiguate.
+ * Two-part public suffixes, listed rather than guessed.
+ *
+ * The obvious heuristic — "drop two labels when both are short" — is wrong for
+ * a subdomain in front of a short registrable label: `mail.ibm.com` reduces to
+ * `mail`, not `ibm`. Short is not the same as suffix.
+ *
+ * This is deliberately NOT the full Public Suffix List. That is a large,
+ * frequently-changing dependency, and the field it would protect is a slug a
+ * human is expected to review. An unlisted suffix degrades to dropping one
+ * label, which is the same answer the old code gave — never worse. Add entries
+ * as real customer domains show you what is missing.
+ */
+const TWO_PART_SUFFIXES = new Set([
+	"com.au", "net.au", "org.au", "edu.au", "co.uk", "org.uk", "ac.uk", "gov.uk",
+	"co.nz", "co.za", "co.jp", "ne.jp", "or.jp", "co.kr", "co.in", "co.il",
+	"com.br", "com.mx", "com.ar", "com.sg", "com.hk", "com.tw", "com.cn", "com.tr",
+]);
+
+/**
+ * `acme-corp.example` → `acme-corp`, `mail.ibm.com` → `ibm`. The registrable
+ * label only: the TLD is noise in a slug, and two customers differing only by
+ * TLD is a naming problem a human should resolve rather than something to
+ * silently disambiguate.
  */
 export function slugForDomain(domain: string): string {
 	const host = domain.trim().toLowerCase().replace(/\.+$/, "");
 	const labels = host.split(".").filter(Boolean);
-	// Drop the TLD, and a second-level public suffix like `.com.mx` / `.co.uk`.
-	if (labels.length > 2 && labels.at(-2)!.length <= 3 && labels.at(-1)!.length <= 3) labels.splice(-2);
+
+	if (labels.length > 2 && TWO_PART_SUFFIXES.has(labels.slice(-2).join("."))) labels.splice(-2);
 	else if (labels.length > 1) labels.pop();
+
 	return (labels.at(-1) ?? host).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 

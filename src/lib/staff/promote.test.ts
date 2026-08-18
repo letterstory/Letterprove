@@ -42,6 +42,24 @@ describe("slugForDomain", () => {
 	it("handles a second-level suffix", () => {
 		expect(slugForDomain("am.com.mx")).toBe("am");
 		expect(slugForDomain("yourlocaltermiteandpestcontrol.com.au")).toBe("yourlocaltermiteandpestcontrol");
+		expect(slugForDomain("news.bbc.co.uk")).toBe("bbc");
+	});
+
+	/**
+	 * The reason the suffixes are listed instead of guessed by length. "Both
+	 * last labels are short" also describes `ibm.com`, so the heuristic version
+	 * of this reduced `mail.ibm.com` to "mail" — a subdomain, not the company.
+	 */
+	it("keeps the registrable label when it is short and carries a subdomain", () => {
+		expect(slugForDomain("mail.ibm.com")).toBe("ibm");
+		expect(slugForDomain("mail.company.com")).toBe("company");
+		expect(slugForDomain("go.hp.com")).toBe("hp");
+	});
+
+	// An unlisted suffix drops one label — the same answer as before, never worse.
+	it("degrades to dropping the tld for a suffix it does not know", () => {
+		expect(slugForDomain("acme.co.zz")).toBe("co");
+		expect(slugForDomain("acme.zz")).toBe("acme");
 	});
 
 	it("normalises case and a trailing dot", () => {
