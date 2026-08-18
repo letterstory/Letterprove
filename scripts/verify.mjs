@@ -81,6 +81,46 @@ function hashOf(signed) {
 	return createHash("sha256").update(canonicalize(signed), "utf8").digest("hex");
 }
 
+// ----------------------------------------------------------------- reporting
+
+/**
+ * What the document is a claim ABOUT.
+ *
+ * A per-customer attestation names its customer. The vendor-level aggregate
+ * deliberately does not — it reports `companies_observed`, never "customers",
+ * because counting a company is not the same as claiming it as a customer — so
+ * reading `customer` alone prints "?" for the one claim most vendors publish.
+ */
+function subjectOf(snapshot) {
+	if (snapshot.customer) return snapshot.customer;
+	if (snapshot.kind === "aggregate") return `${snapshot.vendor ?? "?"} (aggregate)`;
+	return "?";
+}
+
+/**
+ * Provenance tiers, restated here from the published description rather than
+ * imported — same reason this file re-implements canonicalisation. A verifier
+ * that took its definitions from the producer could not report a disagreement
+ * between the producer and the spec.
+ *
+ * The tier is the entire provenance claim: a valid signature over a tier-0 body
+ * proves only that the vendor said so. Reporting "verified" without it invites
+ * exactly the reading the tiers exist to prevent.
+ */
+const TIERS = {
+	0: "vendor-asserted",
+	1: "script-observed",
+	2: "infrastructure-bound",
+	3: "third-party confirmed",
+	4: "customer counter-signed",
+};
+
+function tierOf(snapshot) {
+	const t = snapshot.tier;
+	if (!Number.isInteger(t)) return "no tier stated";
+	return `tier ${t} — ${TIERS[t] ?? "unrecognised"}`;
+}
+
 // --------------------------------------------------------------------- main
 
 const args = process.argv.slice(2);
@@ -103,7 +143,7 @@ let failures = 0;
 let expectedPrev = GENESIS;
 
 for (const snapshot of chain) {
-	const label = `${snapshot.customer ?? "?"} @ ${snapshot.observed_through ?? "?"}`;
+	const label = `${subjectOf(snapshot)} @ ${snapshot.observed_through ?? "?"}`;
 	const sigError = verifyOne(snapshot, jwks);
 
 	// A single attestation is a window into a chain, not the whole of one, so its
@@ -121,8 +161,23 @@ for (const snapshot of chain) {
 }
 
 const head = chain.at(-1);
-if (head?.method) console.log(`\n  method: ${head.method}`);
-if (jwks.keys.some((k) => String(k.kid).startsWith("dev-insecure"))) {
+
+// A signature only ever proves the body was not altered. WHAT the body claims
+// about how it was observed is the tier, and a verifier that prints "verified"
+// without it lets a tier-0 vendor assertion read exactly like a tier-4
+// counter-signed one. Taken from the head: it is the current claim, and tiers
+// can legitimately rise over a chain's life as evidence improves.
+if (head) console.log(`\n  provenance: ${tierOf(head)}`);
+
+if (head?.method) console.log(`  method: ${head.method}`);
+
+// Warn on the key that actually SIGNED these documents, not on whatever the
+// endpoint happens to publish. A JWKS carrying both a dev and a production key
+// — which is exactly what a rotation looks like — would otherwise stamp
+// "demonstration" on genuine countersigned proof. That mislabeling shipped
+// once already, on 2026-08-13, in the service itself.
+const signingKids = new Set(chain.map((s) => String(s.key_id)));
+if ([...signingKids].some((kid) => kid.startsWith("dev-insecure"))) {
 	console.log("\n  ⚠ signed with a development key — this is a demonstration, not evidence");
 }
 

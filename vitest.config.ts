@@ -11,6 +11,10 @@ export default defineConfig({
 	css: { postcss: { plugins: [] } },
 	test: {
 		environment: "node",
-		include: ["src/**/*.test.ts"],
+		// scripts/ is included for verify.mjs — the artifact a sceptical third
+		// party is invited to run. It lived outside the suite entirely, which
+		// meant the one thing we ask outsiders to trust was the one thing
+		// nothing checked.
+		include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
 	},
 });
