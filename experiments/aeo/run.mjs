@@ -48,9 +48,11 @@ const has = (name) => argv.includes(`--${name}`);
 const BASE = flag("base");
 const MODEL = flag("model", "claude-opus-5");
 const INLINE = has("inline");
+const AGGREGATE = has("aggregate");
 const STIMULUS_BASE = flag("stimulus-base", "http://localhost:9100");
 const ROUNDS = Number(flag("rounds", "1"));
 const ARMS = (flag("arms", "proof,control") ?? "").split(",");
+const SCENARIO_FILE = flag("scenario", join(HERE, "scenarios.json"));
 const OUT = flag("out", join(HERE, "results.jsonl"));
 const DRY = has("dry-run");
 
@@ -61,6 +63,9 @@ if (!BASE) {
     --base <url>      REQUIRED. Must be publicly reachable — the web_fetch tool
                       runs on Anthropic's servers, so localhost cannot be read.
                       In --inline mode it is only used to label the run.
+    --aggregate       Use the vendor-level attestation ("N companies observed")
+                      instead of named-customer ones. The only proof that
+                      exists before customers consent to be named.
     --inline          Embed the attestations in the prompt instead of linking
                       to them. See "Run 2" in the README — this is the mode
                       that actually tests whether proof changes the decision.
@@ -68,6 +73,9 @@ if (!BASE) {
                       (default http://localhost:9100). Must be running with a
                       real LETTERPROVE_SIGNING_KEY, or the development warning
                       confounds the run exactly as it did the first time.
+    --scenario <path> scenario file (default experiments/aeo/scenarios.json).
+                      scenarios.lettertrace.json targets our own product with
+                      its real attestation and invented competitors.
     --model <id>      default claude-opus-5
     --rounds <n>      repeats per prompt/arm (default 1). Model output varies;
                       one round per cell is an anecdote, not a measurement.
@@ -78,7 +86,7 @@ if (!BASE) {
 	process.exit(2);
 }
 
-const scenario = JSON.parse(readFileSync(join(HERE, "scenarios.json"), "utf8"));
+const scenario = JSON.parse(readFileSync(SCENARIO_FILE, "utf8"));
 const PROOF_URL = `${BASE.replace(/\/$/, "")}${scenario.proof_path}`;
 
 // -------------------------------------------------------------- the request
@@ -163,7 +171,67 @@ async function loadStimulus() {
 		process.exit(1);
 	}
 
+	if (AGGREGATE) {
+		const aggregate = await fetch(`${root}/attest/${scenario.target.toLowerCase()}.json`).then((r) =>
+			r.ok ? r.json() : null
+		);
+		if (!aggregate) {
+			console.error(`\n  ✗ no aggregate attestation published for ${scenario.target}\n`);
+			process.exit(1);
+		}
+		// The dev-key check above only inspects the per-customer document. The
+		// aggregate is fetched from a different endpoint and would sail past
+		// it — reintroducing exactly the confound that invalidated run 1, where
+		// the model read "dev-insecure-…" and correctly refused to credit the
+		// proof.
+		const devKey = JSON.stringify(aggregate).match(/dev-insecure-[0-9a-f]+/);
+		if (devKey) {
+			console.error(
+				`\n  ✗ the aggregate is signed with ${devKey[0]} — it announces itself as not\n` +
+					`    evidence, which is what invalidated run 1.\n\n` +
+					`    Point --stimulus-base at a deployment signing with a real key:\n` +
+					`      --stimulus-base https://app.letterprove.com\n`
+			);
+			process.exit(1);
+		}
+		if (aggregate.companies_observed === 0) {
+			console.error(
+				`\n  ✗ ${scenario.target}'s aggregate reports 0 companies observed — the proof arm\n` +
+					`    would carry no evidence, and both arms would say the same nothing.\n`
+			);
+			process.exit(1);
+		}
+		return aggregateStimulus(aggregate, jwks);
+	}
+
 	const attestations = doc.customers.filter((c) => c.verified);
+
+	// An empty proof arm is the most dangerous state this experiment can be in,
+	// and the one it is now in by default. Since the evidence gate landed, a
+	// customer publishes `verified: true` only with observations behind it, and
+	// since the consent gate landed it is only listed at all if it agreed to be
+	// named. Both are correct, and together they mean this filter returns
+	// nothing for every vendor we currently have.
+	//
+	// Run it anyway and both arms embed an empty list, the model sees identical
+	// stimuli, and the result reads "proof made no difference" — when what
+	// actually happened is that no proof was supplied. A null result caused by
+	// a wiring fault is worse than no result, because it looks like a finding.
+	//
+	// Same posture as the dev-key check above: refuse rather than measure
+	// something that cannot mean what it appears to.
+	if (attestations.length === 0) {
+		console.error(
+			`\n  ✗ ${scenario.target} publishes no named, verified customer attestations, so the\n` +
+				`    proof arm would be empty and both arms identical.\n\n` +
+				`    This is not a bug in the gates — it is them working. A customer is only\n` +
+				`    verified with observations behind it, and only named with consent.\n\n` +
+				`    Use --aggregate to test the vendor-level claim instead, which is the\n` +
+				`    proof that exists today and needs nobody's consent.\n`
+		);
+		process.exit(1);
+	}
+
 	const proof = [
 		"Publishes signed, machine-readable attestations of real customer usage.",
 		"The attestations and the publisher's public keys:",
@@ -185,6 +253,43 @@ async function loadStimulus() {
 	].join("\n");
 
 	return { proof, control, count: attestations.length };
+}
+
+/**
+ * The vendor-level arm.
+ *
+ * Named-customer attestations are the strongest claim the product can make and
+ * currently the one it cannot make: naming a company needs that company's
+ * consent, and nobody has been asked. The aggregate is what exists — *"N
+ * companies observed, M sessions"* — signed, verifiable, and naming nobody.
+ *
+ * It is a WEAKER stimulus than run 2's, and deliberately so. That run embedded
+ * a fictional vendor's fabricated 4,182 sessions; this one embeds real
+ * observations, which are far smaller. If verifiability only wins when the
+ * numbers are impressive, this is the run that finds out — and that is worth
+ * knowing before the pitch rests on it.
+ */
+function aggregateStimulus(aggregate, jwks) {
+	const proof = [
+		"Publishes a signed, machine-readable attestation of real product usage.",
+		"The attestation and the publisher's public keys:",
+		"```json",
+		JSON.stringify({ attestation: aggregate, jwks }, null, 2),
+		"```",
+		"The signature is Ed25519 over the canonical (sorted-key, whitespace-free) JSON of every field except `signature`.",
+		"`companies_observed` counts distinct company domains seen in authenticated sessions; it is not a customer count, and `domains_excluded` reports the observed domains that could not be attributed to a company.",
+	].join("\n");
+
+	// Identical figures, asserted rather than attested. Verifiability is the
+	// only variable.
+	const control = [
+		"Reports the following usage on its website:",
+		`  ${aggregate.companies_observed} companies observed using the product, ` +
+			`${aggregate.sessions} sessions in the last ${aggregate.window_days} days.`,
+		"These figures are published by the vendor and are not independently verifiable.",
+	].join("\n");
+
+	return { proof, control, count: aggregate.companies_observed };
 }
 
 // ------------------------------------------------------------------ the run
@@ -292,7 +397,13 @@ function signals(blocks) {
 
 const stimulus = INLINE ? await loadStimulus() : null;
 if (stimulus) {
-	console.log(`\n  inline mode — ${stimulus.count} attestations embedded from ${STIMULUS_BASE}`);
+	console.log(
+		AGGREGATE
+			// One attestation covering N companies, not N attestations — the
+			// distinction matters when reading the results back.
+			? `\n  inline mode — 1 aggregate attestation over ${stimulus.count} companies, from ${STIMULUS_BASE}`
+			: `\n  inline mode — ${stimulus.count} attestations embedded from ${STIMULUS_BASE}`
+	);
 }
 
 const cells = [];
