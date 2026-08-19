@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isStaffUser } from "@/lib/staff/allowlist";
 
 /**
  * NOTE THE FILE NAME. Next 16 deprecated `middleware.ts` in favour of
@@ -82,6 +83,22 @@ async function staffAuthGate(request: NextRequest) {
 		loginUrl.search = "";
 		loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
 		return NextResponse.redirect(loginUrl);
+	}
+
+	// Having a session is not being staff. Staff and vendors share one user
+	// pool, and signup is open, so without this any registered account could
+	// read every vendor's withheld customer domains. The vendor gate below has
+	// always demanded a membership row for the same reason.
+	//
+	// Sent to the login page rather than redirected onward or looped: it is
+	// exempted above, so it can state plainly that this account lacks access
+	// without bouncing a signed-in user back and forth.
+	if (!isStaffUser(user.id)) {
+		const deniedUrl = request.nextUrl.clone();
+		deniedUrl.pathname = "/staff/login";
+		deniedUrl.search = "";
+		deniedUrl.searchParams.set("denied", "1");
+		return NextResponse.redirect(deniedUrl);
 	}
 
 	return response;

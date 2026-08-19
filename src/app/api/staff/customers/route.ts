@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUser } from "@/lib/auth/server";
+import { isStaffUser } from "@/lib/staff/allowlist";
 import { promoteDomain, type PromoteFailure } from "@/lib/staff/promote";
 
 /**
@@ -30,7 +31,11 @@ const STATUS: Record<PromoteFailure, number> = {
 };
 
 export async function POST(request: Request) {
-	if (!(await getUser())) return NextResponse.json({ error: "not_found" }, { status: 404 });
+	// A session is not staff. This endpoint WRITES customer records for any
+	// vendor, and /api/staff/* sits outside proxy.ts's matcher, so the allowlist
+	// is checked right here rather than assumed to have happened upstream.
+	const user = await getUser();
+	if (!isStaffUser(user?.id)) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
 	const body = await request.json().catch(() => null);
 	const vendor = typeof body?.vendor === "string" ? body.vendor.trim() : "";

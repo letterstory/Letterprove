@@ -68,8 +68,9 @@ describe("proxy — /staff auth gate", () => {
 		expect(res?.status).not.toBe(307);
 	});
 
-	it("passes an authenticated request through to /staff", async () => {
+	it("passes an allowlisted staff request through to /staff", async () => {
 		setAuthEnv(true);
+		process.env.STAFF_USER_IDS = "u1";
 		mockSupabaseUser({ id: "u1", email: "staff@letterbrace.com" });
 		const { proxy: p } = await freshProxy();
 
@@ -77,6 +78,41 @@ describe("proxy — /staff auth gate", () => {
 
 		expect(res?.status).not.toBe(307);
 		expect(res?.status).not.toBe(503);
+	});
+
+	/**
+	 * The hole this gate closes. /staff/login offered self-service signup and
+	 * Supabase had mailer_autoconfirm on, so ANY session was one form submission
+	 * away — and a session alone used to satisfy this wall, exposing every
+	 * vendor's withheld customer domains via /staff/tiers.
+	 *
+	 * Redirected to the login page (which is exempted above, so no loop) rather
+	 * than passed through.
+	 */
+	it("turns away a signed-in user who is not on the staff allowlist", async () => {
+		setAuthEnv(true);
+		process.env.STAFF_USER_IDS = "u1";
+		mockSupabaseUser({ id: "self-registered", email: "anyone@example.com" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/staff/tiers"));
+
+		expect(res?.status).toBe(307);
+		expect(res?.headers.get("location")).toContain("/staff/login");
+		expect(res?.headers.get("location")).toContain("denied=1");
+	});
+
+	// Fails closed: a deployment that has not named its staff has none.
+	it("turns everyone away when no staff allowlist is configured", async () => {
+		setAuthEnv(true);
+		delete process.env.STAFF_USER_IDS;
+		mockSupabaseUser({ id: "u1", email: "staff@letterbrace.com" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/staff"));
+
+		expect(res?.status).toBe(307);
+		expect(res?.headers.get("location")).toContain("denied=1");
 	});
 
 	it("never touches the public collection/proof API", async () => {

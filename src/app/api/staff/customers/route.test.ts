@@ -18,6 +18,7 @@ function post(body: unknown) {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	process.env.STAFF_USER_IDS = "staff-1";
 	vi.mocked(getUser).mockResolvedValue({ id: "staff-1" } as never);
 });
 
@@ -71,5 +72,32 @@ describe("POST /api/staff/customers", () => {
 		expect(res.status).toBe(status);
 		// The detail is what the operator reads — it must survive the round trip.
 		expect(await res.json()).toMatchObject({ error: reason, detail: "because" });
+	});
+});
+
+/**
+ * The gate that did not exist until 2026-08-18. /staff/login offered
+ * self-service signup, Supabase had signup open with mailer_autoconfirm on, and
+ * the wall only asked whether a session existed — so anyone on the internet
+ * could register and reach this endpoint, which WRITES customer records for any
+ * vendor. A session is not staff.
+ */
+describe("staff allowlist", () => {
+	it("is invisible to a signed-in user who is not staff, and writes nothing", async () => {
+		process.env.STAFF_USER_IDS = "someone-else";
+		vi.mocked(getUser).mockResolvedValue({ id: "self-registered" } as never);
+
+		const res = await post({ vendor: "lettertrace", domain: "juvare.com" });
+		expect(res.status).toBe(404);
+		expect(promoteDomain).not.toHaveBeenCalled();
+	});
+
+	// Fails closed: an unconfigured deployment has no staff, rather than all of them.
+	it("admits nobody when no allowlist is configured", async () => {
+		delete process.env.STAFF_USER_IDS;
+		vi.mocked(getUser).mockResolvedValue({ id: "staff-1" } as never);
+
+		expect((await post({ vendor: "lettertrace", domain: "juvare.com" })).status).toBe(404);
+		expect(promoteDomain).not.toHaveBeenCalled();
 	});
 });
