@@ -9,6 +9,8 @@ import {
 } from "@/lib/oauth/core";
 import { oauthErrorPage, oauthRedirectError } from "@/lib/oauth/responses";
 import { oauthRateLimit, oauthClientIp } from "@/lib/oauth/ratelimit";
+import { parseScope, formatScope, isVendorScoped } from "@/lib/oauth/scopes";
+import { vendorMemberships } from "@/lib/vendors/session";
 
 /**
  * Handles the plain HTML form POST from /oauth/consent.
@@ -52,31 +54,51 @@ export async function POST(request: NextRequest) {
 		);
 	}
 
-	// Membership is checked through the session-bound client, so RLS scopes the
-	// select to auth.uid() — a row coming back really does mean "this user
-	// belongs to this vendor", not "this vendor exists".
-	const { data: membership } = await supabase
-		.from("vendor_members")
-		.select("vendor_id")
-		.eq("vendor_id", vendorId)
-		.maybeSingle();
-	if (!membership) return oauthErrorPage("Not authorized", "You are not a member of the selected vendor.");
+	// Mirrors the narrowing in /oauth/consent: the CLI's default login requests
+	// every scope its client is registered for, which today always includes
+	// vendor:* — recomputed here independently of the form (never trusting a
+	// client-submitted vendor_id or its absence as a security boundary). A user
+	// with no vendor memberships silently drops vendor:* from the grant instead
+	// of erroring; a user who does have memberships must submit one they
+	// actually belong to.
+	const requested = parseScope(pending.scope);
+	const vendors = await vendorMemberships();
+	let resolvedVendorId: string | null = null;
+	let grantScope = requested;
 
-	const consumed = await consumePendingForConsent(nonce, user.id, vendorId);
+	if (vendors.length > 0 && requested.some(isVendorScoped)) {
+		const { data: membership } = await supabase
+			.from("vendor_members")
+			.select("vendor_id")
+			.eq("vendor_id", vendorId)
+			.maybeSingle();
+		if (!membership) return oauthErrorPage("Not authorized", "You are not a member of the selected vendor.");
+		resolvedVendorId = vendorId;
+	} else {
+		grantScope = requested.filter((s) => !isVendorScoped(s));
+	}
+
+	if (grantScope.length === 0) {
+		return oauthErrorPage("Not authorized", "You don't have access to any of the requested permissions.");
+	}
+
+	const consumed = await consumePendingForConsent(nonce, user.id, resolvedVendorId);
 	if (!consumed) return oauthErrorPage("Invalid request", "This login request has already been used or has expired.");
+
+	const grantedScope = formatScope(grantScope);
 
 	try {
 		const authorization = await upsertAuthorization({
 			clientId: consumed.client_id,
-			vendorId,
+			vendorId: resolvedVendorId,
 			userId: user.id,
-			scope: consumed.scope,
+			scope: grantedScope,
 		});
 		const code = await issueAuthorizationCode({
 			authorizationId: authorization.id,
 			redirectUri: consumed.redirect_uri,
 			codeChallenge: consumed.code_challenge,
-			scope: consumed.scope,
+			scope: grantedScope,
 		});
 
 		const redirectUrl = new URL(consumed.redirect_uri);

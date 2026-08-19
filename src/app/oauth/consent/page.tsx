@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth/server";
 import { claimPendingForUser, getClient } from "@/lib/oauth/core";
 import { vendorMemberships } from "@/lib/vendors/session";
-import { parseScope, scopeDescription, OFFLINE_ACCESS } from "@/lib/oauth/scopes";
+import { parseScope, scopeDescription, isVendorScoped, OFFLINE_ACCESS } from "@/lib/oauth/scopes";
 
 // Reads the session and a live pending-request row per request; prerendering
 // this once at build time would render someone else's login (same bug already
@@ -52,8 +52,22 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
 		return <Notice title="Unknown application" message="This application is no longer registered." />;
 	}
 
+	// offline_access is plumbing, not a permission a person can meaningfully
+	// consent to — it is described in the footer instead of listed as a grant.
+	const requested = parseScope(claimed.scope).filter((s) => s !== OFFLINE_ACCESS);
+
+	// The CLI's default login asks for every scope its client is registered
+	// for (see /api/oauth/authorize), which today always includes vendor:* —
+	// so "requested vendor:*" says nothing about whether THIS user can
+	// actually exercise it. A user with no vendor memberships isn't blocked;
+	// vendor:* is silently dropped from what gets shown and granted, the same
+	// way an unsupported scope is dropped in resolveGrantableScope. Only when
+	// nothing is left to grant is there truly nothing to authorize.
 	const vendors = await vendorMemberships();
-	if (vendors.length === 0) {
+	const scopes = vendors.length > 0 ? requested : requested.filter((s) => !isVendorScoped(s));
+	const needsVendor = vendors.length > 0 && scopes.some(isVendorScoped);
+
+	if (scopes.length === 0) {
 		return (
 			<Notice
 				title="No vendor account yet"
@@ -61,10 +75,6 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
 			/>
 		);
 	}
-
-	// offline_access is plumbing, not a permission a person can meaningfully
-	// consent to — it is described in the footer instead of listed as a grant.
-	const scopes = parseScope(claimed.scope).filter((s) => s !== OFFLINE_ACCESS);
 
 	return (
 		<main style={{ maxWidth: 420, margin: "4rem auto", padding: "0 1rem" }}>
@@ -89,7 +99,9 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
 			>
 				<input type="hidden" name="nonce" value={nonce} />
 
-				{vendors.length === 1 ? (
+				{!needsVendor ? (
+					<p style={{ color: "#666" }}>This is a staff action and is not tied to any vendor.</p>
+				) : vendors.length === 1 ? (
 					<>
 						<input type="hidden" name="vendor_id" value={vendors[0].id} />
 						<p>

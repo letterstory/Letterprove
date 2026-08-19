@@ -57,7 +57,16 @@ letterprove customers list                   List this vendor's customers
 letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
 letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
 letterprove customers delete <slug>
+
+letterprove staff tiers [--vendor <slug>]     Per-domain tier status (every vendor, or one)
+letterprove staff record <vendor> <domain>    Turn an observed domain into a customer record
 ```
+
+`staff` commands need `staff:read`/`staff:write` capability, which any signed-in staff
+account gets — not something a vendor's own credentials carry. `letterprove login` already
+requests every capability the CLI client is registered for, so a staff member logs in the
+same way a vendor does; the consent screen shows only what your account is actually
+eligible for.
 
 Pass `--json` to any read command for machine-readable output.
 

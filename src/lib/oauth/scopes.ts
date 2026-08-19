@@ -7,14 +7,23 @@
  * The point of landing it now is that the *mechanism* below is what stays
  * fixed while this list grows.
  */
-export const capabilityValues = ["vendor:read", "vendor:write"] as const;
+export const capabilityValues = ["vendor:read", "vendor:write", "staff:read", "staff:write"] as const;
 
 export type Capability = (typeof capabilityValues)[number];
 
 const CAPABILITY_DESCRIPTIONS: Record<Capability, string> = {
 	"vendor:read": "Read your vendor profile, customers, and proofs.",
 	"vendor:write": "Change your vendor profile, customers, and consent settings.",
+	"staff:read": "Read tier reports and any vendor's customer records.",
+	"staff:write": "Record customers and promote domains on any vendor's behalf.",
 };
+
+// True for a capability that acts on the caller's own vendor rather than
+// staff-wide — used by the consent page to decide whether a vendor selection
+// step is even relevant to what's being granted.
+export function isVendorScoped(capability: string): boolean {
+	return capability.startsWith("vendor:");
+}
 
 // offline_access is an OAuth convention, not a capability anyone checks — it
 // only controls whether the token exchange also mints a refresh token. Every

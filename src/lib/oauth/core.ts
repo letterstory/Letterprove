@@ -167,12 +167,13 @@ export async function claimPendingForUser(nonce: string, userId: string): Promis
 /**
  * Single-use consumption at the consent POST. `vendorId` is whatever the
  * caller resolved the user's vendor choice to — and the route MUST verify that
- * membership itself before calling this, never trusting a form field.
+ * membership itself before calling this, never trusting a form field. Null
+ * means the granted scope was staff-only and no vendor was ever selected.
  */
 export async function consumePendingForConsent(
 	nonce: string,
 	userId: string,
-	vendorId: string,
+	vendorId: string | null,
 ): Promise<PendingRequest | null> {
 	const { data } = await db()
 		.from("oauth_pending_requests")
@@ -205,7 +206,7 @@ export async function denyPendingRequest(nonce: string, userId: string): Promise
 export type AuthorizationRow = {
 	id: string;
 	client_id: string;
-	vendor_id: string;
+	vendor_id: string | null;
 	user_id: string;
 	scope: string;
 };
@@ -213,7 +214,9 @@ export type AuthorizationRow = {
 /**
  * Re-consenting REPLACES the prior grant's scope rather than unioning with it —
  * the consent screen shows exactly what will be granted, so narrowing on
- * re-consent has to actually narrow.
+ * re-consent has to actually narrow. Doesn't dedupe across logins for a null
+ * vendorId (staff-only grant) — see the migration comment in
+ * 20260818210000_oauth_staff_grants.sql.
  *
  * `updated_at` is set here rather than by a trigger: this schema has no shared
  * `handle_updated_at()` helper, and inventing one for a single table would be a
@@ -221,7 +224,7 @@ export type AuthorizationRow = {
  */
 export async function upsertAuthorization(params: {
 	clientId: string;
-	vendorId: string;
+	vendorId: string | null;
 	userId: string;
 	scope: string;
 }): Promise<AuthorizationRow> {
@@ -275,7 +278,7 @@ export type TokenPair = {
 
 async function mintTokenPair(params: {
 	authorizationId: string;
-	vendorId: string;
+	vendorId: string | null;
 	scope: string;
 	familyId?: string;
 }): Promise<TokenPair> {
@@ -323,7 +326,7 @@ type AuthorizationCodeRow = {
 type AuthorizationLookupRow = {
 	id: string;
 	client_id: string;
-	vendor_id: string;
+	vendor_id: string | null;
 	revoked_at: string | null;
 };
 
@@ -385,7 +388,7 @@ type RefreshTokenRow = {
 	id: string;
 	family_id: string;
 	authorization_id: string;
-	vendor_id: string;
+	vendor_id: string | null;
 	scope: string;
 	used_at: string | null;
 	expires_at: string;
@@ -495,7 +498,7 @@ export async function revokeByToken(token: string): Promise<void> {
 
 export type OAuthPrincipal = {
 	tokenId: string;
-	vendorId: string;
+	vendorId: string | null;
 	userId: string;
 	capabilities: Capability[];
 };
@@ -509,7 +512,7 @@ export async function resolveAccessToken(token: string): Promise<OAuthPrincipal 
 		.eq("token_hash", hashToken(token))
 		.maybeSingle<{
 			id: string;
-			vendor_id: string;
+			vendor_id: string | null;
 			scope: string;
 			expires_at: string;
 			revoked_at: string | null;

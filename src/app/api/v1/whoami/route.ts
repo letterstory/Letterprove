@@ -14,16 +14,22 @@ export async function GET(request: Request) {
 	const auth = await authenticateOAuthRequest(request);
 	if (!auth.success) return auth.response;
 
-	const db = dbClient();
-	if (!db) {
-		return NextResponse.json({ error: "storage_unavailable" }, { status: 503, headers: { "cache-control": "no-store" } });
+	// A staff-only token has no vendor to look up at all.
+	let vendor = null;
+	if (auth.principal.vendorId) {
+		const db = dbClient();
+		if (!db) {
+			return NextResponse.json(
+				{ error: "storage_unavailable" },
+				{ status: 503, headers: { "cache-control": "no-store" } },
+			);
+		}
+		({ data: vendor } = await db
+			.from("vendors")
+			.select("id, slug, name, domain")
+			.eq("id", auth.principal.vendorId)
+			.maybeSingle());
 	}
-
-	const { data: vendor } = await db
-		.from("vendors")
-		.select("id, slug, name, domain")
-		.eq("id", auth.principal.vendorId)
-		.maybeSingle();
 
 	return NextResponse.json(
 		{ vendor, capabilities: auth.principal.capabilities },
