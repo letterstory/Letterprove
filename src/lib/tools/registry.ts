@@ -1,6 +1,7 @@
 import type { OAuthPrincipal } from "@/lib/oauth/core";
 import type { Capability } from "@/lib/oauth/scopes";
 import { dbClient } from "@/lib/db/client";
+import { isStaffUser } from "@/lib/staff/allowlist";
 import {
 	listCustomers,
 	createCustomer,
@@ -210,6 +211,25 @@ export async function dispatchTool(
 	if (!tool) return { kind: "unknown_tool" };
 
 	if (!principal.capabilities.includes(tool.capability)) {
+		return { kind: "denied", capability: tool.capability };
+	}
+
+	/**
+	 * A staff capability in a token is not proof of being staff.
+	 *
+	 * The CLI client is registered with `allowed_scopes: ['*']`, which expands to
+	 * every known capability — staff:* included — and the consent flow narrows
+	 * only VENDOR scopes, by membership. So any signed-in user completing an
+	 * ordinary `letterprove login` was granted staff:read and staff:write, which
+	 * reach every vendor's withheld customer domains and can write customer
+	 * records on any vendor's behalf. Signup is open, so "any signed-in user"
+	 * means anyone.
+	 *
+	 * Checked HERE and not only at consent because consent decides what future
+	 * grants contain; tokens already issued carry staff scopes until they expire.
+	 * This is the only point that stops those.
+	 */
+	if (tool.capability.startsWith("staff:") && !isStaffUser(principal.userId)) {
 		return { kind: "denied", capability: tool.capability };
 	}
 

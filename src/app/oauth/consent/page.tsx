@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth/server";
 import { claimPendingForUser, getClient } from "@/lib/oauth/core";
 import { vendorMemberships } from "@/lib/vendors/session";
-import { parseScope, scopeDescription, isVendorScoped, OFFLINE_ACCESS } from "@/lib/oauth/scopes";
+import { parseScope, scopeDescription, isVendorScoped, isStaffScoped, OFFLINE_ACCESS } from "@/lib/oauth/scopes";
+import { isStaffUser } from "@/lib/staff/allowlist";
 
 // Reads the session and a live pending-request row per request; prerendering
 // this once at build time would render someone else's login (same bug already
@@ -64,7 +65,11 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
 	// way an unsupported scope is dropped in resolveGrantableScope. Only when
 	// nothing is left to grant is there truly nothing to authorize.
 	const vendors = await vendorMemberships();
-	const scopes = vendors.length > 0 ? requested : requested.filter((s) => !isVendorScoped(s));
+	// Mirrors the narrowing the POST handler enforces: a non-staff user is never
+	// shown staff scopes, so the consent screen cannot promise a permission the
+	// grant will silently drop.
+	const entitled = requested.filter((s) => !isStaffScoped(s) || isStaffUser(user.id));
+	const scopes = vendors.length > 0 ? entitled : entitled.filter((s) => !isVendorScoped(s));
 	const needsVendor = vendors.length > 0 && scopes.some(isVendorScoped);
 
 	if (scopes.length === 0) {
