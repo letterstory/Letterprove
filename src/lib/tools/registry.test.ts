@@ -21,6 +21,9 @@ const FAKE_DB = {} as never;
 
 beforeEach(async () => {
 	vi.clearAllMocks();
+	// The default principal's user id. Staff tools now require the caller to be
+	// on the allowlist as well as to hold the scope.
+	process.env.STAFF_USER_IDS = "u1";
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(FAKE_DB);
 });
@@ -274,5 +277,67 @@ describe("dispatchTool", () => {
 
 		expect(outcome).toEqual({ kind: "denied", capability: "staff:write" });
 		expect(promoteDomain).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * A staff capability inside a token is not proof of being staff.
+ *
+ * The CLI client is registered with `allowed_scopes: ['*']`, which expands to
+ * every known capability — staff:* included — and the consent flow narrowed only
+ * VENDOR scopes, by membership. So an ordinary `letterprove login` handed
+ * staff:read and staff:write to whoever signed in, and signup is open. Those
+ * scopes read every vendor's withheld customer domains and write customer
+ * records on any vendor's behalf.
+ *
+ * Enforced at dispatch and not only at consent, because consent governs future
+ * grants; tokens already issued carry staff scopes until they expire, and this
+ * is the only thing standing in front of those.
+ */
+describe("staff tools require an allowlisted user, not just the scope", () => {
+	beforeEach(() => {
+		process.env.STAFF_USER_IDS = "staff-1";
+	});
+
+	it.each(["tier_report", "record_customer"] as const)(
+		"denies %s to a signed-in user who holds the scope but is not staff",
+		async (tool) => {
+			const { dispatchTool } = await import("./registry");
+			const { tierReport } = await import("@/lib/tiers/report");
+			const { promoteDomain } = await import("@/lib/staff/promote");
+
+			const outcome = await dispatchTool(
+				tool,
+				{ vendor: "lettertrace", domain: "juvare.com" },
+				principal(["staff:read", "staff:write"], null),
+			);
+
+			expect(outcome.kind).toBe("denied");
+			// Denied before any work happens — no withheld domain is even read.
+			expect(tierReport).not.toHaveBeenCalled();
+			expect(promoteDomain).not.toHaveBeenCalled();
+		},
+	);
+
+	it("allows a staff tool for an allowlisted user", async () => {
+		const { dispatchTool } = await import("./registry");
+		const p = { tokenId: "t1", vendorId: null, userId: "staff-1", capabilities: ["staff:read"] } as OAuthPrincipal;
+		const outcome = await dispatchTool("tier_report", { vendor: "lettertrace" }, p);
+		expect(outcome.kind).toBe("result");
+	});
+
+	// Fails closed: an unconfigured deployment has no staff, so no staff tool runs.
+	it("denies staff tools when no allowlist is configured", async () => {
+		delete process.env.STAFF_USER_IDS;
+		const { dispatchTool } = await import("./registry");
+		const p = { tokenId: "t1", vendorId: null, userId: "staff-1", capabilities: ["staff:read"] } as OAuthPrincipal;
+		expect((await dispatchTool("tier_report", {}, p)).kind).toBe("denied");
+	});
+
+	// The vendor path must be untouched by this.
+	it("still lets an ordinary vendor call vendor tools", async () => {
+		const { dispatchTool } = await import("./registry");
+		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
+		expect(outcome.kind).toBe("result");
 	});
 });

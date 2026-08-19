@@ -9,8 +9,9 @@ import {
 } from "@/lib/oauth/core";
 import { oauthErrorPage, oauthRedirectError } from "@/lib/oauth/responses";
 import { oauthRateLimit, oauthClientIp } from "@/lib/oauth/ratelimit";
-import { parseScope, formatScope, isVendorScoped } from "@/lib/oauth/scopes";
+import { parseScope, formatScope, isVendorScoped, isStaffScoped } from "@/lib/oauth/scopes";
 import { vendorMemberships } from "@/lib/vendors/session";
+import { isStaffUser } from "@/lib/staff/allowlist";
 
 /**
  * Handles the plain HTML form POST from /oauth/consent.
@@ -61,7 +62,14 @@ export async function POST(request: NextRequest) {
 	// with no vendor memberships silently drops vendor:* from the grant instead
 	// of erroring; a user who does have memberships must submit one they
 	// actually belong to.
-	const requested = parseScope(pending.scope);
+	// Staff scopes are dropped for anyone not on the staff allowlist, for the
+	// same reason vendor scopes are narrowed by membership below: the CLI client
+	// is registered with the `*` wildcard, so an ordinary `letterprove login`
+	// REQUESTS staff:read and staff:write regardless of who is signing in. Those
+	// reach every vendor's withheld customer domains and can write customer
+	// records on any vendor's behalf, and signup is open — so granting them on
+	// request alone hands the whole staff surface to anyone who registers.
+	const requested = parseScope(pending.scope).filter((s) => !isStaffScoped(s) || isStaffUser(user.id));
 	const vendors = await vendorMemberships();
 	let resolvedVendorId: string | null = null;
 	let grantScope = requested;

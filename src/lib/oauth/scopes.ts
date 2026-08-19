@@ -25,6 +25,17 @@ export function isVendorScoped(capability: string): boolean {
 	return capability.startsWith("vendor:");
 }
 
+/**
+ * Staff scopes reach across every vendor — reading withheld customer domains
+ * and writing customer records on any vendor's behalf — so, like vendor scopes,
+ * they must be narrowed at consent against who the user actually is. The CLI
+ * client is registered with the `*` wildcard, which expands to every capability
+ * here, so "requested" never means "entitled".
+ */
+export function isStaffScoped(capability: string): boolean {
+	return capability.startsWith("staff:");
+}
+
 // offline_access is an OAuth convention, not a capability anyone checks — it
 // only controls whether the token exchange also mints a refresh token. Every
 // other scope is a 1:1 alias of a capability, so the CLI never needs a second
