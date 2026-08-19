@@ -233,6 +233,31 @@ export async function dispatchTool(
 		return { kind: "denied", capability: tool.capability };
 	}
 
+	/**
+	 * A vendor capability in a token is not proof of current membership,
+	 * for the same reason staff isn't, above: consent no longer verifies
+	 * vendor_members before minting the grant (see the consent route), so a
+	 * token can carry vendor:* for a vendor_id the user doesn't actually
+	 * belong to, or belonged to and was later removed from. Checked here,
+	 * fresh, on every call — membership can change after a token is minted
+	 * and tokens keep their scope until they expire.
+	 */
+	if (tool.capability.startsWith("vendor:")) {
+		const db = dbClient();
+		// A null db means unconfigured, not unauthorized — let the handler's own
+		// dbClient() check produce its usual storage_unavailable rather than
+		// this turning into a denial that has nothing to do with membership.
+		if (db) {
+			const { data: membership } = await db
+				.from("vendor_members")
+				.select("vendor_id")
+				.eq("vendor_id", principal.vendorId ?? "")
+				.eq("user_id", principal.userId)
+				.maybeSingle();
+			if (!membership) return { kind: "denied", capability: tool.capability };
+		}
+	}
+
 	const result = await tool.handler(args, principal);
 	return { kind: "result", result };
 }

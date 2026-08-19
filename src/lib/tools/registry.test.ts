@@ -17,13 +17,32 @@ function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: strin
 	return { tokenId: "t1", vendorId, userId: "u1", capabilities };
 }
 
-const FAKE_DB = {} as never;
+// dispatchTool now re-verifies vendor_members before running any vendor:*
+// handler (consent no longer checks membership — see the consent route), so
+// FAKE_DB needs a real .from().select().eq().eq().maybeSingle() chain, not an
+// empty object. It stays the exact instance passed to toHaveBeenCalledWith
+// below — only its shape grew. Defaults to "is a member"; tests that need the
+// opposite set membershipRow = null first.
+let membershipRow: { vendor_id: string } | null = { vendor_id: "v1" };
+
+const FAKE_DB = {
+	from: vi.fn(() => ({
+		select: vi.fn(() => ({
+			eq: vi.fn(() => ({
+				eq: vi.fn(() => ({
+					maybeSingle: vi.fn(async () => ({ data: membershipRow })),
+				})),
+			})),
+		})),
+	})),
+} as never;
 
 beforeEach(async () => {
 	vi.clearAllMocks();
 	// The default principal's user id. Staff tools now require the caller to be
 	// on the allowlist as well as to hold the scope.
 	process.env.STAFF_USER_IDS = "u1";
+	membershipRow = { vendor_id: "v1" };
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(FAKE_DB);
 });
@@ -338,6 +357,37 @@ describe("staff tools require an allowlisted user, not just the scope", () => {
 	it("still lets an ordinary vendor call vendor tools", async () => {
 		const { dispatchTool } = await import("./registry");
 		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
+		expect(outcome.kind).toBe("result");
+	});
+});
+
+/**
+ * A vendor capability inside a token is not proof of current membership,
+ * mirroring the staff case above — consent no longer verifies vendor_members
+ * before minting a grant (see the consent route), so this is the only check
+ * standing in front of a token whose vendor_id the caller doesn't (or no
+ * longer does) belong to.
+ */
+describe("vendor tools require current membership, not just the scope", () => {
+	it("denies a vendor tool when the caller isn't a member of the token's vendor", async () => {
+		membershipRow = null;
+		const { dispatchTool } = await import("./registry");
+		const { listCustomers } = await import("@/lib/vendors/customers");
+
+		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
+
+		expect(outcome).toEqual({ kind: "denied", capability: "vendor:read" });
+		expect(listCustomers).not.toHaveBeenCalled();
+	});
+
+	it("allows a vendor tool for a current member", async () => {
+		membershipRow = { vendor_id: "v1" };
+		const { dispatchTool } = await import("./registry");
+		const { listCustomers } = await import("@/lib/vendors/customers");
+		vi.mocked(listCustomers).mockResolvedValue({ ok: true, data: [] as never });
+
+		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
+
 		expect(outcome.kind).toBe("result");
 	});
 });

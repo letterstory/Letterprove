@@ -14,3 +14,5 @@ coverage
 # experiment output
 experiments/**/results*.jsonl
 .env*
+
+e2e-authz.mjs
