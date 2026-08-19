@@ -1,10 +1,16 @@
 name: Migration order
 
+# Runs on EVERY pull request, not only ones touching supabase/migrations.
+#
+# A path filter looks like an optimisation and is really a hole: a workflow
+# that does not run reports no check at all, so it can never be marked
+# required — and a rule requiring it would block every PR that happens not to
+# touch migrations, forever. The script already exits 0 in seconds with
+# "ok (no new migrations vs origin/main)", so running it always costs almost
+# nothing and buys a check that is always present to be required.
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "supabase/migrations/**"
 
 jobs:
   check-order:

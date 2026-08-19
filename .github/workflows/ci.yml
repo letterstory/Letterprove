@@ -1,0 +1,62 @@
+# The checks that had never run anywhere but a laptop.
+#
+# This repo had exactly two workflows — the migration-order gate and the npm
+# publish — and neither runs the suite. So 300+ tests, the typechecker and the
+# linter only ever protected whoever remembered to run them, and a pull request
+# showed nothing but a Vercel preview comment. Every "tests pass" claim on a PR
+# here has been a claim about someone's machine.
+#
+# Four gates, ordered to fail fastest: typecheck (seconds) before build (a
+# minute), so an obvious break doesn't wait on a bundle. Mirrors lettertrace's
+# CI deliberately — same job name, same order — so the two repos read the same
+# and a required-check name is predictable across both.
+#
+# NO SECRETS. `prebuild` runs scripts/db-push.sh, which skips itself when
+# SUPABASE_DB_PASSWORD is absent, so the build completes on a clean checkout
+# with no .env at all. That is worth keeping: it means this can run on a fork's
+# pull request, and if a future change makes the build reach for a credential,
+# that is a fact worth surfacing here rather than papering over with a secret.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+# Cancel it rather than paying for an answer nobody will read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck, test, lint, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # .nvmrc is the single source of truth, so CI and a developer's shell
+          # cannot drift apart.
+          node-version-file: .nvmrc
+          cache: npm
+
+      # ci, not install: build from the lockfile exactly, and fail if
+      # package.json and the lockfile disagree.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
