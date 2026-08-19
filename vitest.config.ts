@@ -15,6 +15,9 @@ export default defineConfig({
 		// party is invited to run. It lived outside the suite entirely, which
 		// meant the one thing we ask outsiders to trust was the one thing
 		// nothing checked.
-		include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
+		// .tsx as well as .ts: a component test written as .tsx would otherwise be
+		// collected by nothing and silently never run, which is exactly how
+		// scripts/verify.mjs went untested until 2026-08-18.
+		include: ["src/**/*.test.ts?(x)", "scripts/**/*.test.ts?(x)"],
 	},
 });
