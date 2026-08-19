@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start -p ${PORT:-9100}",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "keygen": "node scripts/keygen.mjs",
