@@ -2,13 +2,14 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-// The gap this closes: the CLI's default login requests every scope its
-// client is registered for (see /api/oauth/authorize), which today always
-// includes vendor:* — so a staff-only user (zero vendor memberships) hits
-// this exact branch on an ordinary `letterprove login`, not just a
-// hand-crafted request. Getting the narrowing wrong here either blocks every
-// staff login, or — worse — lets a tampered vendor_id field grant access to a
-// vendor the caller doesn't belong to.
+// Consent no longer narrows the grant by membership or the staff allowlist —
+// dispatchTool (registry.ts) re-checks both, fresh, on every call instead. So
+// this file's job shrank to: grant whatever was requested, and still make the
+// caller pick a vendor when vendor:* is in play (routing, not permission —
+// dispatchTool is what decides whether that vendor_id is actually theirs) —
+// except when there's nothing to pick from, where vendor:* is dropped rather
+// than blocking the login entirely.
+// See project_letterprove-cli-controllable, 2026-08-19.
 
 vi.mock("@/lib/auth/server", () => ({ createServerSupabaseClient: vi.fn() }));
 vi.mock("@/lib/oauth/core", () => ({
@@ -48,16 +49,6 @@ const PENDING = {
 	expires_at: new Date(Date.now() + 60_000).toISOString(),
 };
 
-function eqVendorMembership(matches: boolean) {
-	return {
-		select: vi.fn().mockReturnValue({
-			eq: vi.fn().mockReturnValue({
-				maybeSingle: vi.fn().mockResolvedValue({ data: matches ? { vendor_id: "v1" } : null }),
-			}),
-		}),
-	};
-}
-
 function form(fields: Record<string, string>) {
 	const body = new URLSearchParams(fields);
 	// NextRequest, not Request: POST's signature demands the Next type, and a
@@ -77,32 +68,68 @@ beforeEach(() => {
 	vi.mocked(oauthRateLimit).mockResolvedValue(true);
 	vi.mocked(createServerSupabaseClient).mockResolvedValue({
 		auth: { getUser: vi.fn().mockResolvedValue({ data: { user: USER } }) },
-		from: vi.fn(),
 	} as never);
 	vi.mocked(getPendingRequest).mockResolvedValue(PENDING as never);
 	vi.mocked(consumePendingForConsent).mockResolvedValue(PENDING as never);
 	vi.mocked(upsertAuthorization).mockResolvedValue({ id: "auth-1" } as never);
 	vi.mocked(issueAuthorizationCode).mockResolvedValue("code-1");
+	vi.mocked(vendorMemberships).mockResolvedValue([{ id: "v1", name: "Acme" }]);
 });
 
-describe("POST /api/oauth/authorize/consent — staff vs. vendor scope narrowing", () => {
-	it("grants an ALLOWLISTED vendor-less user only the staff scopes, dropping vendor:* silently rather than erroring", async () => {
-		process.env.STAFF_USER_IDS = "user-1";
+describe("POST /api/oauth/authorize/consent — grants whatever was requested", () => {
+	it("grants every requested scope, staff included, without checking membership or the allowlist", async () => {
+		const res = await form({ nonce: "nonce-1", decision: "allow", vendor_id: "v1" });
+
+		expect(res.status).toBe(307);
+		const grantedScope = vi.mocked(upsertAuthorization).mock.calls[0]![0].scope;
+		expect(grantedScope).toContain("vendor:read");
+		expect(grantedScope).toContain("vendor:write");
+		expect(grantedScope).toContain("staff:read");
+		expect(grantedScope).toContain("staff:write");
+	});
+
+	it("requires a vendor_id when vendor scope is requested, but does not verify it against membership", async () => {
+		const res = await form({ nonce: "nonce-1", decision: "allow", vendor_id: "not-my-vendor" });
+
+		expect(res.status).toBe(307);
+		expect(consumePendingForConsent).toHaveBeenCalledWith("nonce-1", "user-1", "not-my-vendor");
+		expect(upsertAuthorization).toHaveBeenCalledWith(expect.objectContaining({ vendorId: "not-my-vendor" }));
+	});
+
+	it("refuses rather than grants when vendor scope is requested but no vendor_id was submitted", async () => {
+		const res = await form({ nonce: "nonce-1", decision: "allow" });
+
+		expect(res.status).toBe(400);
+		expect(consumePendingForConsent).not.toHaveBeenCalled();
+		expect(upsertAuthorization).not.toHaveBeenCalled();
+	});
+
+	it("grants a staff-only, vendor-less request with no vendor_id needed", async () => {
+		vi.mocked(getPendingRequest).mockResolvedValue({ ...PENDING, scope: "staff:read staff:write" } as never);
+
+		const res = await form({ nonce: "nonce-1", decision: "allow" });
+
+		expect(res.status).toBe(307);
+		expect(consumePendingForConsent).toHaveBeenCalledWith("nonce-1", "user-1", null);
+		const grantedScope = vi.mocked(upsertAuthorization).mock.calls[0]![0].scope;
+		expect(grantedScope).toContain("staff:read");
+		expect(grantedScope).toContain("staff:write");
+	});
+
+	it("drops vendor:* rather than blocking the login when the user has zero vendor memberships", async () => {
 		vi.mocked(vendorMemberships).mockResolvedValue([]);
 
 		const res = await form({ nonce: "nonce-1", decision: "allow" });
 
 		expect(res.status).toBe(307);
 		expect(consumePendingForConsent).toHaveBeenCalledWith("nonce-1", "user-1", null);
-		expect(upsertAuthorization).toHaveBeenCalledWith(
-			expect.objectContaining({ vendorId: null, scope: expect.stringContaining("staff:read") }),
-		);
 		const grantedScope = vi.mocked(upsertAuthorization).mock.calls[0]![0].scope;
-		expect(grantedScope).not.toContain("vendor:read");
-		expect(grantedScope).not.toContain("vendor:write");
+		expect(grantedScope).not.toContain("vendor:");
+		expect(grantedScope).toContain("staff:read");
+		expect(grantedScope).toContain("staff:write");
 	});
 
-	it("refuses rather than grants when a vendor-less user's request has nothing left after narrowing", async () => {
+	it("refuses when nothing is left to grant after dropping vendor:* for a vendor-less, non-staff request", async () => {
 		vi.mocked(vendorMemberships).mockResolvedValue([]);
 		vi.mocked(getPendingRequest).mockResolvedValue({ ...PENDING, scope: "vendor:read vendor:write" } as never);
 
@@ -110,81 +137,6 @@ describe("POST /api/oauth/authorize/consent — staff vs. vendor scope narrowing
 
 		expect(res.status).toBe(400);
 		expect(consumePendingForConsent).not.toHaveBeenCalled();
-	});
-
-	it("verifies a submitted vendor_id against real membership before granting vendor scope", async () => {
-		const from = vi.fn().mockReturnValue(eqVendorMembership(true));
-		vi.mocked(createServerSupabaseClient).mockResolvedValue({
-			auth: { getUser: vi.fn().mockResolvedValue({ data: { user: USER } }) },
-			from,
-		} as never);
-		vi.mocked(vendorMemberships).mockResolvedValue([{ id: "v1", name: "Vantage" }]);
-
-		const res = await form({ nonce: "nonce-1", decision: "allow", vendor_id: "v1" });
-
-		expect(res.status).toBe(307);
-		expect(consumePendingForConsent).toHaveBeenCalledWith("nonce-1", "user-1", "v1");
-		expect(upsertAuthorization).toHaveBeenCalledWith(expect.objectContaining({ vendorId: "v1" }));
-	});
-
-	it("rejects a vendor_id the caller doesn't actually belong to, even though they have other memberships", async () => {
-		const from = vi.fn().mockReturnValue(eqVendorMembership(false));
-		vi.mocked(createServerSupabaseClient).mockResolvedValue({
-			auth: { getUser: vi.fn().mockResolvedValue({ data: { user: USER } }) },
-			from,
-		} as never);
-		vi.mocked(vendorMemberships).mockResolvedValue([{ id: "v1", name: "Vantage" }]);
-
-		const res = await form({ nonce: "nonce-1", decision: "allow", vendor_id: "someone-elses-vendor" });
-
-		expect(res.status).toBe(400);
-		expect(consumePendingForConsent).not.toHaveBeenCalled();
 		expect(upsertAuthorization).not.toHaveBeenCalled();
-	});
-});
-
-/**
- * The CLI client is registered with `allowed_scopes: ['*']`, so an ordinary
- * `letterprove login` REQUESTS staff:read and staff:write no matter who is
- * signing in. Those scopes read every vendor's withheld customer domains and
- * write customer records on any vendor's behalf — and signup is open, so
- * granting them on request alone hands the staff surface to anyone who
- * registers. Requesting is not being entitled.
- */
-describe("POST /api/oauth/authorize/consent — staff scopes are narrowed by the allowlist", () => {
-	it("does not grant staff scopes to a user who is not staff", async () => {
-		process.env.STAFF_USER_IDS = "someone-else";
-		const from = vi.fn().mockReturnValue(eqVendorMembership(true));
-		vi.mocked(createServerSupabaseClient).mockResolvedValue({
-			auth: { getUser: vi.fn().mockResolvedValue({ data: { user: USER } }) },
-			from,
-		} as never);
-		vi.mocked(vendorMemberships).mockResolvedValue([{ id: "v1", name: "Vantage" }]);
-
-		const res = await form({ nonce: "nonce-1", decision: "allow", vendor_id: "v1" });
-
-		expect(res.status).toBe(307);
-		const grantedScope = vi.mocked(upsertAuthorization).mock.calls[0]![0].scope;
-		expect(grantedScope).not.toContain("staff:");
-		// The vendor half of the same login is unaffected.
-		expect(grantedScope).toContain("vendor:read");
-	});
-
-	/**
-	 * A vendor-less, non-staff user keeps only offline_access — which is an OAuth
-	 * convention, not a capability anyone checks — so the token it mints can do
-	 * nothing at all. Worth pinning: the grant succeeding is fine precisely
-	 * because what survives narrowing carries no authority.
-	 */
-	it("leaves a vendor-less, non-staff user with no capabilities at all", async () => {
-		delete process.env.STAFF_USER_IDS;
-		vi.mocked(vendorMemberships).mockResolvedValue([]);
-
-		await form({ nonce: "nonce-1", decision: "allow" });
-
-		const grantedScope = vi.mocked(upsertAuthorization).mock.calls[0]![0].scope;
-		expect(grantedScope).not.toContain("staff:");
-		expect(grantedScope).not.toContain("vendor:");
-		expect(grantedScope).toBe("offline_access");
 	});
 });

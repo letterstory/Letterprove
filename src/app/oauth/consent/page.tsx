@@ -2,8 +2,7 @@ import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth/server";
 import { claimPendingForUser, getClient } from "@/lib/oauth/core";
 import { vendorMemberships } from "@/lib/vendors/session";
-import { parseScope, scopeDescription, isVendorScoped, isStaffScoped, OFFLINE_ACCESS } from "@/lib/oauth/scopes";
-import { isStaffUser } from "@/lib/staff/allowlist";
+import { parseScope, scopeDescription, isVendorScoped, OFFLINE_ACCESS } from "@/lib/oauth/scopes";
 
 // Reads the session and a live pending-request row per request; prerendering
 // this once at build time would render someone else's login (same bug already
@@ -58,25 +57,23 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
 	const requested = parseScope(claimed.scope).filter((s) => s !== OFFLINE_ACCESS);
 
 	// The CLI's default login asks for every scope its client is registered
-	// for (see /api/oauth/authorize), which today always includes vendor:* —
-	// so "requested vendor:*" says nothing about whether THIS user can
-	// actually exercise it. A user with no vendor memberships isn't blocked;
-	// vendor:* is silently dropped from what gets shown and granted, the same
-	// way an unsupported scope is dropped in resolveGrantableScope. Only when
-	// nothing is left to grant is there truly nothing to authorize.
+	// for (see /api/oauth/authorize), which today always includes vendor:*
+	// and staff:* — consent grants whatever's requested and dispatchTool
+	// (registry.ts) is what actually checks staff status and vendor
+	// membership, fresh, on every call. See project_letterprove-cli-controllable
+	// (Steve, 2026-08-19). vendor:* still needs a vendor to act as, though —
+	// a user with no vendor memberships has nothing to pick, so it's dropped
+	// here rather than shown as something that will be denied at every call
+	// (mirrors the same drop in the POST handler).
 	const vendors = await vendorMemberships();
-	// Mirrors the narrowing the POST handler enforces: a non-staff user is never
-	// shown staff scopes, so the consent screen cannot promise a permission the
-	// grant will silently drop.
-	const entitled = requested.filter((s) => !isStaffScoped(s) || isStaffUser(user.id));
-	const scopes = vendors.length > 0 ? entitled : entitled.filter((s) => !isVendorScoped(s));
+	const scopes = vendors.length > 0 ? requested : requested.filter((s) => !isVendorScoped(s));
 	const needsVendor = vendors.length > 0 && scopes.some(isVendorScoped);
 
 	if (scopes.length === 0) {
 		return (
 			<Notice
-				title="No vendor account yet"
-				message="Your account does not belong to a vendor yet, so there is nothing to authorize. Finish signing up at /vendor first, then run the login command again."
+				title="Nothing to authorize"
+				message="This request doesn't grant anything your account has access to. Finish signing up at /vendor first, then run the login command again."
 			/>
 		);
 	}

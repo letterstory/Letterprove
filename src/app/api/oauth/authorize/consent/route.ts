@@ -9,9 +9,8 @@ import {
 } from "@/lib/oauth/core";
 import { oauthErrorPage, oauthRedirectError } from "@/lib/oauth/responses";
 import { oauthRateLimit, oauthClientIp } from "@/lib/oauth/ratelimit";
-import { parseScope, formatScope, isVendorScoped, isStaffScoped } from "@/lib/oauth/scopes";
+import { parseScope, formatScope, isVendorScoped } from "@/lib/oauth/scopes";
 import { vendorMemberships } from "@/lib/vendors/session";
-import { isStaffUser } from "@/lib/staff/allowlist";
 
 /**
  * Handles the plain HTML form POST from /oauth/consent.
@@ -55,35 +54,38 @@ export async function POST(request: NextRequest) {
 		);
 	}
 
-	// Mirrors the narrowing in /oauth/consent: the CLI's default login requests
-	// every scope its client is registered for, which today always includes
-	// vendor:* — recomputed here independently of the form (never trusting a
-	// client-submitted vendor_id or its absence as a security boundary). A user
-	// with no vendor memberships silently drops vendor:* from the grant instead
-	// of erroring; a user who does have memberships must submit one they
-	// actually belong to.
-	// Staff scopes are dropped for anyone not on the staff allowlist, for the
-	// same reason vendor scopes are narrowed by membership below: the CLI client
-	// is registered with the `*` wildcard, so an ordinary `letterprove login`
-	// REQUESTS staff:read and staff:write regardless of who is signing in. Those
-	// reach every vendor's withheld customer domains and can write customer
-	// records on any vendor's behalf, and signup is open — so granting them on
-	// request alone hands the whole staff surface to anyone who registers.
-	const requested = parseScope(pending.scope).filter((s) => !isStaffScoped(s) || isStaffUser(user.id));
-	const vendors = await vendorMemberships();
+	// The CLI client is registered with the `*` wildcard, so an ordinary
+	// `letterprove login` requests every scope this server knows about —
+	// vendor:* and staff:* alike — regardless of who's signing in. Consent
+	// used to narrow the grant by membership/allowlist here; it no longer
+	// does. Grant whatever was requested and let dispatchTool (registry.ts)
+	// verify vendor membership and staff status fresh on every call instead —
+	// one enforcement point for both capability classes, checked against
+	// current state rather than baked into the token at mint time. See
+	// project_letterprove-cli-controllable for why (Steve, 2026-08-19).
+	const requested = parseScope(pending.scope);
+
+	// vendor:* still needs to know WHICH vendor the token acts on — that's a
+	// routing question dispatchTool can't answer on its own, not a permission
+	// check, so it stays here. Whether vendorId is one this user actually
+	// belongs to is exactly what dispatchTool re-verifies on every call.
+	//
+	// The CLI always requests the full wildcard scope, so a pure-staff user
+	// with zero vendor accounts would otherwise hit "select a vendor" with no
+	// vendor to select — a dead end. When there's truly nothing to pick from,
+	// drop vendor:* from the grant instead of erroring, same as an unsupported
+	// scope is dropped in resolveGrantableScope.
 	let resolvedVendorId: string | null = null;
 	let grantScope = requested;
-
-	if (vendors.length > 0 && requested.some(isVendorScoped)) {
-		const { data: membership } = await supabase
-			.from("vendor_members")
-			.select("vendor_id")
-			.eq("vendor_id", vendorId)
-			.maybeSingle();
-		if (!membership) return oauthErrorPage("Not authorized", "You are not a member of the selected vendor.");
-		resolvedVendorId = vendorId;
-	} else {
-		grantScope = requested.filter((s) => !isVendorScoped(s));
+	if (requested.some(isVendorScoped)) {
+		const vendors = await vendorMemberships();
+		if (vendors.length === 0) {
+			grantScope = requested.filter((s) => !isVendorScoped(s));
+		} else if (!vendorId) {
+			return oauthErrorPage("Not authorized", "Select a vendor to continue.");
+		} else {
+			resolvedVendorId = vendorId;
+		}
 	}
 
 	if (grantScope.length === 0) {
