@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUser } from "@/lib/auth/server";
+import { isStaffUser } from "@/lib/staff/allowlist";
 import { vendorSlugs } from "@/lib/attest/proofs";
 import { tierReport } from "@/lib/tiers/report";
 
@@ -25,8 +26,11 @@ import { tierReport } from "@/lib/tiers/report";
  * that already exists and states what the publishing rules will do with it.
  */
 export async function GET(request: Request) {
+	// Not covered by proxy.ts — its matcher is /staff/*, not /api/staff/*. A
+	// session alone is not staff: signup is open and the pool is shared, so this
+	// re-checks membership rather than trusting that anything upstream did.
 	const user = await getUser();
-	if (!user) return NextResponse.json({ error: "not_found" }, { status: 404 });
+	if (!isStaffUser(user?.id)) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
 	const requested = new URL(request.url).searchParams.get("vendor");
 	const slugs = requested ? [requested] : await vendorSlugs();

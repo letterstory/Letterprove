@@ -7,9 +7,19 @@ vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn() }));
 
 const REQ = new Request("https://example.test/api/staff/tiers");
 
+// Signed in AND on the staff allowlist — the two are separate questions since
+// 2026-08-18, when staff surfaces stopped accepting any session as staff.
 async function signedIn(is: boolean) {
 	const { getUser } = await import("@/lib/auth/server");
+	process.env.STAFF_USER_IDS = "u1";
 	vi.mocked(getUser).mockResolvedValue(is ? ({ id: "u1" } as never) : null);
+}
+
+/** Signed in, but not staff — the case that used to be indistinguishable. */
+async function signedInAsOutsider() {
+	const { getUser } = await import("@/lib/auth/server");
+	process.env.STAFF_USER_IDS = "u1";
+	vi.mocked(getUser).mockResolvedValue({ id: "self-registered" } as never);
 }
 
 describe("GET /api/staff/tiers", () => {
@@ -88,5 +98,29 @@ describe("GET /api/staff/tiers", () => {
 
 		const res = await GET(REQ);
 		expect(res.headers.get("cache-control")).toBe("no-store");
+	});
+});
+
+/**
+ * Until 2026-08-18 this endpoint served every vendor's withheld customer
+ * domains to any session, and a session was one signup form away: /staff/login
+ * offered self-service registration and Supabase had mailer_autoconfirm on.
+ */
+describe("staff allowlist", () => {
+	it("serves nothing to a signed-in user who is not staff", async () => {
+		await signedInAsOutsider();
+		const { tierReport } = await import("@/lib/tiers/report");
+
+		const res = await GET(REQ);
+		expect(res.status).toBe(404);
+		// Never computed, so no withheld domain is even assembled in memory.
+		expect(tierReport).not.toHaveBeenCalled();
+	});
+
+	// Fails closed: no configured staff means no staff, not everyone.
+	it("serves nothing when no allowlist is configured", async () => {
+		await signedIn(true);
+		delete process.env.STAFF_USER_IDS;
+		expect((await GET(REQ)).status).toBe(404);
 	});
 });
