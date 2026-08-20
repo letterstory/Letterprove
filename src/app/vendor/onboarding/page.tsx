@@ -18,13 +18,13 @@ export default async function VendorOnboardingPage() {
 	if (!user) redirect("/vendor/login");
 
 	return (
-		<main style={{ maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
-			<h1>Set up your vendor</h1>
-			<p>
-				Create your organization to get a publishable key and start collecting attested
-				proof events.
+		<div className="mx-auto max-w-md">
+			<h1 className="text-2xl font-semibold tracking-tight">Set up your vendor</h1>
+			<p className="mt-3 text-fog">
+				Create your organization to get a publishable key and start collecting attested proof
+				events.
 			</p>
 			<OnboardingForm />
-		</main>
+		</div>
 	);
 }

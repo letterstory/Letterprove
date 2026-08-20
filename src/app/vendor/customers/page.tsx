@@ -32,17 +32,20 @@ export default async function VendorCustomersPage() {
 	const customers = (data ?? []) as CustomerRow[];
 
 	return (
-		<main style={{ maxWidth: 640, margin: "4rem auto", padding: "0 1rem" }}>
-			<a href="/vendor">&larr; Dashboard</a>
-			<h1>Your customers</h1>
-			<p>
+		<>
+			<h1 className="text-2xl font-semibold tracking-tight">Your customers</h1>
+			<p className="mt-3 max-w-2xl text-fog">
 				The customers you attest to on your{" "}
-				<a href={`/proofs/${vendor.slug}`}>public proof page</a>. New customers start{" "}
-				<strong>anonymous</strong> — switch one to &ldquo;named&rdquo; only once they&rsquo;ve actually
-				agreed to be identified publicly.
+				<a href={`/proofs/${vendor.slug}`} className="text-mint hover:underline">
+					public proof page
+				</a>
+				. New customers start <strong>anonymous</strong> — switch one to &ldquo;named&rdquo; only
+				once they&rsquo;ve actually agreed to be identified publicly.
 			</p>
 
-			<CustomersManager initialCustomers={customers} features={FEATURES} />
-		</main>
+			<div className="mt-8">
+				<CustomersManager initialCustomers={customers} features={FEATURES} />
+			</div>
+		</>
 	);
 }

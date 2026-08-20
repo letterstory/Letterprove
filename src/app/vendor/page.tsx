@@ -2,7 +2,6 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { currentVendor } from "@/lib/vendors/session";
 import { installSnippet, originFromHeaders } from "@/lib/vendors/install";
-import { SignOutButton } from "./SignOutButton";
 import { StatusIndicator } from "./StatusIndicator";
 
 // Reads the signed-in user's session and vendor row per request; without
@@ -23,47 +22,42 @@ export default async function VendorHome() {
 	const snippet = installSnippet(origin, vendor.key);
 
 	return (
-		<main style={{ maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
-			<h1>
-				{vendor.name} <span style={{ color: "#666" }}>({vendor.category})</span>
-			</h1>
-
-			<section style={{ marginTop: "2rem" }}>
-				<h2>Domain</h2>
-				<p>{vendor.domain}</p>
-				<p style={{ color: "#666" }}>
-					Read-only — this is the origin collection pins every event against
-					(see attest.js), so changing it isn&apos;t self-service yet.
-				</p>
-			</section>
-
-			<section style={{ marginTop: "2rem" }}>
-				<h2>Publishable key</h2>
-				<pre style={{ background: "#f4f4f4", padding: "0.75rem", overflowX: "auto" }}>{vendor.key}</pre>
-				<p style={{ color: "#666" }}>
-					Not a secret — it ships in your page&apos;s HTML — but it&apos;s what identifies you to
-					the collector, so don&apos;t hand it to another vendor.
-				</p>
-			</section>
-
-			<section style={{ marginTop: "2rem" }}>
-				<h2>Install snippet</h2>
-				<pre style={{ background: "#f4f4f4", padding: "0.75rem", overflowX: "auto" }}>{snippet}</pre>
-			</section>
-
-			<section style={{ marginTop: "2rem" }}>
-				<h2>Status</h2>
+		<>
+			<div className="flex flex-wrap items-baseline justify-between gap-3">
+				<h1 className="text-2xl font-semibold tracking-tight">
+					{vendor.name} <span className="ml-1 text-base font-normal text-fog">{vendor.category}</span>
+				</h1>
 				<StatusIndicator />
-			</section>
-
-			<nav style={{ marginTop: "2rem", display: "flex", gap: "1rem" }}>
-				<a href="/vendor/customers">Customers</a>
-				<a href="/vendor/proof">Proof</a>
-			</nav>
-
-			<div style={{ marginTop: "2rem" }}>
-				<SignOutButton />
 			</div>
-		</main>
+
+			<div className="mt-8 grid gap-4">
+				<section className="rounded-lg border border-edge bg-panel p-5">
+					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Domain</h2>
+					<p className="mt-2 font-mono text-sm">{vendor.domain}</p>
+					<p className="mt-2 text-sm text-fog">
+						Read-only — this is the origin collection pins every event against (see attest.js),
+						so changing it isn&apos;t self-service yet.
+					</p>
+				</section>
+
+				<section className="rounded-lg border border-edge bg-panel p-5">
+					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Publishable key</h2>
+					<pre className="mt-3 overflow-x-auto rounded border border-edge bg-ink p-3 font-mono text-sm text-mint">
+						{vendor.key}
+					</pre>
+					<p className="mt-2 text-sm text-fog">
+						Not a secret — it ships in your page&apos;s HTML — but it&apos;s what identifies you
+						to the collector, so don&apos;t hand it to another vendor.
+					</p>
+				</section>
+
+				<section className="rounded-lg border border-edge bg-panel p-5">
+					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Install snippet</h2>
+					<pre className="mt-3 overflow-x-auto rounded border border-edge bg-ink p-3 font-mono text-sm text-mint">
+						{snippet}
+					</pre>
+				</section>
+			</div>
+		</>
 	);
 }

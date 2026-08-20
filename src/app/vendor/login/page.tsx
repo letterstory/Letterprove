@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/auth/browser";
+import { AuthCard, Button, ErrorBanner, Field, Notice, TextInput } from "@/components/form";
 
 type Mode = "signin" | "signup";
 
@@ -77,35 +78,35 @@ export default function VendorLoginPage() {
 	}
 
 	return (
-		<main style={{ maxWidth: 360, margin: "4rem auto", padding: "0 1rem" }}>
-			<h1>Letterprove for vendors</h1>
-			<form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem", marginTop: "1.5rem" }}>
-				<label>
-					Email
-					<input
+		<AuthCard title="Letterprove for vendors">
+			<p className="mt-2 text-sm text-fog">
+				{isSignup ? "Create an account to start publishing attested proof." : "Sign in to your vendor account."}
+			</p>
+			<form onSubmit={onSubmit} className="mt-6 grid gap-4">
+				<Field label="Email">
+					<TextInput
 						type="email"
 						required
+						autoComplete="email"
 						value={email}
 						onChange={(e) => setEmail(e.target.value)}
-						style={{ display: "block", width: "100%" }}
 					/>
-				</label>
-				<label>
-					Password
-					<input
+				</Field>
+				<Field label="Password">
+					<TextInput
 						type="password"
 						required
 						minLength={6}
+						autoComplete={isSignup ? "new-password" : "current-password"}
 						value={password}
 						onChange={(e) => setPassword(e.target.value)}
-						style={{ display: "block", width: "100%" }}
 					/>
-				</label>
-				{error && <p style={{ color: "crimson" }}>{error}</p>}
-				{notice && <p>{notice}</p>}
-				<button type="submit" disabled={loading}>
+				</Field>
+				{error && <ErrorBanner>{error}</ErrorBanner>}
+				{notice && <Notice>{notice}</Notice>}
+				<Button type="submit" disabled={loading} className="w-full">
 					{loading ? "Working…" : isSignup ? "Create account" : "Sign in"}
-				</button>
+				</Button>
 				<button
 					type="button"
 					onClick={() => {
@@ -113,10 +114,11 @@ export default function VendorLoginPage() {
 						setError(null);
 						setNotice(null);
 					}}
+					className="text-center text-sm text-fog hover:text-mint"
 				>
 					{isSignup ? "Have an account? Sign in" : "Need an account? Sign up"}
 				</button>
 			</form>
-		</main>
+		</AuthCard>
 	);
 }
