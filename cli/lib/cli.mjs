@@ -30,6 +30,10 @@ Usage:
 
   letterprove status                           Is this vendor receiving events right now?
 
+  letterprove install                          The <script> tag to put on your site
+  letterprove keys rotate                      Replace your collector key — invalidates the old one immediately
+  letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
+
   letterprove customers list                   List this vendor's customers
   letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
   letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
@@ -104,6 +108,12 @@ export async function run(argv, { io = defaultIo() } = {}) {
 				return await cmdTools({ config, flags, io });
 			case "status":
 				return await cmdStatus({ config, flags, io });
+			case "install":
+				return await cmdInstall({ config, flags, io });
+			case "keys":
+				return await cmdKeys({ config, flags, io, positional: positional.slice(1) });
+			case "snapshots":
+				return await cmdSnapshots({ config, flags, io, positional: positional.slice(1) });
 			case "customers":
 				return await cmdCustomers({ config, flags, io, positional: positional.slice(1) });
 			case "staff":
@@ -224,6 +234,70 @@ async function cmdStatus({ config, flags, io }) {
 	}
 	io.log(result.receiving ? `receiving events (${result.count} in the last 24h)` : "no events in the last 24h");
 	return 0;
+}
+
+async function cmdInstall({ config, flags, io }) {
+	const client = newClient(config);
+	const result = await client.callTool("get_install_snippet");
+
+	if (flags.json) {
+		io.log(JSON.stringify(result, null, 2));
+		return 0;
+	}
+	io.log(result.snippet);
+	return 0;
+}
+
+async function cmdKeys({ config, flags, io, positional }) {
+	const [sub] = positional;
+	const client = newClient(config);
+
+	switch (sub) {
+		case "rotate": {
+			const { key } = await client.callTool("rotate_key");
+			if (flags.json) {
+				io.log(JSON.stringify({ key }, null, 2));
+				return 0;
+			}
+			io.log(`New key: ${key}`);
+			io.log('The old key stopped working immediately. Run "letterprove install" for the updated snippet and update every site that uses it.');
+			return 0;
+		}
+		default:
+			io.error(`Unknown "keys" subcommand: ${sub ?? "(none)"}\n`);
+			io.error(USAGE);
+			return 1;
+	}
+}
+
+async function cmdSnapshots({ config, flags, io, positional }) {
+	const [sub] = positional;
+	const client = newClient(config);
+
+	switch (sub) {
+		case "list": {
+			const args = typeof flags.customer === "string" ? { customer: flags.customer } : {};
+			const { snapshots } = await client.callTool("list_snapshots", args);
+			if (flags.json) {
+				io.log(JSON.stringify(snapshots, null, 2));
+				return 0;
+			}
+			if (!snapshots?.length) {
+				io.log("(no snapshots)");
+				return 0;
+			}
+			for (const s of snapshots) {
+				io.log(
+					`${s.slug.padEnd(24)} chain=${s.length}  published_at=${s.current.published_at}  verified=${s.current.verified}  sessions_30d=${s.current.sessions_30d}`,
+				);
+			}
+			return 0;
+		}
+		default:
+			io.error(`Unknown "snapshots" subcommand: ${sub ?? "(none)"}\n`);
+			io.error(USAGE);
+			return 1;
+	}
 }
 
 async function cmdCustomers({ config, flags, io, positional }) {

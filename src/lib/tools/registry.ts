@@ -13,7 +13,9 @@ import {
 import { getVendorStatus } from "@/lib/vendors/status";
 import { promoteDomain, type PromoteFailure } from "@/lib/staff/promote";
 import { tierReport } from "@/lib/tiers/report";
-import { vendorSlugs } from "@/lib/attest/proofs";
+import { vendorSlugs, vendorSnapshots } from "@/lib/attest/proofs";
+import { installSnippet } from "@/lib/vendors/install";
+import { generateKey } from "@/lib/vendors/keys";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -35,7 +37,17 @@ export type ToolResult =
 	| { ok: true; body: unknown; status?: number }
 	| { ok: false; status: number; body: Record<string, unknown> };
 
-export type ToolHandler = (args: unknown, principal: OAuthPrincipal) => Promise<ToolResult>;
+/**
+ * Per-call context that isn't part of the principal or the caller's args —
+ * currently just the request's own origin, needed by get_install_snippet
+ * (see originFromHeaders) since a snippet pointing at the wrong host is a
+ * silent, expensive failure (see src/lib/vendors/install.ts). Optional and
+ * defaulted in dispatchTool so the ~20 existing 3-arg call sites in
+ * registry.test.ts don't all need touching for a field only one handler uses.
+ */
+export type ToolContext = { origin: string | null };
+
+export type ToolHandler = (args: unknown, principal: OAuthPrincipal, context: ToolContext) => Promise<ToolResult>;
 
 export type ToolDef = {
 	name: string;
@@ -195,6 +207,63 @@ export const TOOLS: ToolDef[] = [
 			};
 		},
 	},
+	{
+		name: "get_install_snippet",
+		description: "The <script> tag to install on the caller's site, pointed at this server's own origin. Args: none.",
+		capability: "vendor:read",
+		handler: async (_args, principal, context) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			// The caller's request origin, not a stored/hardcoded one — see
+			// src/lib/vendors/install.ts on why a wrong host here is silently
+			// expensive. A tool call has no browser request, so this can be
+			// legitimately unavailable (e.g. a non-HTTP transport).
+			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("key").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body: { snippet: installSnippet(context.origin, vendor.key), origin: context.origin } };
+		},
+	},
+	{
+		name: "rotate_key",
+		description:
+			"Replace the caller's vendor publishable/collector key with a freshly generated one. The old key stops working immediately — every existing install must be updated. Args: none.",
+		capability: "vendor:write",
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			const key = generateKey(vendor.slug);
+			const { error } = await db.from("vendors").update({ key }).eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			return { ok: true, body: { key } };
+		},
+	},
+	{
+		name: "list_snapshots",
+		description:
+			"Attestation chain summaries for the caller's customers — chain length and current snapshot. Args: customer (slug, optional — every customer if omitted).",
+		capability: "vendor:read",
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const record = asRecord(args);
+			const customer = typeof record.customer === "string" && record.customer.trim() ? record.customer.trim() : undefined;
+			const snapshots = await vendorSnapshots(vendor.slug, customer);
+			if (snapshots === null) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body: { snapshots } };
+		},
+	},
 ];
 
 export type DispatchOutcome =
@@ -206,6 +275,7 @@ export async function dispatchTool(
 	name: string | undefined,
 	args: unknown,
 	principal: OAuthPrincipal,
+	context: ToolContext = { origin: null },
 ): Promise<DispatchOutcome> {
 	const tool = TOOLS.find((t) => t.name === name);
 	if (!tool) return { kind: "unknown_tool" };
@@ -258,6 +328,6 @@ export async function dispatchTool(
 		}
 	}
 
-	const result = await tool.handler(args, principal);
+	const result = await tool.handler(args, principal, context);
 	return { kind: "result", result };
 }

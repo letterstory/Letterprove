@@ -1,6 +1,6 @@
 {
 	"name": "@letterstory/letterprove-cli",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Install, configure, and manage Letterprove from your terminal.",
 	"type": "module",
 	"license": "MIT",

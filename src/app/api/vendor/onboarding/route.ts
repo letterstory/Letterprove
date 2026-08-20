@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabaseClient } from "@/lib/auth/server";
+import { generateKey } from "@/lib/vendors/keys";
 
 // Creates a brand-new vendor org + the signed-in user's membership row in
 // it. RLS (see 20260814231500_vendor_self_signup_policies.sql) allows any
@@ -68,13 +69,6 @@ function slugify(input: string): string {
 		.trim()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
-}
-
-function generateKey(slug: string): string {
-	// Same family as the seeded fixtures ("lp_live_vantage_9f2c",
-	// "lp_live_lettertrace_5747b5e0f521"): prefix + slug + short hex, no
-	// fixed length requirement.
-	return `lp_live_${slug}_${randomBytes(6).toString("hex")}`;
 }
 
 type SupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
