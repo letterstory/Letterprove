@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 		}
 		({ data: vendor } = await db
 			.from("vendors")
-			.select("id, slug, name, domain")
+			.select("id, slug, name, domain, category")
 			.eq("id", auth.principal.vendorId)
 			.maybeSingle());
 	}

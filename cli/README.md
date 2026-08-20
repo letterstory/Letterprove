@@ -55,6 +55,7 @@ letterprove status                           Is this vendor receiving events rig
 
 letterprove install                          The <script> tag to put on your site
 letterprove keys rotate                      Replace your collector key — invalidates the old one immediately
+letterprove vendor update [--name <name>] [--domain <domain>] [--category <category>]  Edit your vendor account
 letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
 
 letterprove customers list                   List this vendor's customers
@@ -76,7 +77,8 @@ eligible for.
 (`--url`, if you passed one) — safe to run against a local or preview deployment as well as
 production. `letterprove keys rotate` mints a new collector key and invalidates the old one
 immediately; every site using the old snippet stops sending events until you install the new
-one.
+one. `letterprove vendor update` edits your account's own `name`/`domain`/`category` — pass
+only the fields you want to change; the rest are left as-is.
 
 Pass `--json` to any read command for machine-readable output.
 

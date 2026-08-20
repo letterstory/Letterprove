@@ -30,7 +30,10 @@ let membershipRow: { vendor_id: string } | null = { vendor_id: "v1" };
 // directly (single .eq().maybeSingle(), not the double-.eq() membership
 // shape above), so `from` branches on the table name. Defaults to a
 // resolvable vendor row; tests that need "not found" set vendorRow = null.
-let vendorRow: { key?: string; slug?: string } | null = { key: "lp_live_acme_old", slug: "acme" };
+let vendorRow: { key?: string; slug?: string; name?: string; domain?: string; category?: string } | null = {
+	key: "lp_live_acme_old",
+	slug: "acme",
+};
 let vendorUpdateError: { message: string } | null = null;
 
 const FAKE_DB = {
@@ -360,6 +363,63 @@ describe("dispatchTool", () => {
 
 		expect(generateKey).toHaveBeenCalledWith("acme");
 		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { key: "lp_live_acme_newkey" } } });
+	});
+
+	it("rejects update_vendor before touching the db when no fields are given", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("update_vendor", {}, principal(["vendor:write"]));
+
+		const fromCalls = (FAKE_DB as unknown as { from: { mock: { calls: unknown[][] } } }).from.mock.calls;
+		expect(fromCalls.some(([table]) => table === "vendors")).toBe(false);
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 400, body: { error: "at least one of name, domain, category is required" } },
+		});
+	});
+
+	it("updates the caller's vendor account and returns the merged row", async () => {
+		vendorRow = { slug: "acme", name: "Old Name", domain: "old.example.com", category: "retail" };
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool(
+			"update_vendor",
+			{ name: "New Name", domain: "new.example.com" },
+			principal(["vendor:write"]),
+		);
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: {
+				ok: true,
+				body: {
+					vendor: { slug: "acme", name: "New Name", domain: "new.example.com", category: "retail" },
+				},
+			},
+		});
+	});
+
+	it("404s update_vendor when the caller's vendor row is gone", async () => {
+		vendorRow = null;
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("update_vendor", { name: "New Name" }, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({ kind: "result", result: { ok: false, status: 404, body: { error: "not_found" } } });
+	});
+
+	it("surfaces a db write failure from update_vendor as a 400", async () => {
+		vendorRow = { slug: "acme", name: "Old Name", domain: "old.example.com", category: "retail" };
+		vendorUpdateError = { message: "constraint violation" };
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("update_vendor", { category: "media" }, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 400, body: { error: "constraint violation" } },
+		});
+		vendorUpdateError = null;
 	});
 
 	it("lists snapshot summaries for every one of the caller's customers by default", async () => {

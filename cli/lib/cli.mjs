@@ -32,6 +32,7 @@ Usage:
 
   letterprove install                          The <script> tag to put on your site
   letterprove keys rotate                      Replace your collector key — invalidates the old one immediately
+  letterprove vendor update [--name <name>] [--domain <domain>] [--category <category>]  Edit your vendor account
   letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
 
   letterprove customers list                   List this vendor's customers
@@ -112,6 +113,8 @@ export async function run(argv, { io = defaultIo() } = {}) {
 				return await cmdInstall({ config, flags, io });
 			case "keys":
 				return await cmdKeys({ config, flags, io, positional: positional.slice(1) });
+			case "vendor":
+				return await cmdVendor({ config, flags, io, positional: positional.slice(1) });
 			case "snapshots":
 				return await cmdSnapshots({ config, flags, io, positional: positional.slice(1) });
 			case "customers":
@@ -189,6 +192,8 @@ async function cmdWhoami({ config, flags, io }) {
 	}
 	io.log(`url:          ${config.url}`);
 	io.log(`vendor:       ${result.vendor?.name ?? "(unknown)"} (${result.vendor?.slug ?? "-"})`);
+	if (result.vendor?.domain) io.log(`domain:       ${result.vendor.domain}`);
+	if (result.vendor?.category) io.log(`category:     ${result.vendor.category}`);
 	io.log(`capabilities: ${(result.capabilities ?? []).join(", ") || "(none)"}`);
 	return 0;
 }
@@ -265,6 +270,34 @@ async function cmdKeys({ config, flags, io, positional }) {
 		}
 		default:
 			io.error(`Unknown "keys" subcommand: ${sub ?? "(none)"}\n`);
+			io.error(USAGE);
+			return 1;
+	}
+}
+
+async function cmdVendor({ config, flags, io, positional }) {
+	const [sub] = positional;
+	const client = newClient(config);
+
+	switch (sub) {
+		case "update": {
+			const args = {};
+			if (typeof flags.name === "string") args.name = flags.name;
+			if (typeof flags.domain === "string") args.domain = flags.domain;
+			if (typeof flags.category === "string") args.category = flags.category;
+			if (Object.keys(args).length === 0) {
+				throw new CliError("Usage: letterprove vendor update [--name <name>] [--domain <domain>] [--category <category>]");
+			}
+			const { vendor } = await client.callTool("update_vendor", args);
+			if (flags.json) {
+				io.log(JSON.stringify(vendor, null, 2));
+				return 0;
+			}
+			io.log(`Updated. name=${vendor.name} domain=${vendor.domain} category=${vendor.category}`);
+			return 0;
+		}
+		default:
+			io.error(`Unknown "vendor" subcommand: ${sub ?? "(none)"}\n`);
 			io.error(USAGE);
 			return 1;
 	}

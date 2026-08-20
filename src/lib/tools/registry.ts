@@ -245,6 +245,35 @@ export const TOOLS: ToolDef[] = [
 		},
 	},
 	{
+		name: "update_vendor",
+		description: "Update the caller's own vendor account. Args: any of name, domain, category.",
+		capability: "vendor:write",
+		handler: async (args, principal) => {
+			const record = asRecord(args);
+			const update: Record<string, unknown> = {};
+			if (typeof record.name === "string" && record.name.trim()) update.name = record.name.trim();
+			if (typeof record.domain === "string" && record.domain.trim()) update.domain = record.domain.trim();
+			if (typeof record.category === "string" && record.category.trim()) update.category = record.category.trim();
+			if (Object.keys(update).length === 0) {
+				return { ok: false, status: 400, body: { error: "at least one of name, domain, category is required" } };
+			}
+
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("slug, name, domain, category")
+				.eq("id", vendorId)
+				.maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			const { error } = await db.from("vendors").update(update).eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			return { ok: true, body: { vendor: { ...vendor, ...update } } };
+		},
+	},
+	{
 		name: "list_snapshots",
 		description:
 			"Attestation chain summaries for the caller's customers — chain length and current snapshot. Args: customer (slug, optional — every customer if omitted).",
