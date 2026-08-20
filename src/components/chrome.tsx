@@ -47,6 +47,12 @@ export function SiteHeader() {
 					>
 						source
 					</a>
+					<Link
+						href="/vendor/login"
+						className="rounded border border-edge px-3 py-1.5 text-fog hover:border-mint hover:text-mint"
+					>
+						vendor sign in
+					</Link>
 				</nav>
 			</div>
 		</header>
