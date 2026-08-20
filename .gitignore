@@ -16,3 +16,4 @@ experiments/**/results*.jsonl
 .env*
 
 e2e-authz.mjs
+e2e-reset.local.mjs

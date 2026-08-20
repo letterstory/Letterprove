@@ -151,6 +151,11 @@ async function vendorAuthGate(request: NextRequest) {
 	// having one would make it unreachable.
 	if (request.nextUrl.pathname.startsWith("/vendor/onboarding")) return response;
 
+	// A password-recovery link signs the user in (Supabase treats recovery as
+	// a real session) before they've necessarily completed onboarding, so this
+	// needs the same membership-check exemption as onboarding itself.
+	if (request.nextUrl.pathname.startsWith("/vendor/reset-password")) return response;
+
 	// Signed in, but does this user belong to a vendor yet? A fresh signup has
 	// a session and no vendor_members row — RLS scopes this select to
 	// auth.uid() already (see the migration), so an empty result really does
