@@ -125,6 +125,97 @@ describe("proxy — /staff auth gate", () => {
 	});
 });
 
+describe("proxy — /vendor auth gate", () => {
+	function mockSupabaseUserAndMembership(
+		user: { id: string; email: string } | null,
+		membership: { vendor_id: string } | null,
+	) {
+		vi.doMock("@supabase/ssr", () => ({
+			createServerClient: vi.fn(() => ({
+				auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) },
+				from: vi.fn(() => ({
+					select: vi.fn(() => ({
+						limit: vi.fn(() => ({
+							maybeSingle: vi.fn().mockResolvedValue({ data: membership }),
+						})),
+					})),
+				})),
+			})),
+		}));
+	}
+
+	it("redirects an unauthenticated request to /vendor/login with a redirect param", async () => {
+		setAuthEnv(true);
+		mockSupabaseUserAndMembership(null, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).toBe(307);
+		const location = new URL(res!.headers.get("location")!);
+		expect(location.pathname).toBe("/vendor/login");
+		expect(location.searchParams.get("redirect")).toBe("/vendor");
+	});
+
+	it("redirects a signed-in user with no vendor_members row to onboarding", async () => {
+		setAuthEnv(true);
+		mockSupabaseUserAndMembership({ id: "u1", email: "vendor@example.com" }, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).toBe(307);
+		expect(res?.headers.get("location")).toContain("/vendor/onboarding");
+	});
+
+	it("lets /vendor/onboarding through for a signed-in user with no membership yet", async () => {
+		setAuthEnv(true);
+		mockSupabaseUserAndMembership({ id: "u1", email: "vendor@example.com" }, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/onboarding"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	// The exemption this change adds: a password-recovery link signs the user
+	// in (Supabase treats recovery as a real session) before they've
+	// necessarily completed onboarding, so this page needs the same
+	// membership-check exemption as onboarding — otherwise a recovering user
+	// with no vendor yet would be bounced to onboarding instead of letting
+	// them set their new password.
+	it("lets /vendor/reset-password through for a signed-in user with no membership yet", async () => {
+		setAuthEnv(true);
+		mockSupabaseUserAndMembership({ id: "u1", email: "vendor@example.com" }, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/reset-password"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("still requires a session for /vendor/reset-password", async () => {
+		setAuthEnv(true);
+		mockSupabaseUserAndMembership(null, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/reset-password"));
+
+		expect(res?.status).toBe(307);
+		expect(res?.headers.get("location")).toContain("/vendor/login");
+	});
+
+	it("passes a signed-in vendor member through to /vendor", async () => {
+		setAuthEnv(true);
+		mockSupabaseUserAndMembership({ id: "u1", email: "vendor@example.com" }, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).not.toBe(307);
+	});
+});
+
 describe("proxy — /proofs content negotiation (unchanged)", () => {
 	it("rewrites a .json suffix to the API route", async () => {
 		const { proxy: p } = await freshProxy();
