@@ -6,6 +6,13 @@ import { dbClient } from "@/lib/db/client";
  * across serverless instances — an in-memory counter is per-instance and
  * therefore no limit at all on an auth endpoint.
  *
+ * Despite the module path, `oauth_rate_touch` is a generic bucket/window/limit
+ * counter with no OAuth-specific behavior — POST /v1/observe (the collector)
+ * uses it too, keyed by IP and by vendor key rather than an OAuth client.
+ * Kept here rather than duplicated: one Postgres function, one set of
+ * grants (service_role only — see the migration), reused by every caller
+ * that needs a shared-across-instances counter.
+ *
  * Fails OPEN on infra error, and when no datastore is configured at all: a
  * transient DB blip should not lock everyone out of login, and the operations
  * it guards (PKCE, single-use codes, client authentication) are each safe on
