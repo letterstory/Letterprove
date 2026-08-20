@@ -31,8 +31,37 @@ export function StatusIndicator() {
 		};
 	}, []);
 
-	if (status.state === "loading") return <p>Checking for events…</p>;
-	if (status.state === "error") return <p style={{ color: "crimson" }}>Couldn&apos;t check event status.</p>;
-	if (!status.receiving) return <p>Waiting for events…</p>;
-	return <p>Receiving events ✓ ({status.count} in the last 24h)</p>;
+	if (status.state === "loading") {
+		return (
+			<p className="flex items-center gap-2 text-sm text-fog">
+				<span className="h-2 w-2 animate-pulse rounded-full bg-fog" />
+				Checking for events…
+			</p>
+		);
+	}
+
+	if (status.state === "error") {
+		return (
+			<p className="flex items-center gap-2 text-sm text-red-300">
+				<span className="h-2 w-2 rounded-full bg-red-400" />
+				Couldn&apos;t check event status.
+			</p>
+		);
+	}
+
+	if (!status.receiving) {
+		return (
+			<p className="flex items-center gap-2 text-sm text-fog">
+				<span className="h-2 w-2 rounded-full bg-amber-400" />
+				Waiting for events…
+			</p>
+		);
+	}
+
+	return (
+		<p className="flex items-center gap-2 text-sm text-mint">
+			<span className="h-2 w-2 rounded-full bg-mint" />
+			Receiving events — {status.count} in the last 24h
+		</p>
+	);
 }

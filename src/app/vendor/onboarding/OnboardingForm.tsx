@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { Button, ErrorBanner, Field, TextInput } from "@/components/form";
 
 export function OnboardingForm() {
 	const [name, setName] = useState("");
@@ -36,47 +37,35 @@ export function OnboardingForm() {
 	}
 
 	return (
-		<form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem", marginTop: "1.5rem" }}>
-			<label>
-				Vendor name
-				<input
-					type="text"
-					required
-					value={name}
-					onChange={(e) => setName(e.target.value)}
-					style={{ display: "block", width: "100%" }}
-				/>
-			</label>
-			<label>
-				Domain
-				<input
+		<form onSubmit={onSubmit} className="mt-6 grid gap-4 rounded-lg border border-edge bg-panel p-6">
+			<Field label="Vendor name">
+				<TextInput type="text" required value={name} onChange={(e) => setName(e.target.value)} />
+			</Field>
+			<Field
+				label="Domain"
+				hint={'Hostname only, e.g. "acme.com" — this must exactly match the host attest.js will be served from, since event collection origin-pins to it.'}
+			>
+				<TextInput
 					type="text"
 					required
 					placeholder="acme.com"
 					value={domain}
 					onChange={(e) => setDomain(e.target.value)}
-					style={{ display: "block", width: "100%" }}
 				/>
-			</label>
-			<p style={{ fontSize: "0.85em", color: "#666", marginTop: "-0.5rem" }}>
-				Hostname only, e.g. &ldquo;acme.com&rdquo; — this must exactly match the host
-				attest.js will be served from, since event collection origin-pins to it.
-			</p>
-			<label>
-				Category
-				<input
+			</Field>
+			<Field label="Category">
+				<TextInput
 					type="text"
 					required
 					placeholder="customer data platforms"
 					value={category}
 					onChange={(e) => setCategory(e.target.value)}
-					style={{ display: "block", width: "100%" }}
 				/>
-			</label>
-			{error && <p style={{ color: "crimson" }}>{error}</p>}
-			<button type="submit" disabled={loading}>
+			</Field>
+			{error && <ErrorBanner>{error}</ErrorBanner>}
+			<Button type="submit" disabled={loading} className="w-full">
 				{loading ? "Working…" : "Create vendor"}
-			</button>
+			</Button>
 		</form>
 	);
 }

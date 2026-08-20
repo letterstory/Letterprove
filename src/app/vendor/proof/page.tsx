@@ -26,9 +26,8 @@ export default async function VendorProofPage() {
 	]);
 
 	return (
-		<main style={{ maxWidth: 480, margin: "4rem auto", padding: "0 1rem" }}>
-			<a href="/vendor">&larr; Dashboard</a>
-			<h1>Your proof page</h1>
+		<div className="max-w-2xl">
+			<h1 className="text-2xl font-semibold tracking-tight">Your proof page</h1>
 
 			{/* Shown FIRST and outside the !proof branch, because for most vendors
 			    it is the only thing they publish. Naming a customer needs that
@@ -112,6 +111,6 @@ export default async function VendorProofPage() {
 					)}
 				</>
 			)}
-		</main>
+		</div>
 	);
 }
