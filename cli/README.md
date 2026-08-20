@@ -53,6 +53,10 @@ letterprove tools                            List what this session's token can 
 
 letterprove status                           Is this vendor receiving events right now?
 
+letterprove install                          The <script> tag to put on your site
+letterprove keys rotate                      Replace your collector key — invalidates the old one immediately
+letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
+
 letterprove customers list                   List this vendor's customers
 letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
 letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
@@ -67,6 +71,12 @@ account gets — not something a vendor's own credentials carry. `letterprove lo
 requests every capability the CLI client is registered for, so a staff member logs in the
 same way a vendor does; the consent screen shows only what your account is actually
 eligible for.
+
+`letterprove install` returns a snippet pointed at the server you're actually talking to
+(`--url`, if you passed one) — safe to run against a local or preview deployment as well as
+production. `letterprove keys rotate` mints a new collector key and invalidates the old one
+immediately; every site using the old snippet stops sending events until you install the new
+one.
 
 Pass `--json` to any read command for machine-readable output.
 

@@ -62,7 +62,7 @@ describe("POST /api/v1/tools/{name}", () => {
 
 		await POST(req({ slug: "acme" }), params("update_customer"));
 
-		expect(dispatchTool).toHaveBeenCalledWith("update_customer", { slug: "acme" }, PRINCIPAL);
+		expect(dispatchTool).toHaveBeenCalledWith("update_customer", { slug: "acme" }, PRINCIPAL, { origin: null });
 	});
 
 	it("treats an unparsable body as empty args rather than failing the request", async () => {
@@ -71,7 +71,7 @@ describe("POST /api/v1/tools/{name}", () => {
 
 		await POST(new Request("https://app.letterprove.com/api/v1/tools/get_status", { method: "POST" }), params("get_status"));
 
-		expect(dispatchTool).toHaveBeenCalledWith("get_status", {}, PRINCIPAL);
+		expect(dispatchTool).toHaveBeenCalledWith("get_status", {}, PRINCIPAL, { origin: null });
 	});
 
 	it("uses the tool's own status on success, defaulting to 200", async () => {
@@ -85,6 +85,26 @@ describe("POST /api/v1/tools/{name}", () => {
 
 		expect(res.status).toBe(201);
 		expect((await res.json()).customer.slug).toBe("acme");
+	});
+
+	// get_install_snippet needs the real serving origin — a wrong one is a
+	// silent, expensive failure (see src/lib/vendors/install.ts), so this
+	// covers that the route actually derives it from headers rather than
+	// leaving dispatchTool's default null in place when a host is present.
+	it("derives the request origin from forwarded headers and passes it as context", async () => {
+		const { dispatchTool } = await import("@/lib/tools/registry");
+		vi.mocked(dispatchTool).mockResolvedValue({ kind: "result", result: { ok: true, body: {} } });
+
+		const forwarded = new Request("https://app.letterprove.com/api/v1/tools/get_install_snippet", {
+			method: "POST",
+			body: JSON.stringify({}),
+			headers: { "x-forwarded-host": "vendor.example.com", "x-forwarded-proto": "https" },
+		});
+		await POST(forwarded, params("get_install_snippet"));
+
+		expect(dispatchTool).toHaveBeenCalledWith("get_install_snippet", {}, PRINCIPAL, {
+			origin: "https://vendor.example.com",
+		});
 	});
 
 	it("carries a failed tool result's own status and body through unchanged", async () => {

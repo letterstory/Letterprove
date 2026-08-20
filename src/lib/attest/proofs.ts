@@ -173,3 +173,41 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 export async function vendorSlugs(): Promise<string[]> {
 	return (await allVendors()).map((v) => v.slug);
 }
+
+export interface CustomerSnapshotSummary {
+	slug: string;
+	length: number;
+	current: { published_at: string; verified: boolean; sessions_30d: number; features: string[] };
+}
+
+/**
+ * The vendor's own view of their customers' attestation chains — unlike
+ * vendorProof, deliberately NOT consent-gated. Consent governs what leaves
+ * the building publicly; this is the vendor reading their own data back
+ * through a bearer token they hold for their own vendor_id, the same trust
+ * boundary as list_customers.
+ */
+export async function vendorSnapshots(vendorSlug: string, customerSlug?: string): Promise<CustomerSnapshotSummary[] | null> {
+	const vendor = await findVendor(vendorSlug);
+	if (!vendor) return null;
+
+	const customers = customerSlug ? vendor.customers.filter((c) => c.slug === customerSlug) : vendor.customers;
+
+	const out: CustomerSnapshotSummary[] = [];
+	for (const c of customers) {
+		const chain = await customerChain(vendorSlug, c.slug);
+		if (!chain || chain.length === 0) continue;
+		const current = head(chain);
+		out.push({
+			slug: c.slug,
+			length: chain.length,
+			current: {
+				published_at: current.published_at,
+				verified: current.verified,
+				sessions_30d: current.sessions_30d,
+				features: current.features,
+			},
+		});
+	}
+	return out;
+}

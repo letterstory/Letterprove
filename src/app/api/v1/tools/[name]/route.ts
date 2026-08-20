@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateOAuthRequest } from "@/lib/oauth-auth";
 import { dispatchTool } from "@/lib/tools/registry";
+import { originFromHeaders } from "@/lib/vendors/install";
 
 /**
  * POST /api/v1/tools/{name} — the one seam every vendor-automation operation
@@ -16,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ nam
 	const { name } = await params;
 	const args = await request.json().catch(() => ({}));
 
-	const outcome = await dispatchTool(name, args, auth.principal);
+	const outcome = await dispatchTool(name, args, auth.principal, { origin: originFromHeaders(request.headers) });
 
 	switch (outcome.kind) {
 		case "unknown_tool":

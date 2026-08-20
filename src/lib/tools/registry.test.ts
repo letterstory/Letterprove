@@ -11,7 +11,8 @@ vi.mock("@/lib/vendors/customers", () => ({
 vi.mock("@/lib/vendors/status", () => ({ getVendorStatus: vi.fn() }));
 vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
 vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
-vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn() }));
+vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn(), vendorSnapshots: vi.fn() }));
+vi.mock("@/lib/vendors/keys", () => ({ generateKey: vi.fn() }));
 
 function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: string | null = "v1"): OAuthPrincipal {
 	return { tokenId: "t1", vendorId, userId: "u1", capabilities };
@@ -25,16 +26,37 @@ function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: strin
 // opposite set membershipRow = null first.
 let membershipRow: { vendor_id: string } | null = { vendor_id: "v1" };
 
+// get_install_snippet/rotate_key/list_snapshots query the `vendors` table
+// directly (single .eq().maybeSingle(), not the double-.eq() membership
+// shape above), so `from` branches on the table name. Defaults to a
+// resolvable vendor row; tests that need "not found" set vendorRow = null.
+let vendorRow: { key?: string; slug?: string } | null = { key: "lp_live_acme_old", slug: "acme" };
+let vendorUpdateError: { message: string } | null = null;
+
 const FAKE_DB = {
-	from: vi.fn(() => ({
-		select: vi.fn(() => ({
-			eq: vi.fn(() => ({
+	from: vi.fn((table: string) => {
+		if (table === "vendors") {
+			return {
+				select: vi.fn(() => ({
+					eq: vi.fn(() => ({
+						maybeSingle: vi.fn(async () => ({ data: vendorRow })),
+					})),
+				})),
+				update: vi.fn(() => ({
+					eq: vi.fn(async () => ({ error: vendorUpdateError })),
+				})),
+			};
+		}
+		return {
+			select: vi.fn(() => ({
 				eq: vi.fn(() => ({
-					maybeSingle: vi.fn(async () => ({ data: membershipRow })),
+					eq: vi.fn(() => ({
+						maybeSingle: vi.fn(async () => ({ data: membershipRow })),
+					})),
 				})),
 			})),
-		})),
-	})),
+		};
+	}),
 } as never;
 
 beforeEach(async () => {
@@ -43,6 +65,8 @@ beforeEach(async () => {
 	// on the allowlist as well as to hold the scope.
 	process.env.STAFF_USER_IDS = "u1";
 	membershipRow = { vendor_id: "v1" };
+	vendorRow = { key: "lp_live_acme_old", slug: "acme" };
+	vendorUpdateError = null;
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(FAKE_DB);
 });
@@ -296,6 +320,74 @@ describe("dispatchTool", () => {
 
 		expect(outcome).toEqual({ kind: "denied", capability: "staff:write" });
 		expect(promoteDomain).not.toHaveBeenCalled();
+	});
+
+	it("builds an install snippet from the caller's vendor key and the request's own origin", async () => {
+		vendorRow = { key: "lp_live_acme_9f2c" };
+		const { dispatchTool } = await import("./registry");
+		const { installSnippet } = await import("@/lib/vendors/install");
+		const origin = "https://acme.example.com";
+
+		const outcome = await dispatchTool("get_install_snippet", {}, principal(["vendor:read"]), { origin });
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: true, body: { snippet: installSnippet(origin, "lp_live_acme_9f2c"), origin } },
+		});
+	});
+
+	// A tool call has no browser request behind it — origin can legitimately be
+	// unavailable — and a wrong host in the snippet is silently expensive (see
+	// src/lib/vendors/install.ts), so this must refuse rather than guess.
+	it("refuses get_install_snippet rather than guess when the origin is unavailable", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("get_install_snippet", {}, principal(["vendor:read"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 400, body: { error: "origin_unavailable" } },
+		});
+	});
+
+	it("rotates the caller's key to a freshly generated one in the same slug family", async () => {
+		vendorRow = { slug: "acme" };
+		const { dispatchTool } = await import("./registry");
+		const { generateKey } = await import("@/lib/vendors/keys");
+		vi.mocked(generateKey).mockReturnValue("lp_live_acme_newkey");
+
+		const outcome = await dispatchTool("rotate_key", {}, principal(["vendor:write"]));
+
+		expect(generateKey).toHaveBeenCalledWith("acme");
+		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { key: "lp_live_acme_newkey" } } });
+	});
+
+	it("lists snapshot summaries for every one of the caller's customers by default", async () => {
+		vendorRow = { slug: "acme" };
+		const { dispatchTool } = await import("./registry");
+		const { vendorSnapshots } = await import("@/lib/attest/proofs");
+		vi.mocked(vendorSnapshots).mockResolvedValue([
+			{ slug: "c1", length: 3, current: { published_at: "2026-08-01", verified: true, sessions_30d: 40, features: [] } },
+		] as never);
+
+		const outcome = await dispatchTool("list_snapshots", {}, principal(["vendor:read"]));
+
+		expect(vendorSnapshots).toHaveBeenCalledWith("acme", undefined);
+		expect(outcome).toMatchObject({
+			kind: "result",
+			result: { ok: true, body: { snapshots: [{ slug: "c1", length: 3 }] } },
+		});
+	});
+
+	it("scopes list_snapshots to one customer when named in args", async () => {
+		vendorRow = { slug: "acme" };
+		const { dispatchTool } = await import("./registry");
+		const { vendorSnapshots } = await import("@/lib/attest/proofs");
+		vi.mocked(vendorSnapshots).mockResolvedValue([]);
+
+		await dispatchTool("list_snapshots", { customer: "c1" }, principal(["vendor:read"]));
+
+		expect(vendorSnapshots).toHaveBeenCalledWith("acme", "c1");
 	});
 });
 
