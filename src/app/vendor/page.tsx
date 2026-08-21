@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { currentVendor } from "@/lib/vendors/session";
 import { installSnippet, originFromHeaders } from "@/lib/vendors/install";
 import { StatusIndicator } from "./StatusIndicator";
-import { DomainVerification } from "./DomainVerification";
+import { DomainCard } from "./DomainCard";
 import { dbClient } from "@/lib/db/client";
 import { expectedRecord, verificationHosts } from "@/lib/vendors/verification";
 
@@ -47,23 +47,16 @@ export default async function VendorHome() {
 			</div>
 
 			<div className="mt-8 grid gap-4">
-				{verification?.domain_verification_token && (
-					<DomainVerification
-						domain={vendor.domain}
-						record={expectedRecord(verification.domain_verification_token)}
-						hosts={verificationHosts(vendor.domain)}
-						verifiedAt={verification.domain_verified_at ?? null}
-					/>
-				)}
-
-				<section className="rounded-lg border border-edge bg-panel p-5">
-					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Domain</h2>
-					<p className="mt-2 font-mono text-sm">{vendor.domain}</p>
-					<p className="mt-2 text-sm text-fog">
-						Read-only — this is the origin collection pins every event against (see attest.js),
-						so changing it isn&apos;t self-service yet.
-					</p>
-				</section>
+				<DomainCard
+					domain={vendor.domain}
+					record={
+						verification?.domain_verification_token
+							? expectedRecord(verification.domain_verification_token)
+							: null
+					}
+					hosts={verificationHosts(vendor.domain)}
+					verifiedAt={verification?.domain_verified_at ?? null}
+				/>
 
 				<section className="rounded-lg border border-edge bg-panel p-5">
 					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Publishable key</h2>

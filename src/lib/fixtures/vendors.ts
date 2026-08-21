@@ -154,10 +154,10 @@ export async function allVendors(): Promise<VendorFixture[]> {
 	}
 
 	return rows.map((row) =>
-		toFixture(
-			{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
-			customersByVendor.get(row.id) ?? [],
-		),
+		// The row itself, not a hand-copied subset: rebuilding the literal is
+		// exactly how `domain_verified_at` got dropped from all three of these
+		// call sites at once, silently capping every vendor at tier 0.
+		toFixture(row, customersByVendor.get(row.id) ?? []),
 	);
 }
 
@@ -177,10 +177,7 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
 		.eq("vendor_id", row.id);
 
-	return toFixture(
-		{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
-		(customerRows ?? []) as unknown as CustomerRow[],
-	);
+	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
 }
 
 /**
@@ -204,10 +201,7 @@ export async function findVendorByKey(key: string): Promise<VendorFixture | unde
 		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
 		.eq("vendor_id", row.id);
 
-	return toFixture(
-		{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
-		(customerRows ?? []) as unknown as CustomerRow[],
-	);
+	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
 }
 
 export function findCustomer(vendor: VendorFixture, slug: string): CustomerFixture | undefined {
