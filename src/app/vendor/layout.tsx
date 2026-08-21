@@ -40,6 +40,13 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 						{vendor && <VendorNav />}
 					</div>
 					<div className="flex items-center gap-4 text-sm">
+						<a
+							href="https://www.npmjs.com/package/@letterstory/letterprove-cli"
+							className="text-fog hover:text-mint"
+							rel="noreferrer"
+						>
+							cli
+						</a>
 						<Link href="/" className="text-fog hover:text-mint">
 							public site
 						</Link>
