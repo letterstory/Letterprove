@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ErrorBanner } from "@/components/form";
 
 /**
@@ -32,9 +32,11 @@ export function DomainCard({
 	const [localVerifiedAt, setLocalVerifiedAt] = useState(verifiedAt);
 	const verified = Boolean(localVerifiedAt);
 
-	async function check() {
-		setChecking(true);
-		setError(null);
+	async function verifyNow(silent: boolean) {
+		if (!silent) {
+			setChecking(true);
+			setError(null);
+		}
 		try {
 			const res = await fetch("/api/vendor/verify-domain", { method: "POST" });
 			const body = await res.json();
@@ -42,13 +44,27 @@ export function DomainCard({
 				setLocalVerifiedAt(body.verifiedAt);
 				return;
 			}
-			setError(body.message ?? body.error ?? "Not verified yet.");
+			if (!silent) setError(body.message ?? body.error ?? "Not verified yet.");
 		} catch {
-			setError("Couldn't reach the server. Try again.");
+			if (!silent) setError("Couldn't reach the server. Try again.");
 		} finally {
-			setChecking(false);
+			if (!silent) setChecking(false);
 		}
 	}
+
+	const check = () => verifyNow(false);
+
+	// A vendor who adds the TXT record in another tab and switches back here
+	// shouldn't have to hit refresh to see it go green — re-check quietly
+	// whenever this tab regains focus, until it's verified.
+	useEffect(() => {
+		if (verified) return;
+		function onVisible() {
+			if (document.visibilityState === "visible") void verifyNow(true);
+		}
+		document.addEventListener("visibilitychange", onVisible);
+		return () => document.removeEventListener("visibilitychange", onVisible);
+	}, [verified]);
 
 	return (
 		<section
