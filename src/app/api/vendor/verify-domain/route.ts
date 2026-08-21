@@ -46,14 +46,12 @@ export async function POST() {
 		return NextResponse.json({ verified: false, message }, { status: 200 });
 	}
 
-	const { error } = await db
-		.from("vendors")
-		.update({ domain_verified_at: new Date().toISOString() })
-		.eq("id", vendor.id);
+	const verifiedAt = new Date().toISOString();
+	const { error } = await db.from("vendors").update({ domain_verified_at: verifiedAt }).eq("id", vendor.id);
 
 	if (error) {
 		return NextResponse.json({ error: "Verified, but couldn't save it. Try again." }, { status: 500 });
 	}
 
-	return NextResponse.json({ verified: true, message });
+	return NextResponse.json({ verified: true, message, verifiedAt });
 }
