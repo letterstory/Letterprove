@@ -57,6 +57,7 @@ letterprove install                          The <script> tag to put on your sit
 letterprove keys rotate                      Replace your collector key — invalidates the old one immediately
 letterprove vendor update [--name <name>] [--domain <domain>] [--category <category>]  Edit your vendor account
 letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
+letterprove support <message>                Send a support message to the team
 
 letterprove customers list                   List this vendor's customers
 letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]

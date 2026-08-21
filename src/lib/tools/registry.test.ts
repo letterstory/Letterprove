@@ -13,6 +13,7 @@ vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
 vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
 vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn(), vendorSnapshots: vi.fn() }));
 vi.mock("@/lib/vendors/keys", () => ({ generateKey: vi.fn() }));
+vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
 
 function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: string | null = "v1"): OAuthPrincipal {
 	return { tokenId: "t1", vendorId, userId: "u1", capabilities };
@@ -43,7 +44,14 @@ let vendorRow: {
 };
 let vendorUpdateError: { message: string } | null = null;
 
+// submit_support_request resolves the caller's email off a bearer token via
+// the service-role client's admin API — there's no cookie session to read it
+// from (see the tool's own comment). Defaults to a resolvable user; tests
+// that need the fallback set authUserRow = null.
+let authUserRow: { email?: string } | null = { email: "u1@example.com" };
+
 const FAKE_DB = {
+	auth: { admin: { getUserById: vi.fn(async () => ({ data: { user: authUserRow } })) } },
 	from: vi.fn((table: string) => {
 		if (table === "vendors") {
 			return {
@@ -77,6 +85,7 @@ beforeEach(async () => {
 	membershipRow = { vendor_id: "v1" };
 	vendorRow = { key: "lp_live_acme_old", slug: "acme" };
 	vendorUpdateError = null;
+	authUserRow = { email: "u1@example.com" };
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(FAKE_DB);
 });
@@ -529,6 +538,86 @@ describe("dispatchTool", () => {
 		await dispatchTool("list_snapshots", { customer: "c1" }, principal(["vendor:read"]));
 
 		expect(vendorSnapshots).toHaveBeenCalledWith("acme", "c1");
+	});
+
+	it("submits a support request with the caller's vendor and resolved email", async () => {
+		vendorRow = { slug: "acme", name: "Acme" };
+		authUserRow = { email: "vendor@acme.com" };
+		const { dispatchTool } = await import("./registry");
+		const { sendSupportMessage } = await import("@/lib/support/slack");
+		vi.mocked(sendSupportMessage).mockResolvedValue({ ok: true });
+
+		const outcome = await dispatchTool("submit_support_request", { message: "help please" }, principal(["vendor:write"]));
+
+		expect(sendSupportMessage).toHaveBeenCalledWith({
+			vendorName: "Acme",
+			vendorSlug: "acme",
+			userEmail: "vendor@acme.com",
+			message: "help please",
+		});
+		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { ok: true } } });
+	});
+
+	it("rejects submit_support_request before touching the db when message is missing", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { sendSupportMessage } = await import("@/lib/support/slack");
+
+		const outcome = await dispatchTool("submit_support_request", {}, principal(["vendor:write"]));
+
+		const fromCalls = (FAKE_DB as unknown as { from: { mock: { calls: unknown[][] } } }).from.mock.calls;
+		expect(fromCalls.some(([table]) => table === "vendors")).toBe(false);
+		expect(sendSupportMessage).not.toHaveBeenCalled();
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 400, body: { error: "message is required" } },
+		});
+	});
+
+	it("rejects submit_support_request over the message length limit", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool(
+			"submit_support_request",
+			{ message: "x".repeat(4001) },
+			principal(["vendor:write"]),
+		);
+
+		expect(outcome).toMatchObject({ result: { ok: false, status: 400 } });
+	});
+
+	it("404s submit_support_request when the caller's vendor row is gone", async () => {
+		vendorRow = null;
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("submit_support_request", { message: "help" }, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({ kind: "result", result: { ok: false, status: 404, body: { error: "not_found" } } });
+	});
+
+	it("falls back to 'unknown' when the caller's email can't be resolved", async () => {
+		vendorRow = { slug: "acme", name: "Acme" };
+		authUserRow = null;
+		const { dispatchTool } = await import("./registry");
+		const { sendSupportMessage } = await import("@/lib/support/slack");
+		vi.mocked(sendSupportMessage).mockResolvedValue({ ok: true });
+
+		await dispatchTool("submit_support_request", { message: "help" }, principal(["vendor:write"]));
+
+		expect(sendSupportMessage).toHaveBeenCalledWith(expect.objectContaining({ userEmail: "unknown" }));
+	});
+
+	it("surfaces a Slack delivery failure from submit_support_request as a 502", async () => {
+		vendorRow = { slug: "acme", name: "Acme" };
+		const { dispatchTool } = await import("./registry");
+		const { sendSupportMessage } = await import("@/lib/support/slack");
+		vi.mocked(sendSupportMessage).mockResolvedValue({ ok: false, error: "Failed to send your message. Please try again." });
+
+		const outcome = await dispatchTool("submit_support_request", { message: "help" }, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 502, body: { error: "Failed to send your message. Please try again." } },
+		});
 	});
 });
 
