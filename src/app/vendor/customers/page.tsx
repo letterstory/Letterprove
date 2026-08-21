@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from "@/lib/auth/server";
 import { currentVendor } from "@/lib/vendors/session";
 import { FEATURES } from "@/lib/fixtures/vendors";
 import { CustomersManager, type CustomerRow } from "./CustomersManager";
+import { PageHeader } from "@/components/ui";
 
 // Reads the signed-in vendor's session and customer rows per request;
 // without this it gets prerendered once at build time with no vendor, same
@@ -33,15 +34,21 @@ export default async function VendorCustomersPage() {
 
 	return (
 		<>
-			<h1 className="text-2xl font-semibold tracking-tight">Your customers</h1>
-			<p className="mt-3 max-w-2xl text-fog">
-				The customers you attest to on your{" "}
-				<a href={`/proofs/${vendor.slug}`} className="text-mint hover:underline">
-					public proof page
-				</a>
-				. New customers start <strong>anonymous</strong> — switch one to &ldquo;named&rdquo; only
-				once they&rsquo;ve actually agreed to be identified publicly.
-			</p>
+			<PageHeader
+				title="Your customers"
+				aside={
+					<a
+						href={`/proofs/${vendor.slug}`}
+						className="rounded border border-edge px-3 py-1.5 text-sm text-fog transition hover:border-mint hover:text-mint"
+					>
+						View public page ↗
+					</a>
+				}
+			>
+				The customers you attest to on your public proof page. New customers start{" "}
+				<strong className="text-[#e9efed]">anonymous</strong>&nbsp;— switch one to
+				&ldquo;named&rdquo; only once they&rsquo;ve actually agreed to be identified publicly.
+			</PageHeader>
 
 			<div className="mt-8">
 				<CustomersManager initialCustomers={customers} features={FEATURES} />
