@@ -38,7 +38,9 @@ export async function SiteHeader() {
 					{/* eslint-disable-next-line @next/next/no-img-element */}
 					<img src="/logo.svg" alt="Letterprove" className="h-6 w-auto" />
 				</Link>
-				<nav className="flex items-center gap-5 text-sm text-fog">
+				{/* Uppercase with letter-spacing: these are labels, not prose, and they
+				    sit beside a wordmark rather than in a sentence. */}
+				<nav className="flex items-center gap-5 text-xs tracking-widest text-fog uppercase">
 					{/* These point at the human pages; each one links the raw
 					    .well-known JSON at the top. The endpoints themselves are
 					    unchanged — agents still fetch exactly what they always did. */}

@@ -75,7 +75,7 @@ export function VendorNav() {
 							tabRefs.current[i] = el;
 						}}
 						aria-current={active ? "page" : undefined}
-						className="relative z-10 rounded-sm px-2.5 py-1 text-xs"
+						className="relative z-10 rounded-sm px-3 py-1 text-[11px] tracking-widest uppercase"
 					>
 						<TabLabel label={tab.label} active={active} />
 					</Link>

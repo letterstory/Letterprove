@@ -39,7 +39,7 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 						</Link>
 						{vendor && <VendorNav />}
 					</div>
-					<div className="flex items-center gap-4 text-sm">
+					<div className="flex items-center gap-4 text-xs tracking-widest uppercase">
 						<a
 							href="https://www.npmjs.com/package/@letterstory/letterprove-cli"
 							className="text-fog hover:text-mint"
@@ -50,7 +50,8 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 						<Link href="/" className="text-fog hover:text-mint">
 							public site
 						</Link>
-						<span className="hidden text-xs text-fog sm:inline">{user.email}</span>
+						{/* The address stays as typed — uppercasing an email misrepresents it. */}
+						<span className="hidden text-xs normal-case text-fog sm:inline">{user.email}</span>
 						<SignOutButton />
 					</div>
 				</div>
