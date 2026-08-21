@@ -10,11 +10,12 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 const HOUR = 3_600_000;
 
 /**
- * Two chains hit this: a head-count (`.select(_, {head}).eq().gte()`) and a
- * latest-row lookup (`.select().eq().order().limit()`). `eq` returns both
- * continuations so either can follow.
+ * Three chains hit this: a head-count (`.select(_, {head}).eq().gte()`), a
+ * latest-row lookup (`.select().eq().order().limit()`), and the config_pings
+ * lookup (`.select().eq().maybeSingle()`). `eq` returns all three
+ * continuations so any of them can follow.
  */
-function mockDb(opts: { counts: number[]; lastEventAt: string | null }) {
+function mockDb(opts: { counts: number[]; lastEventAt: string | null; hasPing?: boolean }) {
 	const counts = [...opts.counts];
 	const gte = vi.fn(async () => ({ count: counts.shift() ?? 0, error: null }));
 	const limit = vi.fn(async () => ({
@@ -22,7 +23,11 @@ function mockDb(opts: { counts: number[]; lastEventAt: string | null }) {
 		error: null,
 	}));
 	const order = vi.fn(() => ({ limit }));
-	const eq = vi.fn(() => ({ gte, order }));
+	const maybeSingle = vi.fn(async () => ({
+		data: opts.hasPing ? { vendor_slug: "vendor" } : null,
+		error: null,
+	}));
+	const eq = vi.fn(() => ({ gte, order, maybeSingle }));
 	const select = vi.fn(() => ({ eq }));
 	return { from: vi.fn(() => ({ select })) };
 }
@@ -75,10 +80,21 @@ describe("collectionHealth", () => {
 	// Never installed is a different problem from stopped working, and gets a
 	// different label so nobody goes hunting for a break that never existed.
 	it("separates a vendor that has never reported from one that stopped", async () => {
-		await withVendor(mockDb({ counts: [0, 0, 0], lastEventAt: null }));
+		await withVendor(mockDb({ counts: [0, 0, 0], lastEventAt: null, hasPing: false }));
 
 		const [v] = (await collectionHealth())!;
 		expect(v.status).toBe("never");
+		expect(v.hoursSinceLastEvent).toBeNull();
+	});
+
+	// The exact shape of Steve's steve-johnson-dev report: attest.js has
+	// booted (config_pings) but no identify()/signup()/login() has fired, so
+	// hot_events is empty. That is not the same as never having loaded at all.
+	it("shows a vendor whose script has pinged config but never fired an event as installed", async () => {
+		await withVendor(mockDb({ counts: [0, 0, 0], lastEventAt: null, hasPing: true }));
+
+		const [v] = (await collectionHealth())!;
+		expect(v.status).toBe("installed");
 		expect(v.hoursSinceLastEvent).toBeNull();
 	});
 
@@ -117,6 +133,7 @@ describe("collectionHealth", () => {
 								error: null,
 							}),
 						}),
+						maybeSingle: async () => ({ data: null, error: null }),
 					}),
 				}),
 			}),
