@@ -796,6 +796,7 @@ and carries the function signature the Letterstory RPC will have.
 | 14 | Tier 2 needs `receipt_ts` + `origin`; ASN is not required for now | ✅ **Decided (08-13)** |
 | 15 | **Nothing signed in `development` mode is ever persisted** — the freeze refuses it, so immutable history only ever holds keys we intend to publish forever | ✅ **Decided (08-13)** — see [Signing](#signing--proposed) |
 | 16 | `signingMode()`, not `isDev`, decides whether proofs are labelled a demonstration | ✅ **Decided (08-13)** — see [What is actually signing](#what-is-actually-signing--decided-08-13) |
+| 17 | **Self-inflation** — `asn_distribution`/`distinct_hash_counts` are hardcoded `null` until upstream capture lands, so fraud scoring only catches gross volume/burst anomalies, not a slow, well-distributed spoofing rig | ✅ **Decided (accepted gap, 08-20)** — see [Processing — Letterprove side, step 3](#processing--letterprove-side) |
 
 ### Open
 
