@@ -691,6 +691,28 @@ Design the consent step as the verification step: a customer who approves their
 own attestation has just produced a tier-4 counter-signature, the strongest
 proof in the system.
 
+### Customer counter-signing — **Built (08-21)**
+
+The consent step above is no longer just a vendor-side flag — there's now a
+real path for the customer themselves to sign off. A vendor mints a
+single-use, expiring link (`generate_consent_link`, 7-day TTL, same
+unguessable-token-in-a-column shape as `vendors.domain_verification_token`)
+and hands it to their customer. That link resolves to
+`/attest/{vendor}/{customer}/consent` — deliberately **outside** the
+vendor/staff auth gate in `src/proxy.ts`, since the person opening it has no
+Letterprove account at all, may be reading it from an email client, and can't
+be asked to sign in. The page is a plain HTML form (no client JS required);
+approving or declining POSTs to `.../consent/respond`, which redirects back
+with the result.
+
+Approval sets `countersigned_at` on `vendor_customers` — once, never
+cleared — and `earned()` in `src/lib/attest/body.ts` treats its presence as
+tier-4 proof directly, short-circuiting the normal domain/observation
+pipeline entirely. That's the point: tier 4 is supposed to not run through
+the vendor at all. Declining, expiry, an already-used token, and an
+already-countersigned customer are all distinct terminal states on the same
+page, not a generic error.
+
 ### How it is enforced — **Built (08-13)**
 
 `consent` on the customer record is `named | anonymous`, and **omitting it means
@@ -798,7 +820,7 @@ and carries the function signature the Letterstory RPC will have.
 | 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
-| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)** — see [Consent](#consent--decided) and [How it is enforced](#how-it-is-enforced--built-08-13) |
+| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), and [Customer counter-signing](#customer-counter-signing--built-08-21) |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |

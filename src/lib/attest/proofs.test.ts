@@ -213,6 +213,16 @@ describe("earned", () => {
 		expect(earned(tier2, false, false)).toEqual({ tier: 0, verified: false });
 		expect(earned(tier2, true, true)).toEqual({ tier: 2, verified: true });
 	});
+
+	// Tier 4 is the one evidence path that doesn't run through the vendor at
+	// all — a customer counter-signing directly is why it's the tier a vendor
+	// can't forge. It has to win over every other gate here, since those gates
+	// exist to police the vendor's own observation pipeline, not this one.
+	it("earns tier 4 from the customer's own counter-signature, regardless of domain verification or observation", () => {
+		const countersigned = { ...tier1, countersignedAt: "2026-08-21T00:00:00.000Z" };
+		expect(earned(countersigned, false, false)).toEqual({ tier: 4, verified: true });
+		expect(earned(countersigned, true, true)).toEqual({ tier: 4, verified: true });
+	});
 });
 
 describe("consent-gated publication", () => {

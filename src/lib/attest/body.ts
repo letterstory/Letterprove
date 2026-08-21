@@ -23,12 +23,22 @@ export const TTL_SECONDS = 3600;
  * window, every fact we hold about that customer came from the vendor —
  * which is tier 0 in the README's trust model, and cannot be `verified` at
  * any tier.
+ *
+ * Tier 4 is the one exception to "the vendor's assertion is a ceiling": a
+ * customer counter-signing their own attestation (src/app/attest/[vendor]/
+ * [customer]/consent) is evidence that doesn't run through the vendor's
+ * domain/script pipeline at all — that's the entire point of it being the
+ * one tier a vendor can't forge (README § The trust model). So it isn't
+ * capped by domainVerified/observed the way tiers 1-3 are; it short-circuits
+ * ahead of them.
  */
 export function earned(
 	customer: CustomerFixture,
 	observed: boolean,
 	domainVerified: boolean,
 ): { tier: Tier; verified: boolean } {
+	if (customer.countersignedAt) return { tier: 4, verified: true };
+
 	// Same ceiling, one step earlier. An observation is only evidence if we
 	// know who the origin it was pinned to belongs to — and `Origin` binds a
 	// browser, not curl (see /v1/observe). Until DNS control of the vendor's
