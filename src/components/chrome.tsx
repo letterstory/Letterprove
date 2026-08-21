@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { isDemonstration } from "@/lib/attest/keys";
+import { getUser } from "@/lib/auth/server";
 
 /**
  * A banner that cannot be missed when proofs are signed with the development
@@ -25,7 +26,11 @@ export function DevKeyBanner() {
 	);
 }
 
-export function SiteHeader() {
+export async function SiteHeader() {
+	// Server component, so it can tell a signed-in visitor from a stranger and
+	// stop offering to sign in someone who already is.
+	const user = await getUser().catch(() => null);
+
 	return (
 		<header className="border-b border-edge">
 			<div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
@@ -33,13 +38,18 @@ export function SiteHeader() {
 					{/* eslint-disable-next-line @next/next/no-img-element */}
 					<img src="/logo.svg" alt="Letterprove" className="h-6 w-auto" />
 				</Link>
-				<nav className="flex items-center gap-5 text-sm text-fog">
-					<a className="hover:text-mint" href="/.well-known/letterprove.json">
-						discovery
-					</a>
-					<a className="hover:text-mint" href="/.well-known/letterprove-jwks.json">
+				{/* Uppercase with letter-spacing: these are labels, not prose, and they
+				    sit beside a wordmark rather than in a sentence. */}
+				<nav className="flex items-center gap-5 text-xs tracking-widest text-fog uppercase">
+					{/* These point at the human pages; each one links the raw
+					    .well-known JSON at the top. The endpoints themselves are
+					    unchanged — agents still fetch exactly what they always did. */}
+					<Link className="hover:text-mint" href="/verify">
+						verify
+					</Link>
+					<Link className="hover:text-mint" href="/keys">
 						keys
-					</a>
+					</Link>
 					<a
 						className="hover:text-mint"
 						href="https://github.com/letterstory/Letterprove"
@@ -55,10 +65,10 @@ export function SiteHeader() {
 						cli
 					</a>
 					<Link
-						href="/vendor/login"
+						href={user ? "/vendor" : "/vendor/login"}
 						className="rounded border border-edge px-3 py-1.5 text-fog hover:border-mint hover:text-mint"
 					>
-						vendor sign in
+						{user ? "vendor dashboard" : "vendor sign in"}
 					</Link>
 				</nav>
 			</div>

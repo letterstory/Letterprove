@@ -121,7 +121,14 @@ async function observedTotals(vendorSlug: string): Promise<Map<string, RollupTot
 export function classifyRow(
 	domain: string,
 	totals: RollupTotals,
-	customer: CustomerFixture | undefined
+	customer: CustomerFixture | undefined,
+	/**
+	 * The vendor's DNS-verified state. This report exists to tell an operator
+	 * why a customer isn't earning what it asserts, so it has to apply the
+	 * same gate publishing does — otherwise it would report an earned tier
+	 * the proof will never actually carry.
+	 */
+	domainVerified: boolean,
 ): DomainTierRow {
 	const { kind } = classifyDomain(domain);
 	const observed = totals.sessions + totals.signups + totals.logins > 0;
@@ -132,7 +139,7 @@ export function classifyRow(
 		...totals,
 		customer: customer?.slug ?? null,
 		assertedTier: customer?.tier ?? null,
-		earnedTier: customer ? earned(customer, observed).tier : null,
+		earnedTier: customer ? earned(customer, observed, domainVerified).tier : null,
 		consent: customer ? consentOf(customer) : null,
 	};
 
@@ -193,7 +200,9 @@ export async function tierReport(vendorSlug: string): Promise<VendorTierReport |
 	const domains = new Set<string>([...totals.keys(), ...byDomain.keys()]);
 
 	const rows = [...domains]
-		.map((d) => classifyRow(d, totals.get(d) ?? { sessions: 0, signups: 0, logins: 0 }, byDomain.get(d)))
+		.map((d) =>
+			classifyRow(d, totals.get(d) ?? { sessions: 0, signups: 0, logins: 0 }, byDomain.get(d), vendor.domainVerified),
+		)
 		.sort((a, b) => b.sessions - a.sessions || a.domain.localeCompare(b.domain));
 
 	return {

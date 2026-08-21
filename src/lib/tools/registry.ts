@@ -1,6 +1,13 @@
 import type { OAuthPrincipal } from "@/lib/oauth/core";
 import type { Capability } from "@/lib/oauth/scopes";
 import { dbClient } from "@/lib/db/client";
+import { domainRejectionReason, normalizeDomain } from "@/lib/vendors/domain";
+import {
+	checkDomainVerification,
+	expectedRecord,
+	verificationHosts,
+	verificationMessage,
+} from "@/lib/vendors/verification";
 import { isStaffUser } from "@/lib/staff/allowlist";
 import {
 	listCustomers,
@@ -246,6 +253,51 @@ export const TOOLS: ToolDef[] = [
 		},
 	},
 	{
+		name: "verify_domain",
+		description:
+			"Check DNS for this vendor's domain-verification TXT record and record the result. No args.",
+		capability: "vendor:write",
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("domain, domain_verification_token, domain_verified_at")
+				.eq("id", vendorId)
+				.maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			if (!vendor.domain_verification_token) {
+				return { ok: false, status: 409, body: { error: "no_verification_token" } };
+			}
+
+			const outcome = await checkDomainVerification(vendor.domain, vendor.domain_verification_token);
+			const message = verificationMessage(outcome, vendor.domain);
+
+			if (!outcome.verified) {
+				// A failed lookup must not un-verify an already-proven vendor;
+				// DNS is allowed to be briefly unreachable.
+				return {
+					ok: true,
+					body: {
+						verified: Boolean(vendor.domain_verified_at),
+						checked: false,
+						message,
+						record: expectedRecord(vendor.domain_verification_token),
+						hosts: verificationHosts(vendor.domain),
+					},
+				};
+			}
+
+			const verifiedAt = new Date().toISOString();
+			const { error } = await db.from("vendors").update({ domain_verified_at: verifiedAt }).eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			return { ok: true, body: { verified: true, checked: true, message, verified_at: verifiedAt } };
+		},
+	},
+	{
 		name: "update_vendor",
 		description: "Update the caller's own vendor account. Args: any of name, domain, category.",
 		capability: "vendor:write",
@@ -253,7 +305,17 @@ export const TOOLS: ToolDef[] = [
 			const record = asRecord(args);
 			const update: Record<string, unknown> = {};
 			if (typeof record.name === "string" && record.name.trim()) update.name = record.name.trim();
-			if (typeof record.domain === "string" && record.domain.trim()) update.domain = record.domain.trim();
+			if (typeof record.domain === "string" && record.domain.trim()) {
+				// Same normalisation the signup form applies. Without it the CLI
+				// is a back door to exactly the unmatchable value the form now
+				// rejects — and this path uses the service-role client, so no
+				// RLS policy stands behind it either.
+				const normalized = normalizeDomain(record.domain);
+				if (!normalized) {
+					return { ok: false, status: 400, body: { error: domainRejectionReason(record.domain) } };
+				}
+				update.domain = normalized;
+			}
 			if (typeof record.category === "string" && record.category.trim()) update.category = record.category.trim();
 			if (Object.keys(update).length === 0) {
 				return { ok: false, status: 400, body: { error: "at least one of name, domain, category is required" } };
@@ -265,10 +327,19 @@ export const TOOLS: ToolDef[] = [
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			const { data: vendor } = await db
 				.from("vendors")
-				.select("slug, name, domain, category")
+				.select("slug, name, domain, category, domain_verified_at")
 				.eq("id", vendorId)
 				.maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			// Changing the domain invalidates the proof of control that was
+			// granted for the old one. Without this a vendor could verify a
+			// domain they own, then repoint the row at one they do not and
+			// keep the verified flag — which is the entire attack the DNS
+			// check exists to stop.
+			if (typeof update.domain === "string" && update.domain !== vendor.domain) {
+				update.domain_verified_at = null;
+			}
+
 			const { error } = await db.from("vendors").update(update).eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { vendor: { ...vendor, ...update } } };

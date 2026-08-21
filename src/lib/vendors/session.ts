@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createServerSupabaseClient, getUser } from "@/lib/auth/server";
 
 export interface CurrentVendor {
@@ -31,8 +32,12 @@ interface VendorMembershipRow {
  * so this is a plain select, not a manual membership check — the DB is
  * already the source of truth for "does this user belong to this vendor"
  * (see feedback_rls_trust_pattern).
+ *
+ * cache()d per request: the layout needs this to decide whether to show the
+ * section tabs, and the page it wraps needs the same row. Two identical
+ * queries in one render is just latency.
  */
-export async function currentVendor(): Promise<CurrentVendor | null> {
+export const currentVendor = cache(async (): Promise<CurrentVendor | null> => {
 	const user = await getUser();
 	if (!user) return null;
 
@@ -40,11 +45,17 @@ export async function currentVendor(): Promise<CurrentVendor | null> {
 	const { data } = await supabase
 		.from("vendor_members")
 		.select("vendors(id, slug, name, domain, category, key)")
+		// `limit(1)` without an order is whichever row Postgres happens to
+		// return, and that can differ between requests — so a user in two
+		// vendors could watch the dashboard switch under them, with the key
+		// and install snippet switching too. Oldest membership wins: it is
+		// stable, and it is the vendor they created first.
+		.order("created_at", { ascending: true })
 		.limit(1)
 		.maybeSingle<VendorMembershipRow>();
 
 	return data?.vendors ?? null;
-}
+});
 
 /**
  * Every vendor the signed-in user belongs to, not just the first.
@@ -56,7 +67,7 @@ export async function currentVendor(): Promise<CurrentVendor | null> {
  * credential for a vendor they did not choose. Same RLS-scoped select, no
  * manual ownership check (see feedback_rls_trust_pattern).
  */
-export async function vendorMemberships(): Promise<{ id: string; name: string }[]> {
+export const vendorMemberships = cache(async (): Promise<{ id: string; name: string }[]> => {
 	const user = await getUser();
 	if (!user) return [];
 
@@ -67,4 +78,4 @@ export async function vendorMemberships(): Promise<{ id: string; name: string }[
 		.returns<{ vendors: { id: string; name: string } | null }[]>();
 
 	return (data ?? []).flatMap((row) => (row.vendors ? [row.vendors] : []));
-}
+});

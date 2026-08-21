@@ -1,3 +1,4 @@
+import { hostnameOf } from "@/lib/vendors/domain";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
@@ -72,8 +73,26 @@ export async function POST(request: Request) {
 	 * this for real, but that's a phase-2+ redesign with its own trust-tier
 	 * plumbing — not something to bolt on here piecemeal.
 	 */
-	const origin = originHostname(request.headers.get("origin"));
+	const origin = hostnameOf(request.headers.get("origin"));
 	if (!origin || origin !== vendor.domain) return collectorResponse(false);
+
+	/*
+	 * Refuse anything from a vendor who has not proven DNS control of the
+	 * domain they claim.
+	 *
+	 * Capping their published tier at 0 (which earned() also does) is not
+	 * enough on its own. If an unverified vendor may still collect, whoever
+	 * registers a domain FIRST establishes a foothold on it — events, rollups,
+	 * history — before the real owner ever arrives. Refusing at the door means
+	 * an impersonator accumulates nothing at all, and the legitimate owner
+	 * verifies into a clean slate rather than one already occupied.
+	 *
+	 * Same silent 204 as every other refusal here: this endpoint is
+	 * sendBeacon-safe and must never surface collection state to a page. The
+	 * vendor sees it in the dashboard, which tells them plainly that nothing
+	 * is counted until they verify.
+	 */
+	if (!vendor.domainVerified) return collectorResponse(false);
 
 	await recordObservation({
 		vendor: vendor.slug,
@@ -94,11 +113,3 @@ function parseJson(raw: string): unknown {
 	}
 }
 
-function originHostname(origin: string | null): string | null {
-	if (!origin) return null;
-	try {
-		return new URL(origin).hostname.toLowerCase();
-	} catch {
-		return null;
-	}
-}

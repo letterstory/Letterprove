@@ -70,6 +70,12 @@ export interface VendorFixture {
 	category: string;
 	/** Publishable key `attest.js` sends on every event — origin-pinned to `domain`. */
 	key: string;
+	/**
+	 * Whether DNS control of `domain` has been proven. Origin-pinning only
+	 * constrains browsers, so without this an observation is an assertion —
+	 * see lib/vendors/verification.ts. Caps everything at tier 0 when false.
+	 */
+	domainVerified: boolean;
 	customers: CustomerFixture[];
 }
 
@@ -80,6 +86,7 @@ interface VendorRow {
 	slug: string;
 	name: string;
 	domain: string;
+	domain_verified_at?: string | null;
 	category: string;
 	key: string;
 }
@@ -103,6 +110,7 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 		domain: row.domain,
 		category: row.category,
 		key: row.key,
+		domainVerified: Boolean(row.domain_verified_at),
 		customers: customers.map((c) => ({
 			slug: c.slug,
 			name: c.name,
@@ -127,7 +135,7 @@ export async function allVendors(): Promise<VendorFixture[]> {
 	const db = dbClient();
 	if (!db) return [];
 
-	const { data: rows } = await db.from("vendors").select("id, slug, name, domain, category, key");
+	const { data: rows } = await db.from("vendors").select("id, slug, name, domain, category, key, domain_verified_at");
 	if (!rows || rows.length === 0) return [];
 
 	const { data: customerRows } = await db
@@ -146,10 +154,10 @@ export async function allVendors(): Promise<VendorFixture[]> {
 	}
 
 	return rows.map((row) =>
-		toFixture(
-			{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
-			customersByVendor.get(row.id) ?? [],
-		),
+		// The row itself, not a hand-copied subset: rebuilding the literal is
+		// exactly how `domain_verified_at` got dropped from all three of these
+		// call sites at once, silently capping every vendor at tier 0.
+		toFixture(row, customersByVendor.get(row.id) ?? []),
 	);
 }
 
@@ -159,7 +167,7 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 
 	const { data: row } = await db
 		.from("vendors")
-		.select("id, slug, name, domain, category, key")
+		.select("id, slug, name, domain, category, key, domain_verified_at")
 		.eq("slug", slug)
 		.maybeSingle();
 	if (!row) return undefined;
@@ -169,10 +177,7 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
 		.eq("vendor_id", row.id);
 
-	return toFixture(
-		{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
-		(customerRows ?? []) as unknown as CustomerRow[],
-	);
+	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
 }
 
 /**
@@ -186,7 +191,7 @@ export async function findVendorByKey(key: string): Promise<VendorFixture | unde
 
 	const { data: row } = await db
 		.from("vendors")
-		.select("id, slug, name, domain, category, key")
+		.select("id, slug, name, domain, category, key, domain_verified_at")
 		.eq("key", key)
 		.maybeSingle();
 	if (!row) return undefined;
@@ -196,10 +201,7 @@ export async function findVendorByKey(key: string): Promise<VendorFixture | unde
 		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
 		.eq("vendor_id", row.id);
 
-	return toFixture(
-		{ slug: row.slug, name: row.name, domain: row.domain, category: row.category, key: row.key },
-		(customerRows ?? []) as unknown as CustomerRow[],
-	);
+	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
 }
 
 export function findCustomer(vendor: VendorFixture, slug: string): CustomerFixture | undefined {

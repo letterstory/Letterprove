@@ -9,7 +9,17 @@ import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { recordObservation } from "@/lib/telemetry/record";
 import { POST } from "./route";
 
-const VENDOR = { slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "x", key: "lp_live_x", customers: [] };
+// Verified, because every test below the refusal ones is about some other
+// rule and would otherwise be testing the verification gate by accident.
+const VENDOR = {
+	slug: "lettertrace",
+	name: "Lettertrace",
+	domain: "lettertrace.com",
+	category: "x",
+	key: "lp_live_x",
+	domainVerified: true,
+	customers: [],
+};
 
 function post(body: unknown, { origin, headers }: { origin?: string; headers?: Record<string, string> } = {}) {
 	const payload = typeof body === "string" ? body : JSON.stringify(body);
@@ -29,6 +39,36 @@ beforeEach(() => {
 	vi.mocked(oauthRateLimit).mockResolvedValue(true);
 	vi.mocked(findVendorByKey).mockResolvedValue(VENDOR as never);
 	vi.mocked(recordObservation).mockResolvedValue(undefined);
+});
+
+describe("POST /api/v1/observe — unverified vendors", () => {
+	it("refuses an event from a vendor who has not proven domain control", async () => {
+		// Not merely uncounted: refused. If an unverified vendor could still
+		// collect, whoever registers a domain first builds up history on it
+		// before the real owner ever arrives.
+		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: false } as never);
+
+		const res = await post(VALID_BODY, { origin: "https://lettertrace.com" });
+
+		expect(res.headers.get("x-letterprove")).not.toBe("ok");
+		expect(recordObservation).not.toHaveBeenCalled();
+	});
+
+	it("still answers 204, because this endpoint never leaks collection state", async () => {
+		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: false } as never);
+
+		const res = await post(VALID_BODY, { origin: "https://lettertrace.com" });
+
+		expect(res.status).toBe(204);
+	});
+
+	it("accepts once the same vendor is verified", async () => {
+		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: true } as never);
+
+		await post(VALID_BODY, { origin: "https://lettertrace.com" });
+
+		expect(recordObservation).toHaveBeenCalled();
+	});
 });
 
 describe("POST /api/v1/observe", () => {

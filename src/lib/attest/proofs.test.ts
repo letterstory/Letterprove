@@ -21,14 +21,14 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 			name: "Vantage",
 			domain: "vantage.example",
 			category: "customer data platforms",
-			key: "lp_live_vantage_9f2c",
+			key: "lp_live_vantage_9f2c", domainVerified: true,
 			customers: [
 				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api", "analytics"], consent: "named" },
 				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso", "api", "analytics", "sla"], consent: "anonymous" },
 				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
 			],
 		},
-		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", customers: [] },
+		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
 	];
 	return {
 		...original,
@@ -184,19 +184,33 @@ describe("earned", () => {
 	const tier1 = { ...asserted, tier: 1 as const, verified: false };
 
 	it("publishes the asserted tier once something has been observed", () => {
-		expect(earned(tier2, true)).toEqual({ tier: 2, verified: true });
+		expect(earned(tier2, true, true)).toEqual({ tier: 2, verified: true });
 	});
 
 	it("refuses every asserted tier when nothing was observed", () => {
-		expect(earned(tier2, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(tier1, false)).toEqual({ tier: 0, verified: false });
+		expect(earned(tier2, false, true)).toEqual({ tier: 0, verified: false });
+		expect(earned(tier1, false, true)).toEqual({ tier: 0, verified: false });
 	});
 
 	// The ceiling half of the rule. Observation earns the asserted tier; it
 	// never grants a higher one, however much traffic there is — tier 2 is
 	// about what a fact is bound to, not how much of it there is.
 	it("never raises a claim above what the vendor asserted", () => {
-		expect(earned(tier1, true)).toEqual({ tier: 1, verified: false });
+		expect(earned(tier1, true, true)).toEqual({ tier: 1, verified: false });
+	});
+
+	// The gate one step earlier: an observation only counts as evidence if we
+	// know whose origin produced it. Origin binds a browser, not curl, so
+	// without DNS control of the vendor's domain the traffic is the vendor
+	// asserting — and asserting earns tier 0.
+	it("refuses every tier while the vendor's domain is unverified, however much was observed", () => {
+		expect(earned(tier2, true, false)).toEqual({ tier: 0, verified: false });
+		expect(earned(tier1, true, false)).toEqual({ tier: 0, verified: false });
+	});
+
+	it("needs both verification and observation, not either", () => {
+		expect(earned(tier2, false, false)).toEqual({ tier: 0, verified: false });
+		expect(earned(tier2, true, true)).toEqual({ tier: 2, verified: true });
 	});
 });
 
