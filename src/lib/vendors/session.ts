@@ -40,6 +40,12 @@ export async function currentVendor(): Promise<CurrentVendor | null> {
 	const { data } = await supabase
 		.from("vendor_members")
 		.select("vendors(id, slug, name, domain, category, key)")
+		// `limit(1)` without an order is whichever row Postgres happens to
+		// return, and that can differ between requests — so a user in two
+		// vendors could watch the dashboard switch under them, with the key
+		// and install snippet switching too. Oldest membership wins: it is
+		// stable, and it is the vendor they created first.
+		.order("created_at", { ascending: true })
 		.limit(1)
 		.maybeSingle<VendorMembershipRow>();
 

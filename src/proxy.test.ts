@@ -32,6 +32,30 @@ function mockSupabaseUser(user: { id: string; email: string } | null) {
 	}));
 }
 
+/**
+ * The vendor gate asks two questions, not one: is there a user, and does that
+ * user belong to a vendor. `membership` is the answer to the second — null
+ * means signed in but membership-less, which is the state a fresh signup is
+ * in and the reason /vendor/onboarding exists.
+ */
+function mockSupabaseVendor(
+	user: { id: string; email: string } | null,
+	membership: { vendor_id: string } | null,
+) {
+	vi.doMock("@supabase/ssr", () => ({
+		createServerClient: vi.fn(() => ({
+			auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) },
+			from: vi.fn(() => ({
+				select: vi.fn(() => ({
+					limit: vi.fn(() => ({
+						maybeSingle: vi.fn().mockResolvedValue({ data: membership }),
+					})),
+				})),
+			})),
+		})),
+	}));
+}
+
 describe("proxy — /staff auth gate", () => {
 	it("503s rather than falling open when auth isn't configured", async () => {
 		setAuthEnv(false);
@@ -233,6 +257,105 @@ describe("proxy — /proofs content negotiation (unchanged)", () => {
 			}),
 		);
 		expect(res).toBeUndefined();
+	});
+});
+
+describe("proxy — /vendor auth gate", () => {
+	const USER = { id: "u1", email: "vendor@acme.com" };
+
+	it("503s rather than falling open when auth isn't configured", async () => {
+		// An account area has no safe "unauthenticated but allowed" default.
+		setAuthEnv(false);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).toBe(503);
+		expect(await res?.json()).toEqual({
+			error: "Vendor auth is not configured on this deployment",
+		});
+	});
+
+	it("sends a signed-out visitor to the login page, remembering where they were going", async () => {
+		setAuthEnv(true);
+		mockSupabaseVendor(null, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/customers"));
+
+		expect(res?.status).toBe(307);
+		const location = new URL(res!.headers.get("location")!);
+		expect(location.pathname).toBe("/vendor/login");
+		expect(location.searchParams.get("redirect")).toBe("/vendor/customers");
+	});
+
+	it("lets the login page itself through, or it could never be reached", async () => {
+		setAuthEnv(true);
+		mockSupabaseVendor(null, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/login"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("sends a signed-in user with no vendor to onboarding", async () => {
+		// The state every fresh signup lands in: a session, no membership row.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).toBe(307);
+		expect(new URL(res!.headers.get("location")!).pathname).toBe("/vendor/onboarding");
+	});
+
+	it("lets a membership-less user reach onboarding — it is the page that creates the membership", async () => {
+		// Gating onboarding on having a membership would make it unreachable,
+		// which would strand every new signup permanently.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/onboarding"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("lets a member through to the dashboard", async () => {
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("does not bounce a signed-in member back to onboarding once they have one", async () => {
+		// Regression guard: an over-eager membership check here would put a
+		// working vendor into a redirect loop between /vendor and onboarding.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/proof"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("leaves the public collection and proof surface ungated", async () => {
+		// /vendor is a login wall; the product's public API must not be behind
+		// it. These carry no session and must stay reachable.
+		setAuthEnv(true);
+		mockSupabaseVendor(null, null);
+		const { proxy: p } = await freshProxy();
+
+		for (const path of ["/v1/observe", "/v1/config", "/.well-known/jwks.json", "/api/cron/rollup"]) {
+			const res = await p(new NextRequest(`https://app.letterprove.com${path}`));
+			expect(res, path).toBeUndefined();
+		}
 	});
 });
 
