@@ -39,12 +39,15 @@ export async function SiteHeader() {
 					<img src="/logo.svg" alt="Letterprove" className="h-6 w-auto" />
 				</Link>
 				<nav className="flex items-center gap-5 text-sm text-fog">
-					<a className="hover:text-mint" href="/.well-known/letterprove.json">
-						discovery
-					</a>
-					<a className="hover:text-mint" href="/.well-known/letterprove-jwks.json">
+					{/* These point at the human pages; each one links the raw
+					    .well-known JSON at the top. The endpoints themselves are
+					    unchanged — agents still fetch exactly what they always did. */}
+					<Link className="hover:text-mint" href="/verify">
+						verify
+					</Link>
+					<Link className="hover:text-mint" href="/keys">
 						keys
-					</a>
+					</Link>
 					<a
 						className="hover:text-mint"
 						href="https://github.com/letterstory/Letterprove"

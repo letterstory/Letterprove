@@ -1,6 +1,4 @@
-import { isDemonstration, signingMode } from "@/lib/attest/keys";
-import { methodUrl } from "@/lib/attest/method";
-import { vendorSlugs } from "@/lib/attest/proofs";
+import { discoveryDocument } from "@/lib/attest/discovery";
 import { proofJson } from "@/lib/http";
 
 /**
@@ -9,41 +7,11 @@ import { proofJson } from "@/lib/http";
  * Everything an agent needs to go from "this host publishes proof" to a
  * verified claim, without reading our documentation: where the keys are, how
  * the bytes are canonicalised, where the verifier lives, and what is published.
+ *
+ * The document itself is built in lib/attest/discovery.ts, which /verify also
+ * renders for humans — one definition, so the page and the endpoint cannot
+ * describe different things.
  */
 export async function GET(request: Request) {
-	const origin = new URL(request.url).origin;
-
-	return proofJson({
-		name: "Letterprove",
-		description: "Cryptographically attested proof of real product usage, published for evaluating agents.",
-		signing: {
-			alg: "EdDSA",
-			crv: "Ed25519",
-			jwks_uri: `${origin}/.well-known/letterprove-jwks.json`,
-			canonicalization: methodUrl("src/lib/attest/canonical.ts"),
-			// Stated positively, not only as a warning-when-bad: an agent
-			// deciding how much weight to give a signature should be able to
-			// read who produced it without inferring it from the absence of a
-			// warning field.
-			mode: signingMode(),
-		},
-		verifier: methodUrl("scripts/verify.mjs"),
-		// The aggregate is listed beside the report on purpose. It is the only
-		// claim most vendors will ever publish — naming a customer needs that
-		// customer's consent — so an agent that only found `report` would miss
-		// the one thing that is actually signed for them. `chain` is what makes
-		// it auditable rather than merely signed: walk it and you can prove no
-		// earlier figure was restated.
-		proofs: (await vendorSlugs()).map((slug) => ({
-			vendor: slug,
-			url: `${origin}/proofs/${slug}`,
-			aggregate: `${origin}/attest/${slug}.json`,
-			aggregate_chain: `${origin}/attest/${slug}/chain`,
-		})),
-		// Said in the machine-readable surface, not only on the page: anything
-		// signed by the development key is a demonstration, not evidence.
-		...(isDemonstration() && {
-			warning: "DEVELOPMENT DEPLOYMENT — signed with a published development key. These attestations are not evidence.",
-		}),
-	});
+	return proofJson(await discoveryDocument(new URL(request.url).origin));
 }
