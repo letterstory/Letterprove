@@ -34,7 +34,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					    Without this, zero attested customers and zero of anything
 					    else look identical, when one of those is "nothing is
 					    happening" and the other is "a backlog nobody has worked." */}
-					<Tile label="Unverified" value={String(proof.summary.unverified_customers)} />
+					<Tile label="Unverified customers" value={String(proof.summary.unverified_customers)} />
 					<Tile label="Features proven" value={String(proof.summary.features_proven.length)} />
 					<Tile label="Sessions / 30d" value={proof.summary.sessions_30d.toLocaleString("en-US")} />
 					<Tile label="Last attested" value={shortStamp(proof.summary.last_attested)} />
