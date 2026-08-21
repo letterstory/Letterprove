@@ -55,7 +55,7 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 					</div>
 				</div>
 			</header>
-			<main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
+			<main className="vendor-main mx-auto max-w-5xl px-6 py-10">{children}</main>
 		</div>
 	);
 }
