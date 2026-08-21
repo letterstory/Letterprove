@@ -79,9 +79,21 @@ export async function SiteHeader() {
 export function SiteFooter() {
 	return (
 		<footer className="mt-20 border-t border-edge">
-			<div className="mx-auto max-w-5xl px-6 py-8 text-sm text-fog">
-				Every attestation links to the open-source logic that computed it. A product of The Letter
-				Company.
+			<div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-6 py-8 text-sm text-fog">
+				<span>
+					Every attestation links to the open-source logic that computed it. A product of The
+					Letter Company.
+				</span>
+				{/* Reachable from every public page: these get cited from contracts,
+				    so a link that only exists on one page is a link nobody finds. */}
+				<span className="flex items-center gap-3 whitespace-nowrap">
+					<Link className="hover:text-mint" href="/privacy">
+						Privacy
+					</Link>
+					<Link className="hover:text-mint" href="/terms">
+						Terms
+					</Link>
+				</span>
 			</div>
 		</footer>
 	);
