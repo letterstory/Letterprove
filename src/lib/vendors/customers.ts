@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FEATURES, type Consent } from "@/lib/fixtures/vendors";
 import { classifyDomain } from "@/lib/identity/domains";
@@ -17,9 +18,10 @@ export type CustomerRow = {
 	verified: boolean;
 	features: string[];
 	consent: Consent;
+	countersigned_at: string | null;
 };
 
-const CUSTOMER_COLUMNS = "id, slug, name, domain, since, tier, verified, features, consent";
+const CUSTOMER_COLUMNS = "id, slug, name, domain, since, tier, verified, features, consent, countersigned_at";
 
 export type ServiceResult<T> = { ok: true; data: T } | { ok: false; status: number; body: Record<string, unknown> };
 
@@ -168,6 +170,46 @@ export async function updateCustomer(
 	if (error) return { ok: false, status: 400, body: { error: error.message } };
 	if (!data) return { ok: false, status: 404, body: { error: "not_found" } };
 	return { ok: true, data: data as CustomerRow };
+}
+
+/** How long a consent link stays live before a vendor has to re-issue it. */
+const CONSENT_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type ConsentLink = { token: string; expiresAt: string };
+
+/**
+ * Mints (or re-mints) the unguessable link a vendor hands their customer to
+ * approve their own attestation — the tier-4 counter-signature (README §
+ * Consent). Generating a new one overwrites any live token, which is the
+ * vendor's way to invalidate a stale link (sent to the wrong inbox, expired,
+ * customer lost it).
+ *
+ * Deliberately not exposed as an `update_customer` field: a vendor being able
+ * to PATCH `countersigned_at` or `consent_token` directly would let them
+ * forge the one tier they can't otherwise reach. This is the only path that
+ * touches those columns from vendor-authenticated code, and it never sets
+ * `countersigned_at` — only the customer's own POST to the public consent
+ * route (src/lib/vendors/consent.ts) can do that.
+ */
+export async function generateConsentLink(
+	supabase: SupabaseClient,
+	vendorId: string,
+	slug: string,
+): Promise<ServiceResult<ConsentLink>> {
+	const token = randomUUID();
+	const expiresAt = new Date(Date.now() + CONSENT_LINK_TTL_MS).toISOString();
+
+	const { data, error } = await supabase
+		.from("vendor_customers")
+		.update({ consent_token: token, consent_token_expires_at: expiresAt })
+		.eq("vendor_id", vendorId)
+		.eq("slug", slug)
+		.select("id")
+		.maybeSingle();
+
+	if (error) return { ok: false, status: 400, body: { error: error.message } };
+	if (!data) return { ok: false, status: 404, body: { error: "not_found" } };
+	return { ok: true, data: { token, expiresAt } };
 }
 
 export async function deleteCustomer(

@@ -26,7 +26,7 @@ export default async function VendorCustomersPage() {
 	const supabase = await createServerSupabaseClient();
 	const { data } = await supabase
 		.from("vendor_customers")
-		.select("id, slug, name, domain, since, tier, verified, features, consent")
+		.select("id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
 		.eq("vendor_id", vendor.id)
 		.order("created_at", { ascending: true });
 

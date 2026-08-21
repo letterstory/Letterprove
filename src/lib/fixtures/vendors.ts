@@ -56,6 +56,14 @@ export interface CustomerFixture {
 	 * silently withheld, never silently published.
 	 */
 	consent?: Consent;
+	/**
+	 * When this customer approved their own attestation via the consent link
+	 * (src/app/attest/[vendor]/[customer]/consent). Null until then. This is
+	 * tier-4 evidence in its own right — see earned() in ../attest/body.ts —
+	 * independent of `tier`, which is only ever a ceiling on what the vendor's
+	 * own observation pipeline can earn.
+	 */
+	countersignedAt?: string | null;
 }
 
 /** Consent, with the safe default applied. The only way publication should ask. */
@@ -101,6 +109,7 @@ interface CustomerRow {
 	verified: boolean;
 	features: string[];
 	consent: Consent;
+	countersigned_at: string | null;
 }
 
 function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
@@ -120,6 +129,7 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 			verified: c.verified,
 			features: c.features,
 			consent: c.consent,
+			countersignedAt: c.countersigned_at,
 		})),
 	};
 }
@@ -140,7 +150,7 @@ export async function allVendors(): Promise<VendorFixture[]> {
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
 		.in(
 			"vendor_id",
 			rows.map((r) => r.id),
@@ -174,7 +184,7 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
 		.eq("vendor_id", row.id);
 
 	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
@@ -198,7 +208,7 @@ export async function findVendorByKey(key: string): Promise<VendorFixture | unde
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
 		.eq("vendor_id", row.id);
 
 	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
