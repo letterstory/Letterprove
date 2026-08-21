@@ -160,14 +160,15 @@ export const TOOLS: ToolDef[] = [
 	},
 	{
 		name: "get_status",
-		description: "Whether the caller's vendor has received any events in the last 24h, and how many.",
+		description:
+			"Whether the caller's vendor has received any events in the last 24h and how many, plus whether the tracking script has ever successfully checked in at all.",
 		capability: "vendor:read",
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
 			const result = await getVendorStatus(vendorId);
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
-			return { ok: true, body: { receiving: result.receiving, count: result.count } };
+			return { ok: true, body: { receiving: result.receiving, installed: result.installed, count: result.count } };
 		},
 	},
 	{

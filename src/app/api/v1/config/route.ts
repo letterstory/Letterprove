@@ -1,6 +1,7 @@
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { configJson, notFound } from "@/lib/http";
 import { CURRENT_CONFIG_VERSION } from "@/lib/telemetry/events";
+import { recordConfigPing } from "@/lib/telemetry/ping";
 
 /**
  * `GET /v1/config` — see README § Configuration.
@@ -15,6 +16,8 @@ export async function GET(request: Request) {
 	const key = new URL(request.url).searchParams.get("k");
 	const vendor = key ? await findVendorByKey(key) : undefined;
 	if (!vendor) return notFound("unknown key");
+
+	await recordConfigPing(vendor.slug);
 
 	return configJson({
 		cfg: CURRENT_CONFIG_VERSION,

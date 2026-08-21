@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 type Status =
 	| { state: "loading" }
-	| { state: "ok"; receiving: boolean; count: number }
+	| { state: "ok"; receiving: boolean; installed: boolean; count: number }
 	| { state: "error" };
 
 /** GET /api/vendor/status on mount — the dashboard's "is this vendor receiving events?" check. */
@@ -19,8 +19,9 @@ export function StatusIndicator() {
 				if (!res.ok) throw new Error(`status ${res.status}`);
 				return res.json();
 			})
-			.then((data: { receiving: boolean; count: number }) => {
-				if (!cancelled) setStatus({ state: "ok", receiving: data.receiving, count: data.count });
+			.then((data: { receiving: boolean; installed: boolean; count: number }) => {
+				if (!cancelled)
+					setStatus({ state: "ok", receiving: data.receiving, installed: data.installed, count: data.count });
 			})
 			.catch(() => {
 				if (!cancelled) setStatus({ state: "error" });
@@ -45,6 +46,15 @@ export function StatusIndicator() {
 			<p className="flex items-center gap-2 text-sm text-red-300">
 				<span className="h-2 w-2 rounded-full bg-red-400" />
 				Couldn&apos;t check event status.
+			</p>
+		);
+	}
+
+	if (!status.receiving && status.installed) {
+		return (
+			<p className="flex items-center gap-2 text-sm text-fog">
+				<span className="h-2 w-2 rounded-full bg-amber-400" />
+				Script installed — waiting for your first identify() call…
 			</p>
 		);
 	}

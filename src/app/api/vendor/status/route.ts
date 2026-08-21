@@ -16,5 +16,5 @@ export async function GET() {
 	const result = await getVendorStatus(vendor.id);
 	if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
 
-	return NextResponse.json({ receiving: result.receiving, count: result.count });
+	return NextResponse.json({ receiving: result.receiving, installed: result.installed, count: result.count });
 }

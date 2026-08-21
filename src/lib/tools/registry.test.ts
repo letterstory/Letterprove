@@ -179,12 +179,15 @@ describe("dispatchTool", () => {
 	it("reports get_status by delegating to the shared status service", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { getVendorStatus } = await import("@/lib/vendors/status");
-		vi.mocked(getVendorStatus).mockResolvedValue({ ok: true, receiving: true, count: 3 });
+		vi.mocked(getVendorStatus).mockResolvedValue({ ok: true, receiving: true, installed: true, count: 3 });
 
 		const outcome = await dispatchTool("get_status", {}, principal(["vendor:read"]));
 
 		expect(getVendorStatus).toHaveBeenCalledWith("v1");
-		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { receiving: true, count: 3 } } });
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: true, body: { receiving: true, installed: true, count: 3 } },
+		});
 	});
 
 	it("answers storage_unavailable rather than throwing when dbClient() is unconfigured", async () => {

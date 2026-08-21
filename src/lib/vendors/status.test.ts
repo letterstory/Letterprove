@@ -3,7 +3,17 @@ import { getVendorStatus } from "./status";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
-function mockDb({ vendor, count, error }: { vendor: unknown; count?: number | null; error?: unknown }) {
+function mockDb({
+	vendor,
+	count,
+	error,
+	ping = null,
+}: {
+	vendor: unknown;
+	count?: number | null;
+	error?: unknown;
+	ping?: unknown;
+}) {
 	const vendorMaybeSingle = vi.fn().mockResolvedValue({ data: vendor });
 	const vendorEq = vi.fn().mockReturnValue({ maybeSingle: vendorMaybeSingle });
 	const vendorSelect = vi.fn().mockReturnValue({ eq: vendorEq });
@@ -12,7 +22,15 @@ function mockDb({ vendor, count, error }: { vendor: unknown; count?: number | nu
 	const eventsEq = vi.fn().mockReturnValue({ gte: eventsGte });
 	const eventsSelect = vi.fn().mockReturnValue({ eq: eventsEq });
 
-	const from = vi.fn((table: string) => (table === "vendors" ? { select: vendorSelect } : { select: eventsSelect }));
+	const pingMaybeSingle = vi.fn().mockResolvedValue({ data: ping });
+	const pingEq = vi.fn().mockReturnValue({ maybeSingle: pingMaybeSingle });
+	const pingSelect = vi.fn().mockReturnValue({ eq: pingEq });
+
+	const from = vi.fn((table: string) => {
+		if (table === "vendors") return { select: vendorSelect };
+		if (table === "config_pings") return { select: pingSelect };
+		return { select: eventsSelect };
+	});
 	return { from };
 }
 
@@ -33,18 +51,29 @@ describe("getVendorStatus", () => {
 		expect(await getVendorStatus("v1")).toEqual({ ok: false, status: 404, error: "Not configured" });
 	});
 
-	it("reports receiving=false with a zero count when nothing landed in the window", async () => {
+	it("reports receiving=false, installed=false with a zero count when the script has never checked in", async () => {
 		const { dbClient } = await import("@/lib/db/client");
-		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, count: 0 }) as never);
+		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, count: 0, ping: null }) as never);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, count: 0 });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0 });
+	});
+
+	it("reports receiving=false, installed=true when config has been fetched but no event has landed", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(
+			mockDb({ vendor: { slug: "acme" }, count: 0, ping: { vendor_slug: "acme" } }) as never
+		);
+
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0 });
 	});
 
 	it("reports receiving=true once at least one event landed", async () => {
 		const { dbClient } = await import("@/lib/db/client");
-		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, count: 5 }) as never);
+		vi.mocked(dbClient).mockReturnValue(
+			mockDb({ vendor: { slug: "acme" }, count: 5, ping: { vendor_slug: "acme" } }) as never
+		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, count: 5 });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5 });
 	});
 
 	it("reports a count failure distinctly from a missing vendor", async () => {
