@@ -24,7 +24,17 @@ export const TTL_SECONDS = 3600;
  * which is tier 0 in the README's trust model, and cannot be `verified` at
  * any tier.
  */
-export function earned(customer: CustomerFixture, observed: boolean): { tier: Tier; verified: boolean } {
+export function earned(
+	customer: CustomerFixture,
+	observed: boolean,
+	domainVerified: boolean,
+): { tier: Tier; verified: boolean } {
+	// Same ceiling, one step earlier. An observation is only evidence if we
+	// know who the origin it was pinned to belongs to — and `Origin` binds a
+	// browser, not curl (see /v1/observe). Until DNS control of the vendor's
+	// domain is proven, every observation is the vendor asserting, so it earns
+	// exactly what an assertion earns.
+	if (!domainVerified) return { tier: 0, verified: false };
 	if (!observed) return { tier: 0, verified: false };
 	return { tier: customer.tier, verified: customer.verified };
 }
@@ -43,7 +53,7 @@ export async function attestationBody(
 	customer: CustomerFixture
 ): Promise<{ body: Omit<AttestationBody, "prev_hash">; snapshot: CustomerSnapshot }> {
 	const snapshot = await currentSnapshot(vendor.slug, customer.domain);
-	const { tier, verified } = earned(customer, snapshot.observed);
+	const { tier, verified } = earned(customer, snapshot.observed, vendor.domainVerified);
 	const body = {
 		vendor: vendor.slug,
 		customer: customer.slug,

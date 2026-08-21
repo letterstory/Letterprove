@@ -33,6 +33,7 @@ Usage:
   letterprove install                          The <script> tag to put on your site
   letterprove keys rotate                      Replace your collector key — invalidates the old one immediately
   letterprove vendor update [--name <name>] [--domain <domain>] [--category <category>]  Edit your vendor account
+  letterprove vendor verify                                    Check DNS for your domain-verification record
   letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
 
   letterprove customers list                   List this vendor's customers
@@ -280,6 +281,23 @@ async function cmdVendor({ config, flags, io, positional }) {
 	const client = newClient(config);
 
 	switch (sub) {
+		case "verify": {
+			const result = await client.callTool("verify_domain", {});
+			if (flags.json) {
+				io.log(JSON.stringify(result, null, 2));
+				return result.verified ? 0 : 1;
+			}
+			if (result.verified) {
+				io.log(result.message ?? "Domain verified.");
+				return 0;
+			}
+			// Non-zero, so this is usable in a script that waits for DNS.
+			io.error(result.message ?? "Domain not verified.");
+			if (result.record) {
+				io.error(`\nAdd a TXT record at ${(result.hosts ?? []).join(" or ")} with:\n  ${result.record}`);
+			}
+			return 1;
+		}
 		case "update": {
 			const args = {};
 			if (typeof flags.name === "string") args.name = flags.name;

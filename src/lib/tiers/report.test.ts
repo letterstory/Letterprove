@@ -160,7 +160,7 @@ describe("classifyRow", () => {
 	};
 
 	it("publishes at the earned tier when a named customer has evidence", () => {
-		const r = classifyRow("acme.com", busy, customer);
+		const r = classifyRow("acme.com", busy, customer, true);
 		expect(r.status).toBe("published");
 		expect(r.assertedTier).toBe(2);
 		expect(r.earnedTier).toBe(2);
@@ -169,42 +169,42 @@ describe("classifyRow", () => {
 	// The asserted tier stays visible even when capped, because "what did the
 	// vendor claim" is the question someone is usually asking next.
 	it("caps a named customer with no evidence, keeping the asserted tier visible", () => {
-		const r = classifyRow("acme.com", none, customer);
+		const r = classifyRow("acme.com", none, customer, true);
 		expect(r.status).toBe("no-observation");
 		expect(r.assertedTier).toBe(2);
 		expect(r.earnedTier).toBe(0);
 	});
 
 	it("reports a withheld customer as consent-blocked, not as missing evidence", () => {
-		const r = classifyRow("acme.com", busy, { ...customer, consent: "anonymous" });
+		const r = classifyRow("acme.com", busy, { ...customer, consent: "anonymous" }, true);
 		expect(r.status).toBe("consent-withheld");
 		expect(r.sessions).toBe(12);
 	});
 
 	it("treats an omitted consent field as withheld", () => {
 		const { consent: _omitted, ...noConsent } = customer;
-		expect(classifyRow("acme.com", busy, noConsent).status).toBe("consent-withheld");
+		expect(classifyRow("acme.com", busy, noConsent, true).status).toBe("consent-withheld");
 	});
 
 	it("flags observed, attributable traffic with no record", () => {
-		expect(classifyRow("acme.com", busy, undefined).status).toBe("no-customer-record");
+		expect(classifyRow("acme.com", busy, undefined, true).status).toBe("no-customer-record");
 	});
 
 	// The worst case the ordering exists for: a customer record on a domain that
 	// can never name a company. Publishing state is irrelevant while that is true.
 	it("puts unattributability ahead of every other status, record or not", () => {
-		const onFreeMail = classifyRow("gmail.com", busy, { ...customer, domain: "gmail.com" });
+		const onFreeMail = classifyRow("gmail.com", busy, { ...customer, domain: "gmail.com" }, true);
 		expect(onFreeMail.status).toBe("not-attributable");
 		expect(onFreeMail.kind).toBe("free_mail");
 
-		expect(classifyRow("lettertrace.com", busy, undefined).status).toBe("not-attributable");
-		expect(classifyRow("probe.invalid", busy, undefined).status).toBe("not-attributable");
+		expect(classifyRow("lettertrace.com", busy, undefined, true).status).toBe("not-attributable");
+		expect(classifyRow("probe.invalid", busy, undefined, true).status).toBe("not-attributable");
 	});
 
 	// signups and logins are evidence too — a domain seen only at signup has
 	// still been observed.
 	it("counts any event type as evidence, not just sessions", () => {
-		const signupOnly = classifyRow("acme.com", { sessions: 0, signups: 1, logins: 0 }, customer);
+		const signupOnly = classifyRow("acme.com", { sessions: 0, signups: 1, logins: 0 }, customer, true);
 		expect(signupOnly.status).toBe("published");
 		expect(signupOnly.earnedTier).toBe(2);
 	});
