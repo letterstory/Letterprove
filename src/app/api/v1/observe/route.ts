@@ -1,3 +1,4 @@
+import { hostnameOf } from "@/lib/vendors/domain";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
 	 * this for real, but that's a phase-2+ redesign with its own trust-tier
 	 * plumbing — not something to bolt on here piecemeal.
 	 */
-	const origin = originHostname(request.headers.get("origin"));
+	const origin = hostnameOf(request.headers.get("origin"));
 	if (!origin || origin !== vendor.domain) return collectorResponse(false);
 
 	await recordObservation({
@@ -94,11 +95,3 @@ function parseJson(raw: string): unknown {
 	}
 }
 
-function originHostname(origin: string | null): string | null {
-	if (!origin) return null;
-	try {
-		return new URL(origin).hostname.toLowerCase();
-	} catch {
-		return null;
-	}
-}

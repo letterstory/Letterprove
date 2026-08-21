@@ -1,6 +1,7 @@
 import type { OAuthPrincipal } from "@/lib/oauth/core";
 import type { Capability } from "@/lib/oauth/scopes";
 import { dbClient } from "@/lib/db/client";
+import { domainRejectionReason, normalizeDomain } from "@/lib/vendors/domain";
 import { isStaffUser } from "@/lib/staff/allowlist";
 import {
 	listCustomers,
@@ -252,7 +253,17 @@ export const TOOLS: ToolDef[] = [
 			const record = asRecord(args);
 			const update: Record<string, unknown> = {};
 			if (typeof record.name === "string" && record.name.trim()) update.name = record.name.trim();
-			if (typeof record.domain === "string" && record.domain.trim()) update.domain = record.domain.trim();
+			if (typeof record.domain === "string" && record.domain.trim()) {
+				// Same normalisation the signup form applies. Without it the CLI
+				// is a back door to exactly the unmatchable value the form now
+				// rejects — and this path uses the service-role client, so no
+				// RLS policy stands behind it either.
+				const normalized = normalizeDomain(record.domain);
+				if (!normalized) {
+					return { ok: false, status: 400, body: { error: domainRejectionReason(record.domain) } };
+				}
+				update.domain = normalized;
+			}
 			if (typeof record.category === "string" && record.category.trim()) update.category = record.category.trim();
 			if (Object.keys(update).length === 0) {
 				return { ok: false, status: 400, body: { error: "at least one of name, domain, category is required" } };

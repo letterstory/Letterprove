@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabaseClient } from "@/lib/auth/server";
 import { generateKey } from "@/lib/vendors/keys";
+import { domainRejectionReason, normalizeDomain } from "@/lib/vendors/domain";
 
 // Creates a brand-new vendor org + the signed-in user's membership row in
 // it. RLS (see 20260814231500_vendor_self_signup_policies.sql) allows any
@@ -30,6 +31,15 @@ export async function POST(request: NextRequest) {
 		);
 	}
 
+	// The collector compares an incoming Origin header to this value for
+	// equality, so anything but a bare hostname collects nothing — silently,
+	// because /v1/observe is sendBeacon-safe and answers 204 either way.
+	// Reject here, the one moment the vendor is looking at the field.
+	const normalizedDomain = normalizeDomain(domain);
+	if (!normalizedDomain) {
+		return NextResponse.json({ error: domainRejectionReason(domain) }, { status: 400 });
+	}
+
 	const baseSlug = slugify(name);
 	if (!baseSlug) {
 		return NextResponse.json({ error: "Vendor name must contain letters or numbers" }, { status: 400 });
@@ -37,12 +47,12 @@ export async function POST(request: NextRequest) {
 
 	const key = generateKey(baseSlug);
 
-	let vendorId = await insertVendor(supabase, baseSlug, name, domain, category, key);
+	let vendorId = await insertVendor(supabase, baseSlug, name, normalizedDomain, category, key);
 
 	if (vendorId === "conflict") {
 		// Unique-slug conflict — retry once with a short random suffix.
 		const retrySlug = `${baseSlug}-${randomBytes(2).toString("hex")}`;
-		vendorId = await insertVendor(supabase, retrySlug, name, domain, category, key);
+		vendorId = await insertVendor(supabase, retrySlug, name, normalizedDomain, category, key);
 	}
 
 	if (vendorId === "conflict" || vendorId === null) {
