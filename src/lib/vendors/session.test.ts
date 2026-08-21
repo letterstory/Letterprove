@@ -15,20 +15,26 @@ const VENDOR = {
 	key: "lp_live_acme_x",
 };
 
-/** Records the query the caller builds, so the ordering can be asserted. */
+/**
+ * Records the query the caller builds, so the ordering can be asserted.
+ * `order` has to be chainable — the real query applies two terms, and a mock
+ * that only supports one would pass while the second silently did nothing.
+ */
 function mockDb(result: unknown) {
-	const calls: { order?: [string, unknown]; limit?: number } = {};
+	const calls: { orders: [string, unknown][]; limit?: number } = { orders: [] };
 	const maybeSingle = vi.fn().mockResolvedValue({ data: result });
+	const returns = vi.fn().mockResolvedValue({ data: result });
 	const limit = vi.fn((n: number) => {
 		calls.limit = n;
-		return { maybeSingle };
+		return { maybeSingle, returns };
 	});
+	const chain: Record<string, unknown> = { limit, maybeSingle, returns };
 	const order = vi.fn((col: string, opts: unknown) => {
-		calls.order = [col, opts];
-		return { limit, maybeSingle };
+		calls.orders.push([col, opts]);
+		return chain;
 	});
-	const returns = vi.fn().mockResolvedValue({ data: result });
-	const select = vi.fn(() => ({ order, limit, maybeSingle, returns }));
+	chain.order = order;
+	const select = vi.fn(() => chain);
 	return { client: { from: vi.fn(() => ({ select })) }, calls };
 }
 
@@ -47,14 +53,19 @@ describe("currentVendor", () => {
 		expect(await currentVendor()).toEqual(VENDOR);
 	});
 
-	it("picks deterministically when a user belongs to more than one vendor", async () => {
-		// `limit(1)` with no order is whichever row Postgres happens to return,
-		// and it can differ between requests — the dashboard would switch
-		// vendors under the user, key and install snippet included.
+	it("shows the vendor last switched to, and falls back to the oldest", async () => {
+		// Both terms matter. With no order at all, limit(1) is whichever row
+		// Postgres happens to return and can differ between requests — the
+		// dashboard would change under the user, key and install snippet
+		// included. Without the created_at fallback, a user who has never
+		// touched the switcher would have no vendor at all.
 		const { client, calls } = mockDb({ vendors: VENDOR });
 		await signedIn(client);
 		await currentVendor();
-		expect(calls.order).toEqual(["created_at", { ascending: true }]);
+		expect(calls.orders).toEqual([
+			["last_selected_at", { ascending: false, nullsFirst: false }],
+			["created_at", { ascending: true }],
+		]);
 		expect(calls.limit).toBe(1);
 	});
 
@@ -81,25 +92,39 @@ describe("currentVendor", () => {
 });
 
 describe("vendorMemberships", () => {
+	it("lists in the same order currentVendor resolves, so the first entry is the active one", async () => {
+		const { client, calls } = mockDb([]);
+		await signedIn(client);
+		await vendorMemberships();
+		expect(calls.orders).toEqual([
+			["last_selected_at", { ascending: false, nullsFirst: false }],
+			["created_at", { ascending: true }],
+		]);
+		// Deliberately unlimited: the switcher needs all of them.
+		expect(calls.limit).toBeUndefined();
+	});
+
 	it("returns every vendor, unlike currentVendor", async () => {
 		// The consent screen must ask rather than assume: a CLI token is minted
 		// for exactly one vendor, so silently picking would hand the terminal a
 		// credential for a vendor the user did not choose.
 		const { client } = mockDb([
-			{ vendors: { id: "v1", name: "Acme" } },
-			{ vendors: { id: "v2", name: "Globex" } },
+			{ vendors: { id: "v1", name: "Acme", slug: "acme", domain: "acme.com" } },
+			{ vendors: { id: "v2", name: "Globex", slug: "globex", domain: "globex.com" } },
 		]);
 		await signedIn(client);
 		expect(await vendorMemberships()).toEqual([
-			{ id: "v1", name: "Acme" },
-			{ id: "v2", name: "Globex" },
+			{ id: "v1", name: "Acme", slug: "acme", domain: "acme.com" },
+			{ id: "v2", name: "Globex", slug: "globex", domain: "globex.com" },
 		]);
 	});
 
 	it("drops rows whose join came back empty rather than emitting nulls", async () => {
-		const { client } = mockDb([{ vendors: null }, { vendors: { id: "v2", name: "Globex" } }]);
+		const { client } = mockDb([{ vendors: null }, { vendors: { id: "v2", name: "Globex", slug: "globex", domain: "globex.com" } }]);
 		await signedIn(client);
-		expect(await vendorMemberships()).toEqual([{ id: "v2", name: "Globex" }]);
+		expect(await vendorMemberships()).toEqual([
+			{ id: "v2", name: "Globex", slug: "globex", domain: "globex.com" },
+		]);
 	});
 
 	it("returns nothing when signed out", async () => {

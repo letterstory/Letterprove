@@ -45,11 +45,13 @@ export const currentVendor = cache(async (): Promise<CurrentVendor | null> => {
 	const { data } = await supabase
 		.from("vendor_members")
 		.select("vendors(id, slug, name, domain, category, key)")
-		// `limit(1)` without an order is whichever row Postgres happens to
-		// return, and that can differ between requests — so a user in two
-		// vendors could watch the dashboard switch under them, with the key
-		// and install snippet switching too. Oldest membership wins: it is
-		// stable, and it is the vendor they created first.
+		// Whichever vendor was last switched to, falling back to the oldest
+		// membership when nothing has been. Two terms, both needed: without an
+		// order at all, `limit(1)` is whichever row Postgres happens to return
+		// and can differ between requests — the dashboard would change under a
+		// user, key and install snippet included. Without the fallback, a user
+		// who has never opened the switcher has no vendor at all.
+		.order("last_selected_at", { ascending: false, nullsFirst: false })
 		.order("created_at", { ascending: true })
 		.limit(1)
 		.maybeSingle<VendorMembershipRow>();
@@ -67,15 +69,27 @@ export const currentVendor = cache(async (): Promise<CurrentVendor | null> => {
  * credential for a vendor they did not choose. Same RLS-scoped select, no
  * manual ownership check (see feedback_rls_trust_pattern).
  */
-export const vendorMemberships = cache(async (): Promise<{ id: string; name: string }[]> => {
+export interface VendorMembership {
+	id: string;
+	name: string;
+	slug: string;
+	domain: string;
+}
+
+export const vendorMemberships = cache(async (): Promise<VendorMembership[]> => {
 	const user = await getUser();
 	if (!user) return [];
 
 	const supabase = await createServerSupabaseClient();
 	const { data } = await supabase
 		.from("vendor_members")
-		.select("vendors(id, name)")
-		.returns<{ vendors: { id: string; name: string } | null }[]>();
+		.select("vendors(id, name, slug, domain)")
+		// Same order the switcher shows them in, and the same order
+		// currentVendor() resolves — so the first entry in this list is always
+		// the one the dashboard is actually showing.
+		.order("last_selected_at", { ascending: false, nullsFirst: false })
+		.order("created_at", { ascending: true })
+		.returns<{ vendors: VendorMembership | null }[]>();
 
 	return (data ?? []).flatMap((row) => (row.vendors ? [row.vendors] : []));
 });

@@ -360,10 +360,10 @@ describe("proxy — /vendor auth gate", () => {
 		expect(new URL(res!.headers.get("location")!).pathname).toBe("/vendor");
 	});
 
-	it("sends a signed-in member away from onboarding", async () => {
-		// Onboarding only ever creates a NEW vendor, and currentVendor() shows
-		// the oldest membership — so a second one made here would be invisible
-		// in the dashboard that created it, with no switcher to reach it.
+	it("sends a signed-in member away from a bare visit to onboarding", async () => {
+		// Onboarding only ever creates a NEW vendor, so a member landing here
+		// by accident used to end up with one nothing could reach. A stray
+		// click must still bounce.
 		setAuthEnv(true);
 		mockSupabaseVendor(USER, { vendor_id: "v1" });
 		const { proxy: p } = await freshProxy();
@@ -372,6 +372,30 @@ describe("proxy — /vendor auth gate", () => {
 
 		expect(res?.status).toBe(307);
 		expect(new URL(res!.headers.get("location")!).pathname).toBe("/vendor");
+	});
+
+	it("lets a member through to onboarding when they meant it", async () => {
+		// ?new=1 is set only by the switcher's own "Add a vendor" link. The
+		// switcher is also what makes the second vendor reachable afterwards,
+		// so intent and visibility arrive together.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/onboarding?new=1"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("does not accept any other value as intent", async () => {
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		for (const qs of ["?new=0", "?new=true", "?new", "?other=1"]) {
+			const res = await p(new NextRequest(`https://app.letterprove.com/vendor/onboarding${qs}`));
+			expect(res?.status, qs).toBe(307);
+		}
 	});
 
 	it("still lets a membership-less user through to onboarding", async () => {
