@@ -35,7 +35,13 @@ export type CollectionStatus =
 	| "reporting"
 	/** Has reported before, but nothing lately — the shape both outages had. */
 	| "silent"
-	/** Never reported at all: not installed, or installed and never loaded. */
+	/**
+	 * attest.js has booted (config_pings) but no identify()/signup()/login()
+	 * has ever fired. Not necessarily broken — see status.ts — but distinct
+	 * from `never`: the script is present, nothing has just gone wrong.
+	 */
+	| "installed"
+	/** No config ping and no event, ever: the script has not loaded at all. */
 	| "never";
 
 export interface VendorHealth {
@@ -89,10 +95,11 @@ export async function collectionHealth(): Promise<VendorHealth[] | null> {
 			? (Date.now() - new Date(lastEventAt).getTime()) / 3_600_000
 			: null;
 
-		const [events24h, events7d, events30d] = await Promise.all([
+		const [events24h, events7d, events30d, { data: ping }] = await Promise.all([
 			countSince(24),
 			countSince(24 * 7),
 			countSince(24 * 30),
+			db.from("config_pings").select("vendor_slug").eq("vendor_slug", v.slug).maybeSingle(),
 		]);
 
 		rows.push({
@@ -105,12 +112,18 @@ export async function collectionHealth(): Promise<VendorHealth[] | null> {
 			events7d,
 			events30d,
 			status:
-				hoursSince === null ? "never" : hoursSince > SILENT_AFTER_HOURS ? "silent" : "reporting",
+				hoursSince !== null
+					? hoursSince > SILENT_AFTER_HOURS
+						? "silent"
+						: "reporting"
+					: ping != null
+						? "installed"
+						: "never",
 		});
 	}
 
 	// Silent first: a vendor that stopped reporting is the only row here that
 	// ever needs acting on, and it should not be buried under healthy ones.
-	const order: Record<CollectionStatus, number> = { silent: 0, reporting: 1, never: 2 };
+	const order: Record<CollectionStatus, number> = { silent: 0, reporting: 1, installed: 2, never: 3 };
 	return rows.sort((a, b) => order[a.status] - order[b.status] || b.events7d - a.events7d);
 }

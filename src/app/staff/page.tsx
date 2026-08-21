@@ -23,12 +23,14 @@ export const dynamic = "force-dynamic";
 const STATUS_LABEL: Record<CollectionStatus, string> = {
 	reporting: "reporting",
 	silent: "silent",
+	installed: "installed",
 	never: "never reported",
 };
 
 function statusTone(status: CollectionStatus): string {
 	if (status === "reporting") return "border-mint/30 bg-mint/10 text-mint";
 	if (status === "silent") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+	if (status === "installed") return "border-sky-500/30 bg-sky-500/10 text-sky-200";
 	return "border-edge text-fog";
 }
 
@@ -85,6 +87,8 @@ export default async function StaffHome() {
 				&ldquo;Silent&rdquo; means a vendor reported before and has not in 24 hours. It is a
 				prompt to look, not a verdict — a quiet weekend produces the same number as a broken
 				install, which is why the automated check probes the script URL instead of the volume.
+				&ldquo;Installed&rdquo; means attest.js has loaded but no identify() has fired yet — the
+				script reached us, nothing has gone wrong.
 			</p>
 		</>
 	);
