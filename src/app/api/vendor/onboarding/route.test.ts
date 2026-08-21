@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
@@ -18,8 +19,10 @@ function mockSupabase() {
 	return { from, insert, auth: { getUser } };
 }
 
+// The route takes a NextRequest (it builds a redirect from request.url), so
+// build a real one rather than casting a plain Request past the type.
 function req(body: unknown) {
-	return new Request("https://app.letterprove.com/api/vendor/onboarding", {
+	return new NextRequest("https://app.letterprove.com/api/vendor/onboarding", {
 		method: "POST",
 		body: JSON.stringify(body),
 	});
