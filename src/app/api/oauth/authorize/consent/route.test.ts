@@ -73,7 +73,9 @@ beforeEach(() => {
 	vi.mocked(consumePendingForConsent).mockResolvedValue(PENDING as never);
 	vi.mocked(upsertAuthorization).mockResolvedValue({ id: "auth-1" } as never);
 	vi.mocked(issueAuthorizationCode).mockResolvedValue("code-1");
-	vi.mocked(vendorMemberships).mockResolvedValue([{ id: "v1", name: "Acme" }]);
+	vi.mocked(vendorMemberships).mockResolvedValue([
+		{ id: "v1", name: "Acme", slug: "acme", domain: "acme.com" },
+	]);
 });
 
 describe("POST /api/oauth/authorize/consent — grants whatever was requested", () => {
