@@ -11,6 +11,7 @@ import { buildChain, head } from "./chain";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import { allVendors, consentOf, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
 import { loadPersistedChain } from "@/rollup/history";
+import { tierReport } from "@/lib/tiers/report";
 import type { SignedAttestation } from "./types";
 
 // Re-exported for proofs.test.ts, which exercises the tier-gating rule
@@ -33,6 +34,15 @@ export interface VendorProof {
 		attested_customers: number;
 		/** Of `attested_customers`, how many are withheld pending consent. */
 		attested_unnamed: number;
+		/**
+		 * Domains that could name a company and were actually observed, but
+		 * haven't crossed into `attested_customers` yet — no customer record
+		 * exists for them, or one exists without consent to be named. A
+		 * count only: this must never grow into per-domain detail, since
+		 * that's exactly the staff-only view tierReport() already gates
+		 * (see the warning on its own doc comment).
+		 */
+		unverified_customers: number;
 		features_proven: string[];
 		sessions_30d: number;
 		/** The most recent `published_at` across all customers. */
@@ -153,6 +163,12 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 	const features = new Set<string>();
 	for (const c of attested) for (const f of c.proof.current.features) features.add(f);
 
+	// Best-effort: a zero here on a telemetry hiccup understates the vendor's
+	// real backlog for one page load rather than failing the whole report, and
+	// self-heals on the next request. tierReport()'s own null-vs-zero rule
+	// applies to the staff report it's meant for, not to this single count.
+	const tiers = await tierReport(vendor.slug);
+
 	return {
 		vendor: { slug: vendor.slug, name: vendor.name, domain: vendor.domain, category: vendor.category },
 		customers: all.filter((c) => c.named).map((c) => c.proof),
@@ -163,6 +179,7 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 			// an agent that sees "3 attested" and one named entry should be able to
 			// tell that the other two were withheld, not that we miscounted.
 			attested_unnamed: attested.filter((c) => !c.named).length,
+			unverified_customers: tiers?.unpublishedEvidence ?? 0,
 			features_proven: [...features].sort(),
 			sessions_30d: attested.reduce((n, c) => n + c.proof.current.sessions_30d, 0),
 			last_attested: all.map((c) => c.proof.current.published_at).sort().at(-1) ?? "",
