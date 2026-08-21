@@ -27,7 +27,10 @@ export function DomainCard({
 }) {
 	const [checking, setChecking] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const verified = Boolean(verifiedAt);
+	// Seeded from the server-rendered prop, then updated in place on a
+	// successful check — no page reload needed to see the badge go green.
+	const [localVerifiedAt, setLocalVerifiedAt] = useState(verifiedAt);
+	const verified = Boolean(localVerifiedAt);
 
 	async function check() {
 		setChecking(true);
@@ -36,7 +39,7 @@ export function DomainCard({
 			const res = await fetch("/api/vendor/verify-domain", { method: "POST" });
 			const body = await res.json();
 			if (body.verified) {
-				window.location.reload();
+				setLocalVerifiedAt(body.verifiedAt);
 				return;
 			}
 			setError(body.message ?? body.error ?? "Not verified yet.");
@@ -71,7 +74,7 @@ export function DomainCard({
 			{verified ? (
 				<p className="mt-2 text-sm text-fog">
 					DNS control confirmed{" "}
-					{new Date(verifiedAt!).toLocaleDateString("en-US", {
+					{new Date(localVerifiedAt!).toLocaleDateString("en-US", {
 						month: "long",
 						day: "numeric",
 						year: "numeric",
