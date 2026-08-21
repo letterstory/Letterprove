@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 // Auth uses the *anon* key + a user session (cookies) — distinct from
 // src/lib/db/client.ts's service-role client, which the hot-tier collection
@@ -35,12 +36,20 @@ export async function createServerSupabaseClient() {
 	});
 }
 
-/** The signed-in staff user, or null when signed out or auth isn't configured. */
-export async function getUser() {
+/**
+ * The signed-in user, or null when signed out or auth isn't configured.
+ *
+ * cache()d so it runs once per request rather than once per caller. Rendering
+ * /vendor/customers made four auth round-trips: the layout asked, then
+ * currentVendor() asked again inside the layout, then the page called
+ * currentVendor() and it asked again. They cannot disagree — it is one cookie
+ * — so the extras were pure latency, and each is a network hop to Supabase.
+ */
+export const getUser = cache(async () => {
 	if (!isAuthConfigured()) return null;
 	const supabase = await createServerSupabaseClient();
 	const {
 		data: { user },
 	} = await supabase.auth.getUser();
 	return user;
-}
+});
