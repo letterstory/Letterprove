@@ -34,6 +34,14 @@ comment on column vendor_members.last_selected_at is
 -- table already had select and insert policies scoped to auth.uid(); this is
 -- the same scope for update, so a user still cannot see, create, or now touch
 -- a membership that is not theirs.
+-- Dropped first because `create policy` has no `if not exists` — unlike every
+-- other statement in this file, it cannot be re-run. That is not hypothetical:
+-- this migration was applied by hand while testing the switcher, and the
+-- deploy that followed re-ran it and failed the whole build on SQLSTATE 42710.
+-- A migration that only works against a database in one exact state is a trap
+-- for whoever re-runs it next, restores a branch, or seeds an environment.
+drop policy if exists "a user can update their own membership" on vendor_members;
+
 create policy "a user can update their own membership" on vendor_members
 	for update
 	using (user_id = auth.uid())
