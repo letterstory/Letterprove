@@ -48,6 +48,8 @@ export default function VendorResetPasswordPage() {
 				<Field label="New password">
 					<TextInput
 						type="password"
+						name="new-password"
+						id="new-password"
 						required
 						minLength={6}
 						autoComplete="new-password"
@@ -58,6 +60,8 @@ export default function VendorResetPasswordPage() {
 				<Field label="Confirm password">
 					<TextInput
 						type="password"
+						name="confirm-password"
+						id="confirm-password"
 						required
 						minLength={6}
 						autoComplete="new-password"

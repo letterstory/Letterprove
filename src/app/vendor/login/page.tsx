@@ -107,8 +107,10 @@ export default function VendorLoginPage() {
 				<Field label="Email">
 					<TextInput
 						type="email"
+						name="email"
+						id="email"
 						required
-						autoComplete="email"
+						autoComplete="username"
 						value={email}
 						onChange={(e) => setEmail(e.target.value)}
 					/>
@@ -117,6 +119,8 @@ export default function VendorLoginPage() {
 					<Field label="Password">
 						<TextInput
 							type="password"
+							name="password"
+							id="password"
 							required
 							minLength={6}
 							autoComplete={isSignup ? "new-password" : "current-password"}

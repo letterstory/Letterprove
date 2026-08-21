@@ -59,6 +59,9 @@ export function StaffLoginForm({ denied }: { denied: boolean }) {
 					Email
 					<input
 						type="email"
+						name="email"
+						id="email"
+						autoComplete="username"
 						required
 						value={email}
 						onChange={(e) => setEmail(e.target.value)}
@@ -69,6 +72,9 @@ export function StaffLoginForm({ denied }: { denied: boolean }) {
 					Password
 					<input
 						type="password"
+						name="password"
+						id="password"
+						autoComplete="current-password"
 						required
 						minLength={6}
 						value={password}
