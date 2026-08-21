@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "docs:status": "node scripts/gen-readme-status.mjs",
     "keygen": "node scripts/keygen.mjs",
     "verify": "node scripts/verify.mjs"
   },
