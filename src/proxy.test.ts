@@ -345,6 +345,71 @@ describe("proxy — /vendor auth gate", () => {
 		expect(res?.status).not.toBe(307);
 	});
 
+
+	it("sends a signed-in visitor away from the sign-in page", async () => {
+		// The layout renders the full vendor shell for a signed-in user, so
+		// /vendor/login showed working Dashboard/Customers/Proof tabs sitting
+		// above a form asking them to log in.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/login"));
+
+		expect(res?.status).toBe(307);
+		expect(new URL(res!.headers.get("location")!).pathname).toBe("/vendor");
+	});
+
+	it("sends a signed-in member away from onboarding", async () => {
+		// Onboarding only ever creates a NEW vendor, and currentVendor() shows
+		// the oldest membership — so a second one made here would be invisible
+		// in the dashboard that created it, with no switcher to reach it.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, { vendor_id: "v1" });
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/onboarding"));
+
+		expect(res?.status).toBe(307);
+		expect(new URL(res!.headers.get("location")!).pathname).toBe("/vendor");
+	});
+
+	it("still lets a membership-less user through to onboarding", async () => {
+		// The rule above must not strand a fresh signup, who has no membership
+		// and nowhere else to go.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/onboarding"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("keeps the password-recovery page reachable without a membership", async () => {
+		// A recovery link signs the user in before onboarding may have
+		// happened; bouncing them to onboarding would lose the reset.
+		setAuthEnv(true);
+		mockSupabaseVendor(USER, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/reset-password"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
+	it("does not bounce a signed-out visitor off the sign-in page", async () => {
+		// The redirect above is for signed-in visitors only — applying it to
+		// everyone would make signing in impossible.
+		setAuthEnv(true);
+		mockSupabaseVendor(null, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor/login"));
+
+		expect(res?.status).not.toBe(307);
+	});
+
 	it("leaves the public collection and proof surface ungated", async () => {
 		// /vendor is a login wall; the product's public API must not be behind
 		// it. These carry no session and must stay reachable.
