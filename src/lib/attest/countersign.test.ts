@@ -15,14 +15,14 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 			name: "Vantage",
 			domain: "vantage.example",
 			category: "customer data platforms",
-			key: "lp_live_vantage_9f2c",
+			key: "lp_live_vantage_9f2c", domainVerified: true,
 			customers: [
 				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api", "analytics"], consent: "named" },
 				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso", "api", "analytics", "sla"], consent: "anonymous" },
 				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
 			],
 		},
-		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", customers: [] },
+		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
 	];
 	return {
 		...original,

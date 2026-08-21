@@ -30,7 +30,14 @@ let membershipRow: { vendor_id: string } | null = { vendor_id: "v1" };
 // directly (single .eq().maybeSingle(), not the double-.eq() membership
 // shape above), so `from` branches on the table name. Defaults to a
 // resolvable vendor row; tests that need "not found" set vendorRow = null.
-let vendorRow: { key?: string; slug?: string; name?: string; domain?: string; category?: string } | null = {
+let vendorRow: {
+	key?: string;
+	slug?: string;
+	name?: string;
+	domain?: string;
+	category?: string;
+	domain_verified_at?: string | null;
+} | null = {
 	key: "lp_live_acme_old",
 	slug: "acme",
 };
@@ -393,10 +400,81 @@ describe("dispatchTool", () => {
 			result: {
 				ok: true,
 				body: {
-					vendor: { slug: "acme", name: "New Name", domain: "new.example.com", category: "retail" },
+					vendor: {
+						slug: "acme",
+						name: "New Name",
+						domain: "new.example.com",
+						category: "retail",
+						// The domain moved, so the proof of control for the old
+						// one no longer says anything about this row.
+						domain_verified_at: null,
+					},
 				},
 			},
 		});
+	});
+
+	it("clears domain verification when the domain changes", async () => {
+		// Otherwise: verify a domain you own, repoint the row at one you do
+		// not, keep the verified flag. That is the whole attack DNS
+		// verification exists to stop.
+		vendorRow = {
+			slug: "acme",
+			name: "Acme",
+			domain: "acme.com",
+			category: "retail",
+			domain_verified_at: "2026-08-01T00:00:00.000Z",
+		};
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("update_vendor", { domain: "victim.com" }, principal(["vendor:write"]));
+
+		expect(outcome).toMatchObject({
+			result: { ok: true, body: { vendor: { domain: "victim.com", domain_verified_at: null } } },
+		});
+	});
+
+	it("keeps verification when the domain is unchanged", async () => {
+		// Renaming or recategorising says nothing about domain control, so it
+		// must not cost a vendor their verified status.
+		vendorRow = {
+			slug: "acme",
+			name: "Acme",
+			domain: "acme.com",
+			category: "retail",
+			domain_verified_at: "2026-08-01T00:00:00.000Z",
+		};
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("update_vendor", { name: "Acme Inc" }, principal(["vendor:write"]));
+
+		expect(outcome).toMatchObject({
+			result: { ok: true, body: { vendor: { domain_verified_at: "2026-08-01T00:00:00.000Z" } } },
+		});
+	});
+
+	it("normalises a domain before storing it, like signup does", async () => {
+		vendorRow = { slug: "acme", name: "Acme", domain: "acme.com", category: "retail" };
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool(
+			"update_vendor",
+			{ domain: "https://New.Example.com/path" },
+			principal(["vendor:write"]),
+		);
+
+		expect(outcome).toMatchObject({
+			result: { ok: true, body: { vendor: { domain: "new.example.com" } } },
+		});
+	});
+
+	it("rejects a domain the collector could never match", async () => {
+		vendorRow = { slug: "acme", name: "Acme", domain: "acme.com", category: "retail" };
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("update_vendor", { domain: "my company" }, principal(["vendor:write"]));
+
+		expect(outcome).toMatchObject({ result: { ok: false, status: 400 } });
 	});
 
 	it("404s update_vendor when the caller's vendor row is gone", async () => {
