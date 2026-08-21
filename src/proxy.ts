@@ -136,37 +136,57 @@ async function vendorAuthGate(request: NextRequest) {
 		data: { user },
 	} = await supabase.auth.getUser();
 
-	if (request.nextUrl.pathname.startsWith("/vendor/login")) return response;
+	const { pathname } = request.nextUrl;
+	const onLogin = pathname.startsWith("/vendor/login");
+	const onOnboarding = pathname.startsWith("/vendor/onboarding");
+	const onReset = pathname.startsWith("/vendor/reset-password");
+
+	function redirectTo(destination: string) {
+		const url = request.nextUrl.clone();
+		url.pathname = destination;
+		url.search = "";
+		return NextResponse.redirect(url);
+	}
 
 	if (!user) {
+		// The sign-in page is the one thing a signed-out visitor may see here.
+		if (onLogin) return response;
+
 		const loginUrl = request.nextUrl.clone();
 		loginUrl.pathname = "/vendor/login";
 		loginUrl.search = "";
-		loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
+		loginUrl.searchParams.set("redirect", pathname);
 		return NextResponse.redirect(loginUrl);
 	}
 
-	// Onboarding is reachable by any signed-in user regardless of membership —
-	// it's the page that CREATES the first membership row, so gating it on
-	// having one would make it unreachable.
-	if (request.nextUrl.pathname.startsWith("/vendor/onboarding")) return response;
+	// Showing a signed-in visitor a sign-in form is incoherent, and the layout
+	// wraps it in the full vendor shell — so they got working Dashboard /
+	// Customers / Proof tabs sitting above a form asking them to log in.
+	// Send them into the app; the rules below sort out where.
+	if (onLogin) return redirectTo("/vendor");
 
 	// A password-recovery link signs the user in (Supabase treats recovery as
 	// a real session) before they've necessarily completed onboarding, so this
-	// needs the same membership-check exemption as onboarding itself.
-	if (request.nextUrl.pathname.startsWith("/vendor/reset-password")) return response;
+	// is exempt from the membership check either way.
+	if (onReset) return response;
 
 	// Signed in, but does this user belong to a vendor yet? A fresh signup has
 	// a session and no vendor_members row — RLS scopes this select to
 	// auth.uid() already (see the migration), so an empty result really does
 	// mean "no membership", not "blocked from seeing someone else's".
 	const { data: membership } = await supabase.from("vendor_members").select("vendor_id").limit(1).maybeSingle();
+
 	if (!membership) {
-		const onboardingUrl = request.nextUrl.clone();
-		onboardingUrl.pathname = "/vendor/onboarding";
-		onboardingUrl.search = "";
-		return NextResponse.redirect(onboardingUrl);
+		// Onboarding CREATES the first membership row, so it has to stay
+		// reachable by exactly the users who have none.
+		return onOnboarding ? response : redirectTo("/vendor/onboarding");
 	}
+
+	// Already has a vendor. Onboarding only ever creates a NEW one, and
+	// currentVendor() shows the oldest membership — so a second vendor created
+	// here would be invisible in the dashboard that made it, with no vendor
+	// switcher anywhere to reach it again.
+	if (onOnboarding) return redirectTo("/vendor");
 
 	return response;
 }
