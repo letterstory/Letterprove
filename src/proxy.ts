@@ -182,11 +182,15 @@ async function vendorAuthGate(request: NextRequest) {
 		return onOnboarding ? response : redirectTo("/vendor/onboarding");
 	}
 
-	// Already has a vendor. Onboarding only ever creates a NEW one, and
-	// currentVendor() shows the oldest membership — so a second vendor created
-	// here would be invisible in the dashboard that made it, with no vendor
-	// switcher anywhere to reach it again.
-	if (onOnboarding) return redirectTo("/vendor");
+	// Already has a vendor. Onboarding only ever creates a NEW one, so a member
+	// arriving here by accident used to end up with a vendor nothing could
+	// reach. The switcher fixes the reachability half; `?new=1` supplies the
+	// intent, and it is only ever set by the switcher's own "Add a vendor"
+	// link. A bare visit still bounces, so a stray click cannot silently
+	// create a second account.
+	if (onOnboarding && request.nextUrl.searchParams.get("new") !== "1") {
+		return redirectTo("/vendor");
+	}
 
 	return response;
 }

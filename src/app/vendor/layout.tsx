@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { getUser } from "@/lib/auth/server";
-import { currentVendor } from "@/lib/vendors/session";
+import { currentVendor, vendorMemberships } from "@/lib/vendors/session";
+import { VendorSwitcher } from "./VendorSwitcher";
 import { VendorNav } from "./nav";
 import { SignOutButton } from "./SignOutButton";
 
@@ -25,7 +26,7 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 	const user = await getUser();
 	if (!user) return <>{children}</>;
 
-	const vendor = await currentVendor();
+	const [vendor, memberships] = await Promise.all([currentVendor(), vendorMemberships()]);
 
 	return (
 		<div className="min-h-screen bg-ink">
@@ -37,6 +38,9 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 							<img src="/logo.svg" alt="Letterprove" className="h-5 w-auto" />
 							<span className="font-mono text-xs text-mint">vendor</span>
 						</Link>
+						{vendor && memberships.length > 1 && (
+							<VendorSwitcher vendors={memberships} activeId={vendor.id} />
+						)}
 						{vendor && <VendorNav />}
 					</div>
 					<div className="flex items-center gap-4 text-xs tracking-widest uppercase">
