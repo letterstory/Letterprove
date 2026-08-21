@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 /**
  * Shared form primitives for the vendor auth/onboarding surface, styled with
@@ -29,6 +29,15 @@ export function Field({
 export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
 	return (
 		<input
+			{...props}
+			className={`rounded border border-edge bg-ink px-3 py-2 text-sm text-[#e9efed] outline-none placeholder:text-fog/50 focus:border-mint ${props.className ?? ""}`}
+		/>
+	);
+}
+
+export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+	return (
+		<textarea
 			{...props}
 			className={`rounded border border-edge bg-ink px-3 py-2 text-sm text-[#e9efed] outline-none placeholder:text-fog/50 focus:border-mint ${props.className ?? ""}`}
 		/>
