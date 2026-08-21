@@ -7,6 +7,7 @@ import type { SignedAttestation } from "./types";
 
 vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
 vi.mock("@/rollup/history", () => ({ loadPersistedChain: vi.fn() }));
+vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
 
 // Vendor/customer identity is DB-backed now (supabase/migrations/
 // 20260814230000_vendor_accounts.sql), but this suite is exercising chain
@@ -218,7 +219,9 @@ describe("consent-gated publication", () => {
 	beforeEach(async () => {
 		const { currentSnapshot } = await import("@/rollup/snapshots");
 		const { loadPersistedChain } = await import("@/rollup/history");
+		const { tierReport } = await import("@/lib/tiers/report");
 		vi.mocked(loadPersistedChain).mockReset().mockResolvedValue([]);
+		vi.mocked(tierReport).mockReset();
 		vi.mocked(currentSnapshot).mockReset().mockResolvedValue({
 			observed_through: "2026-08-20T00:00:00.000Z",
 			published_at: "2026-08-20T00:00:00.000Z",
@@ -276,5 +279,35 @@ describe("consent-gated publication", () => {
 
 		expect(JSON.stringify(proof)).not.toContain("Northwind");
 		expect(JSON.stringify(proof)).not.toContain("northwind");
+	});
+
+	// The lettertrace case that motivated this field: real traffic, zero
+	// customer records, so the headline reads 0 attested with nothing to
+	// explain why. unverified_customers is that explanation, as a count only
+	// — tierReport's own per-domain rows must never reach this surface.
+	it("surfaces tierReport's unpublished-evidence count as unverified_customers", async () => {
+		vi.setSystemTime(new Date("2026-08-20T05:00:00.000Z"));
+		const { tierReport } = await import("@/lib/tiers/report");
+		vi.mocked(tierReport).mockResolvedValue({
+			vendor: "lettertrace",
+			observed: 47,
+			attributable: 43,
+			unpublishedEvidence: 43,
+			published: 0,
+			rows: [],
+		});
+
+		const proof = await vendorProof("lettertrace");
+		expect(proof!.summary.unverified_customers).toBe(43);
+		expect(JSON.stringify(proof)).not.toContain("tenevents"); // no row data, ever
+	});
+
+	it("degrades unverified_customers to 0 rather than failing the page when telemetry can't be read", async () => {
+		vi.setSystemTime(new Date("2026-08-20T06:00:00.000Z"));
+		const { tierReport } = await import("@/lib/tiers/report");
+		vi.mocked(tierReport).mockResolvedValue(null);
+
+		const proof = await vendorProof("lettertrace");
+		expect(proof!.summary.unverified_customers).toBe(0);
 	});
 });

@@ -27,8 +27,14 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					{proof.vendor.category} · {proof.vendor.domain}
 				</p>
 
-				<dl className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-4">
+				<dl className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-5">
 					<Tile label="Attested customers" value={String(proof.summary.attested_customers)} />
+					{/* Real activity that hasn't crossed into a published claim yet —
+					    no customer record, or a record without consent to be named.
+					    Without this, zero attested customers and zero of anything
+					    else look identical, when one of those is "nothing is
+					    happening" and the other is "a backlog nobody has worked." */}
+					<Tile label="Unverified" value={String(proof.summary.unverified_customers)} />
 					<Tile label="Features proven" value={String(proof.summary.features_proven.length)} />
 					<Tile label="Sessions / 30d" value={proof.summary.sessions_30d.toLocaleString("en-US")} />
 					<Tile label="Last attested" value={shortStamp(proof.summary.last_attested)} />
@@ -62,6 +68,18 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						{proof.summary.attested_unnamed === 1 ? "customer is" : "customers are"} counted in the
 						totals above but not named here. Their attestations exist and are signed; publishing
 						a customer&rsquo;s name is theirs to agree to, not the vendor&rsquo;s.
+					</p>
+				)}
+
+				{/* The "Unverified" tile has no room for the "why" — this is that
+				    room. Same domain-only discipline as everywhere else on this
+				    page: a count, never a name. */}
+				{proof.summary.unverified_customers > 0 && (
+					<p className="mt-4 rounded-lg border border-edge bg-panel px-4 py-3 text-sm text-fog">
+						<span className="text-mint">{proof.summary.unverified_customers}</span> more{" "}
+						{proof.summary.unverified_customers === 1 ? "domain shows" : "domains show"} real activity but
+						{proof.summary.unverified_customers === 1 ? " hasn't" : " haven't"} been recorded as a
+						customer, or consented to be named, yet — not counted above.
 					</p>
 				)}
 
