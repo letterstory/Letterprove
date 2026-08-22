@@ -24,6 +24,7 @@ import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots } from "@/lib/attest/proofs";
 import { installSnippet } from "@/lib/vendors/install";
 import { generateKey } from "@/lib/vendors/keys";
+import { sendSupportMessage } from "@/lib/support/slack";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -77,6 +78,10 @@ function requireVendorId(principal: OAuthPrincipal): string | ToolResult {
 	if (principal.vendorId) return principal.vendorId;
 	return { ok: false, status: 500, body: { error: "vendor_scope_without_vendor" } };
 }
+
+// Mirrors src/app/api/vendor/support/route.ts's own limit — same reasoning
+// as PROMOTE_STATUS below, a single shared constant isn't worth the coupling.
+const MAX_SUPPORT_MESSAGE_LENGTH = 4000;
 
 // Mirrors src/app/api/staff/customers/route.ts's STATUS map — kept in this
 // file too rather than exported/shared, since a route and a tool handler
@@ -383,6 +388,41 @@ export const TOOLS: ToolDef[] = [
 			const snapshots = await vendorSnapshots(vendor.slug, customer);
 			if (snapshots === null) return { ok: false, status: 404, body: { error: "not_found" } };
 			return { ok: true, body: { snapshots } };
+		},
+	},
+	{
+		name: "submit_support_request",
+		description: "Send a support message to the team, attributed to the caller's vendor and account. Args: message.",
+		capability: "vendor:write",
+		handler: async (args, principal) => {
+			const record = asRecord(args);
+			const message = typeof record.message === "string" ? record.message.trim() : "";
+			if (!message) return { ok: false, status: 400, body: { error: "message is required" } };
+			if (message.length > MAX_SUPPORT_MESSAGE_LENGTH) {
+				return { ok: false, status: 400, body: { error: `message must be under ${MAX_SUPPORT_MESSAGE_LENGTH} characters` } };
+			}
+
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("name, slug").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			// A bearer token has no cookie session to read an email off of (see
+			// this file's own header comment) — resolve it from the user id via
+			// the service-role client's admin API instead, same as the route
+			// resolves it from the signed-in session's user object.
+			const { data: userData } = await db.auth.admin.getUserById(principal.userId);
+
+			const result = await sendSupportMessage({
+				vendorName: vendor.name,
+				vendorSlug: vendor.slug,
+				userEmail: userData?.user?.email ?? "unknown",
+				message,
+			});
+			if (!result.ok) return { ok: false, status: 502, body: { error: result.error ?? "Failed to send your message" } };
+			return { ok: true, body: { ok: true } };
 		},
 	},
 ];

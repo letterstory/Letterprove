@@ -54,6 +54,9 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 						<Link href="/" className="text-fog hover:text-mint">
 							public site
 						</Link>
+						<Link href="/vendor/support" className="text-fog hover:text-mint">
+							support
+						</Link>
 						{/* The address stays as typed — uppercasing an email misrepresents it. */}
 						<span className="hidden text-xs normal-case text-fog sm:inline">{user.email}</span>
 						<SignOutButton />
