@@ -5,6 +5,13 @@ import { snapshotHash, verifyAttestation } from "./verify";
 import type { SignedAttestation } from "./types";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
+// Reached transitively via countersign -> fraudFeatures. It runs its own query
+// shape against the same client, which the mock below is not built for, and
+// none of these cases are about arrival timing. Real coverage lives in
+// domain-arrivals.test.ts.
+vi.mock("./domain-arrivals", () => ({
+	domainArrivals: vi.fn().mockResolvedValue({ vendor_first_seen: null, first_seen: [] }),
+}));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),

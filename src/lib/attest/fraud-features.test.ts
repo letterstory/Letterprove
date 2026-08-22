@@ -3,6 +3,14 @@ import { fraudFeatures } from "./fraud-features";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
+// domainArrivals runs its own query against the same client. Stubbing it keeps
+// these cases about the rollup maths they were written for, rather than about
+// whether one mock can satisfy two different query shapes; the real behaviour
+// has its own suite in domain-arrivals.test.ts.
+vi.mock("./domain-arrivals", () => ({
+	domainArrivals: vi.fn().mockResolvedValue({ vendor_first_seen: null, first_seen: [] }),
+}));
+
 /** Mimics the chainable `.from().select().eq().eq().gte().order()` shape the query uses. */
 function mockDb(result: { data: unknown; error: unknown }) {
 	const order = vi.fn().mockResolvedValue(result);
