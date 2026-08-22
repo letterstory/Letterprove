@@ -35,6 +35,7 @@ Usage:
   letterprove vendor update [--name <name>] [--domain <domain>] [--category <category>]  Edit your vendor account
   letterprove vendor verify                                    Check DNS for your domain-verification record
   letterprove snapshots list [--customer <slug>]  Attestation chain summaries for your customers
+  letterprove support <message>                Send a support message to the team
 
   letterprove customers list                   List this vendor's customers
   letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
@@ -118,6 +119,8 @@ export async function run(argv, { io = defaultIo() } = {}) {
 				return await cmdVendor({ config, flags, io, positional: positional.slice(1) });
 			case "snapshots":
 				return await cmdSnapshots({ config, flags, io, positional: positional.slice(1) });
+			case "support":
+				return await cmdSupport({ config, flags, io, positional: positional.slice(1) });
 			case "customers":
 				return await cmdCustomers({ config, flags, io, positional: positional.slice(1) });
 			case "staff":
@@ -349,6 +352,19 @@ async function cmdSnapshots({ config, flags, io, positional }) {
 			io.error(USAGE);
 			return 1;
 	}
+}
+
+async function cmdSupport({ config, flags, io, positional }) {
+	const message = positional.join(" ").trim();
+	if (!message) throw new CliError("Usage: letterprove support <message>");
+	const client = newClient(config);
+	await client.callTool("submit_support_request", { message });
+	if (flags.json) {
+		io.log(JSON.stringify({ ok: true }, null, 2));
+		return 0;
+	}
+	io.log("Sent — we'll get back to you by email.");
+	return 0;
 }
 
 async function cmdCustomers({ config, flags, io, positional }) {
