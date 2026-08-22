@@ -18,6 +18,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import { domainArrivals, type DomainArrivals } from "./domain-arrivals";
 
 export interface FraudFeatures {
 	schema_version: 1;
@@ -29,6 +30,18 @@ export interface FraudFeatures {
 	hourly_buckets: number[];
 	asn_distribution: null;
 	distinct_hash_counts: null;
+	/**
+	 * When each distinct domain was first observed — see domain-arrivals.ts for
+	 * why the count of domains, not the volume per domain, is the number worth
+	 * defending.
+	 *
+	 * Added WITHOUT bumping schema_version, deliberately. The countersigner
+	 * rejects any version it does not recognise, so bumping would mean every
+	 * signature failing for however long it took the two deploys to line up.
+	 * An additive optional field is not a breaking change: an older scorer
+	 * ignores it, a newer one uses it, and neither ordering breaks signing.
+	 */
+	domain_arrivals?: DomainArrivals;
 }
 
 const WINDOW_DAYS = 30;
@@ -67,6 +80,8 @@ export async function fraudFeatures(
 	const db = dbClient();
 	if (!db) return empty;
 
+	const arrivals = await domainArrivals(vendorSlug);
+
 	let query = db
 		.from("hot_rollups")
 		.select("sessions, signups, logins")
@@ -89,5 +104,5 @@ export async function fraudFeatures(
 	// relative share, so summing all three event kinds per row is enough.
 	const hourly_buckets = rows.map((r) => r.sessions + r.signups + r.logins);
 
-	return { ...empty, events: { sessions, signups, logins }, hourly_buckets };
+	return { ...empty, events: { sessions, signups, logins }, hourly_buckets, domain_arrivals: arrivals };
 }
