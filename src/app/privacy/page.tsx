@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 		"What Letterprove collects when its script runs on a customer's site, why it is company-level rather than personal, and what is published.",
 };
 
-const UPDATED = "August 21, 2026";
+const UPDATED = "August 22, 2026";
 
 /**
  * Written against what the code actually does, not against the sibling
@@ -19,8 +19,11 @@ const UPDATED = "August 21, 2026";
  *   §6  src/lib/db/client.ts — RLS, service-role isolation
  *
  * If one of those changes, this page is wrong and has to change with it. The
- * riskiest one is §2: ASN capture is planned (see record.ts's header) and is a
- * materially different disclosure than a bare domain.
+ * riskiest one is §2, which is why the location disclosure there was published
+ * BEFORE the code that collects it rather than alongside — the commitment the
+ * previous revision made was "before we start collecting, not afterwards", and
+ * shipping both in one deploy would have honoured the letter of that and not
+ * the point of it.
  */
 export default function PrivacyPage() {
 	return (
@@ -37,9 +40,10 @@ export default function PrivacyPage() {
 				</p>
 				<p>
 					For vendors, we hold an account and the configuration you enter. For visitors, we record{" "}
-					<strong>the company domain only</strong> — never a name, never an email address, never
-					an IP address, and no cookies. We do not set anything on your device, and there is
-					nothing on a vendor&apos;s site that identifies you personally to us.
+					<strong>the company domain, and the country and region a request came from</strong> —
+					never a name, never an email address, never an IP address, and no cookies. We do not
+					set anything on your device, and there is nothing on a vendor&apos;s site that
+					identifies you personally to us.
 				</p>
 			</Section>
 
@@ -82,10 +86,31 @@ export default function PrivacyPage() {
 					<em>company</em>, which is the entire point of the product.
 				</p>
 				<p>
-					<strong>If this changes, this page changes first.</strong> We intend to add
-					network-level signals (the autonomous system a request arrived from) to detect
-					fabricated traffic. That is a broader disclosure than a bare domain, and we will update
-					this policy before we start collecting it, not afterwards.
+					<strong>If this changes, this page changes first.</strong> This is that change,
+					made before the collection starts rather than after it.
+				</p>
+				<p>
+					<strong>Approximate location, starting shortly.</strong> To detect fabricated traffic
+					we are adding two more fields to the list above: the{" "}
+					<strong>country</strong> and the <strong>first-level region</strong> (a state or
+					equivalent) that a request arrived from, as our hosting provider reports them from the
+					network. Real usage by real companies comes from many places; traffic invented to look
+					like customers usually comes from one. That difference is only visible if we record
+					roughly where requests came from.
+				</p>
+				<p>
+					This is deliberately the coarsest form of that signal. We do <strong>not</strong> record
+					the city, the latitude and longitude, the postal code, or the IP address itself, even
+					though our hosting provider offers all of them — a region contains millions of people
+					and identifies none of them, and the extra precision would buy us nothing a spoofer
+					couldn&apos;t defeat anyway.
+				</p>
+				<p>
+					We considered recording the network operator each request came from, which is the
+					sharper signal because it distinguishes a data centre from a home connection. We are
+					not doing it: it would mean either shipping a commercial address database or sending
+					every visitor&apos;s IP address to a third-party lookup service, and the second of
+					those is a far larger disclosure than the problem justifies.
 				</p>
 			</Section>
 
