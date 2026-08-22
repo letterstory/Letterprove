@@ -14,6 +14,7 @@ import {
 	createCustomer,
 	updateCustomer,
 	deleteCustomer,
+	generateConsentLink,
 	type CreateCustomerInput,
 	type UpdateCustomerInput,
 } from "@/lib/vendors/customers";
@@ -161,6 +162,25 @@ export const TOOLS: ToolDef[] = [
 			// LetterproveClient.request(), which calls res.json() on every
 			// response), so an empty-body success is expressed as a flag instead.
 			return { ok: true, body: { deleted: true } };
+		},
+	},
+	{
+		name: "generate_consent_link",
+		description:
+			"Mint (or re-mint) the unguessable link to send a customer so they can approve their own attestation — the tier-4 counter-signature. Args: slug (required). Re-issuing invalidates any link already sent.",
+		capability: "vendor:write",
+		handler: async (args, principal) => {
+			const record = asRecord(args);
+			const slug = typeof record.slug === "string" ? record.slug : "";
+			if (!slug) return { ok: false, status: 400, body: { error: "slug is required" } };
+
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const result = await generateConsentLink(db, vendorId, slug);
+			if (!result.ok) return result;
+			return { ok: true, body: { token: result.data.token, expiresAt: result.data.expiresAt } };
 		},
 	},
 	{

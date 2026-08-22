@@ -14,6 +14,7 @@ export interface CustomerRow {
 	verified: boolean;
 	features: string[];
 	consent: "named" | "anonymous";
+	countersigned_at: string | null;
 }
 
 interface Props {
@@ -32,6 +33,11 @@ function emptyForm() {
 const selectClass =
 	"rounded border border-edge bg-ink px-3 py-2 text-sm text-[#e9efed] outline-none focus:border-mint";
 
+/** `2026-08-28T06:00:00.000Z` → `2026-08-28`, all a vendor needs to know before resending. */
+function shortDate(iso: string): string {
+	return iso.slice(0, 10);
+}
+
 export function CustomersManager({ initialCustomers, features }: Props) {
 	const [customers, setCustomers] = useState<CustomerRow[]>(initialCustomers);
 	const [form, setForm] = useState(emptyForm());
@@ -42,6 +48,10 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 	// which renders in OS chrome and ignores the page entirely.
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [showForm, setShowForm] = useState(false);
+	// The freshly-minted consent link for one row at a time — shown inline
+	// under that row until the vendor closes it or opens a different one.
+	const [consentLink, setConsentLink] = useState<{ slug: string; url: string; expiresAt: string } | null>(null);
+	const [generatingLinkFor, setGeneratingLinkFor] = useState<string | null>(null);
 
 	async function onAdd(e: FormEvent) {
 		e.preventDefault();
@@ -101,6 +111,27 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 		setEditingSlug(null);
 	}
 
+	async function onGenerateConsentLink(slug: string) {
+		setError(null);
+		setConsentLink(null);
+		setGeneratingLinkFor(slug);
+
+		const res = await fetch(`/api/vendor/customers/${encodeURIComponent(slug)}/consent-link`, {
+			method: "POST",
+		});
+
+		setGeneratingLinkFor(null);
+
+		if (!res.ok) {
+			const body = await res.json().catch(() => null);
+			setError(body?.error ?? `Failed to create a consent link for ${slug} (${res.status})`);
+			return;
+		}
+
+		const { path, expiresAt } = (await res.json()) as { path: string; expiresAt: string };
+		setConsentLink({ slug, url: `${window.location.origin}${path}`, expiresAt });
+	}
+
 	return (
 		<div className="grid gap-4">
 			{error && <ErrorBanner>{error}</ErrorBanner>}
@@ -144,7 +175,10 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 									<Td className="font-mono text-[13px] text-fog">{c.domain}</Td>
 									<Td className="tabular-nums text-fog">{c.since}</Td>
 									<Td>
-										<Badge tone={c.consent === "named" ? "mint" : "neutral"}>{c.consent}</Badge>
+										<span className="flex flex-wrap items-center gap-1.5">
+											<Badge tone={c.consent === "named" ? "mint" : "neutral"}>{c.consent}</Badge>
+											{c.countersigned_at && <Badge tone="mint">countersigned · tier 4</Badge>}
+										</span>
 									</Td>
 									<Td className="text-fog">
 										{c.features.length === 0 ? (
@@ -183,6 +217,16 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 											</span>
 										) : (
 											<span className="inline-flex items-center gap-3">
+												{!c.countersigned_at && (
+													<button
+														type="button"
+														onClick={() => onGenerateConsentLink(c.slug)}
+														disabled={generatingLinkFor === c.slug}
+														className="text-xs text-fog transition hover:text-mint disabled:opacity-60"
+													>
+														{generatingLinkFor === c.slug ? "Generating…" : "Consent link"}
+													</button>
+												)}
 												<button
 													type="button"
 													onClick={() => setEditingSlug(c.slug)}
@@ -203,6 +247,30 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 								</tr>
 							),
 						)}
+					{consentLink && customers.some((c) => c.slug === consentLink.slug) && (
+						<tr className="bg-ink/40">
+							<Td colSpan={6}>
+								<div className="flex flex-wrap items-center gap-3 py-0.5">
+									<span className="shrink-0 text-xs text-fog">
+										Send this link to confirm and be named — expires {shortDate(consentLink.expiresAt)}:
+									</span>
+									<input
+										readOnly
+										value={consentLink.url}
+										onFocus={(e) => e.currentTarget.select()}
+										className="min-w-0 flex-1 rounded border border-edge bg-ink px-2 py-1 font-mono text-xs text-[#e9efed] outline-none focus:border-mint"
+									/>
+									<button
+										type="button"
+										onClick={() => setConsentLink(null)}
+										className="shrink-0 text-xs text-fog transition hover:text-mint"
+									>
+										Close
+									</button>
+								</div>
+							</Td>
+						</tr>
+					)}
 					</tbody>
 				</TableWrap>
 			)}

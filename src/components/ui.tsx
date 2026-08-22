@@ -140,8 +140,20 @@ export function Th({ children, className = "" }: { children?: ReactNode; classNa
 	);
 }
 
-export function Td({ children, className = "" }: { children?: ReactNode; className?: string }) {
-	return <td className={`border-b border-edge/60 px-4 py-3 align-middle ${className}`}>{children}</td>;
+export function Td({
+	children,
+	className = "",
+	colSpan,
+}: {
+	children?: ReactNode;
+	className?: string;
+	colSpan?: number;
+}) {
+	return (
+		<td colSpan={colSpan} className={`border-b border-edge/60 px-4 py-3 align-middle ${className}`}>
+			{children}
+		</td>
+	);
 }
 
 /** A monospace value that is meant to be read or copied, not skimmed. */

@@ -7,6 +7,7 @@ vi.mock("@/lib/vendors/customers", () => ({
 	createCustomer: vi.fn(),
 	updateCustomer: vi.fn(),
 	deleteCustomer: vi.fn(),
+	generateConsentLink: vi.fn(),
 }));
 vi.mock("@/lib/vendors/status", () => ({ getVendorStatus: vi.fn() }));
 vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
@@ -183,6 +184,34 @@ describe("dispatchTool", () => {
 
 		expect(deleteCustomer).toHaveBeenCalledWith(FAKE_DB, "v1", "acme");
 		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { deleted: true } } });
+	});
+
+	it("mints a consent link via generate_consent_link", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { generateConsentLink } = await import("@/lib/vendors/customers");
+		vi.mocked(generateConsentLink).mockResolvedValue({
+			ok: true,
+			data: { token: "tok123", expiresAt: "2026-08-28T06:00:00.000Z" },
+		});
+
+		const outcome = await dispatchTool("generate_consent_link", { slug: "acme" }, principal(["vendor:write"]));
+
+		expect(generateConsentLink).toHaveBeenCalledWith(FAKE_DB, "v1", "acme");
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: true, body: { token: "tok123", expiresAt: "2026-08-28T06:00:00.000Z" } },
+		});
+	});
+
+	it("requires a slug for generate_consent_link", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("generate_consent_link", {}, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 400, body: { error: "slug is required" } },
+		});
 	});
 
 	it("reports get_status by delegating to the shared status service", async () => {
