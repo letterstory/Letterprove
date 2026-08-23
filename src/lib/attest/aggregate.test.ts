@@ -12,6 +12,9 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("./domain-arrivals", () => ({
 	domainArrivals: vi.fn().mockResolvedValue({ vendor_first_seen: null, first_seen: [] }),
 }));
+vi.mock("./geo-distribution", () => ({
+	geoDistribution: vi.fn().mockResolvedValue({ regions: {}, unknown: 0, distinctRegions: 0 }),
+}));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
