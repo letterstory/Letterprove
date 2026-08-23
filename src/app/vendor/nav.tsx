@@ -29,7 +29,7 @@ export function VendorNav() {
 	const pathname = usePathname() ?? "";
 
 	return (
-		<nav className="flex flex-row flex-wrap gap-1 md:flex-col md:flex-nowrap">
+		<nav className="flex flex-row flex-wrap gap-1 md:flex-col md:flex-nowrap md:gap-0.5">
 			{ITEMS.map((item) => {
 				const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
 				return (
@@ -37,7 +37,7 @@ export function VendorNav() {
 						key={item.href}
 						href={item.href}
 						aria-current={active ? "page" : undefined}
-						className={`group relative rounded px-3 py-2 text-sm transition-colors ${
+						className={`group relative rounded-lg px-3.5 py-2.5 text-[15px] font-medium transition-colors ${
 							active ? "bg-mint/10 text-mint" : "text-fog hover:bg-ink/60 hover:text-[#e9efed]"
 						}`}
 					>
@@ -45,7 +45,7 @@ export function VendorNav() {
 						    in a vertical list, where an underline reads as a link. */}
 						<span
 							aria-hidden="true"
-							className={`absolute top-1.5 bottom-1.5 -left-px w-0.5 rounded-full transition-colors ${
+							className={`absolute top-2 bottom-2 -left-px w-[3px] rounded-full transition-colors ${
 								active ? "bg-mint" : "bg-transparent"
 							}`}
 						/>
