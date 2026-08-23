@@ -32,14 +32,14 @@ describe("POST /api/staff/customers", () => {
 	 */
 	it("is invisible to a signed-out caller, and writes nothing", async () => {
 		vi.mocked(getUser).mockResolvedValue(null as never);
-		const res = await post({ vendor: "lettertrace", domain: "juvare.com" });
+		const res = await post({ vendor: "lettertrace", domain: "globex.com" });
 		expect(res.status).toBe(404);
 		expect(promoteDomain).not.toHaveBeenCalled();
 	});
 
 	it("requires both a vendor and a domain", async () => {
 		expect((await post({ vendor: "lettertrace" })).status).toBe(400);
-		expect((await post({ domain: "juvare.com" })).status).toBe(400);
+		expect((await post({ domain: "globex.com" })).status).toBe(400);
 		expect(promoteDomain).not.toHaveBeenCalled();
 	});
 
@@ -51,10 +51,10 @@ describe("POST /api/staff/customers", () => {
 	});
 
 	it("returns the created record", async () => {
-		vi.mocked(promoteDomain).mockResolvedValue({ ok: true, slug: "juvare", name: "Juvare", domain: "juvare.com" });
-		const res = await post({ vendor: "lettertrace", domain: "juvare.com" });
+		vi.mocked(promoteDomain).mockResolvedValue({ ok: true, slug: "globex", name: "Globex", domain: "globex.com" });
+		const res = await post({ vendor: "lettertrace", domain: "globex.com" });
 		expect(res.status).toBe(201);
-		expect(await res.json()).toMatchObject({ customer: { slug: "juvare", domain: "juvare.com" } });
+		expect(await res.json()).toMatchObject({ customer: { slug: "globex", domain: "globex.com" } });
 	});
 
 	// Each refusal maps to a status a client can act on differently: 422 means
@@ -68,7 +68,7 @@ describe("POST /api/staff/customers", () => {
 		["write_failed", 500],
 	] as const)("maps %s to %i", async (reason, status) => {
 		vi.mocked(promoteDomain).mockResolvedValue({ ok: false, reason, detail: "because" });
-		const res = await post({ vendor: "lettertrace", domain: "juvare.com" });
+		const res = await post({ vendor: "lettertrace", domain: "globex.com" });
 		expect(res.status).toBe(status);
 		// The detail is what the operator reads — it must survive the round trip.
 		expect(await res.json()).toMatchObject({ error: reason, detail: "because" });
@@ -87,7 +87,7 @@ describe("staff allowlist", () => {
 		process.env.STAFF_USER_IDS = "someone-else";
 		vi.mocked(getUser).mockResolvedValue({ id: "self-registered" } as never);
 
-		const res = await post({ vendor: "lettertrace", domain: "juvare.com" });
+		const res = await post({ vendor: "lettertrace", domain: "globex.com" });
 		expect(res.status).toBe(404);
 		expect(promoteDomain).not.toHaveBeenCalled();
 	});
@@ -97,7 +97,7 @@ describe("staff allowlist", () => {
 		delete process.env.STAFF_USER_IDS;
 		vi.mocked(getUser).mockResolvedValue({ id: "staff-1" } as never);
 
-		expect((await post({ vendor: "lettertrace", domain: "juvare.com" })).status).toBe(404);
+		expect((await post({ vendor: "lettertrace", domain: "globex.com" })).status).toBe(404);
 		expect(promoteDomain).not.toHaveBeenCalled();
 	});
 });

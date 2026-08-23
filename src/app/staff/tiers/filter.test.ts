@@ -41,10 +41,10 @@ describe("sortRows", () => {
 	it("puts an actionable domain above a louder unpublishable one", () => {
 		const sorted = sortRows([
 			row("gmail.com", "not-attributable", 109),
-			row("des-ai.com", "no-customer-record", 9),
+			row("acme.com", "no-customer-record", 9),
 		]);
 
-		expect(sorted.map((r) => r.domain)).toEqual(["des-ai.com", "gmail.com"]);
+		expect(sorted.map((r) => r.domain)).toEqual(["acme.com", "gmail.com"]);
 	});
 
 	it("orders by volume within the same status", () => {
@@ -76,7 +76,7 @@ describe("sortRows", () => {
 
 describe("matchesQuery", () => {
 	it("matches on domain", () => {
-		expect(matchesQuery(row("des-ai.com", "no-customer-record"), "des-ai")).toBe(true);
+		expect(matchesQuery(row("acme.com", "no-customer-record"), "acme")).toBe(true);
 	});
 
 	it("matches on the customer record's name", () => {
@@ -92,7 +92,7 @@ describe("matchesQuery", () => {
 	});
 
 	it("does not match an unrelated term", () => {
-		expect(matchesQuery(row("des-ai.com", "no-customer-record"), "gmail")).toBe(false);
+		expect(matchesQuery(row("acme.com", "no-customer-record"), "gmail")).toBe(false);
 	});
 });
 
