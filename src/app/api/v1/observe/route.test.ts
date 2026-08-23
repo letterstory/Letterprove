@@ -90,6 +90,24 @@ describe("POST /api/v1/observe", () => {
 			ev: "session",
 			cfg: 1,
 			origin: "lettertrace.com",
+			geo: { country: null, region: null },
+		});
+	});
+
+	it("takes location from the edge headers, never from the payload", () => {
+		// Same trust rule as receipt_ts and origin: anything a vendor could
+		// write is not evidence. A payload claiming to be in Germany while the
+		// edge says the request came from the US must record the US.
+		return post(
+			{ ...VALID_BODY, country: "DE", region: "BE" },
+			{
+				origin: "https://lettertrace.com",
+				headers: { "x-vercel-ip-country": "us", "x-vercel-ip-country-region": "ca" },
+			}
+		).then(() => {
+			expect(recordObservation).toHaveBeenCalledWith(
+				expect.objectContaining({ geo: { country: "US", region: "CA" } })
+			);
 		});
 	});
 
