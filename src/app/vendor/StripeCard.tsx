@@ -124,10 +124,15 @@ export function StripeCard({ connection }: { connection: StripeConnectionView | 
 						your Stripe account, not asserted by you. That&rsquo;s what raises a proof to tier 3:
 						the evidence stops passing through your hands, so nobody has to take your word for it.
 					</p>
-					<Field
-						label="Restricted API key"
-						hint="Stripe → Developers → API keys → Create restricted key. Grant Customers and Subscriptions read access, nothing else."
-					>
+					{/* Walks both screens Stripe actually shows. Found by doing it:
+					    the flow asks how the key will be used, then offers
+					    permission templates where EVERY option grants 30-40
+					    permissions and the correct choice is a small "Choose your
+					    own" link. A vendor following vaguer instructions lands on
+					    that screen and picks a template, ending up with 34
+					    permissions instead of 2 — which would make our own "we
+					    only ask for what we need" claim false in practice. */}
+					<Field label="Restricted API key" hint="Create it in Stripe → Developers → API keys → Create restricted key.">
 						<TextInput
 							value={key}
 							onChange={(e) => setKey(e.target.value)}
@@ -136,6 +141,22 @@ export function StripeCard({ connection }: { connection: StripeConnectionView | 
 							spellCheck={false}
 						/>
 					</Field>
+					<ol className="ml-4 list-decimal space-y-1 text-xs text-fog marker:text-fog/60">
+						<li>
+							Asked how you&rsquo;ll use it, choose{" "}
+							<strong className="text-[#e9efed]">Providing this key to a third-party application</strong>.
+						</li>
+						<li>
+							On the templates screen, ignore all of them and click{" "}
+							<strong className="text-[#e9efed]">Choose your own</strong> — every template grants
+							30&ndash;40 permissions and we need two.
+						</li>
+						<li>
+							Set <strong className="text-[#e9efed]">Customers: Read</strong> and{" "}
+							<strong className="text-[#e9efed]">Subscriptions: Read</strong>. Leave everything
+							else, and the whole Connect column, on None.
+						</li>
+					</ol>
 					<p className="text-xs text-fog/70">
 						We only accept restricted keys. A standard secret key (<code>sk_…</code>) can refund
 						your customers, and nothing here needs that.
