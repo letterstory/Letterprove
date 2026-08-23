@@ -43,20 +43,20 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 			 * block at the top with the nav wrapping — a fixed sidebar on a small
 			 * screen costs more width than the content can spare.
 			 */}
-			<aside className="border-b border-edge md:sticky md:top-0 md:flex md:h-screen md:w-60 md:shrink-0 md:flex-col md:border-r md:border-b-0">
-				<div className="flex items-center gap-2 px-5 py-4">
+			<aside className="border-b border-edge md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:border-r md:border-b-0">
+				<div className="flex items-center gap-2.5 px-5 py-6">
 					<Link
 						href={vendor ? "/vendor" : "/vendor/onboarding"}
 						className="flex items-center gap-2"
 					>
 						{/* eslint-disable-next-line @next/next/no-img-element */}
-						<img src="/logo.svg" alt="Letterprove" className="h-5 w-auto" />
+						<img src="/logo.svg" alt="Letterprove" className="h-7 w-auto" />
 						<span className="font-mono text-xs text-mint">vendor</span>
 					</Link>
 				</div>
 
 				{vendor && memberships.length > 1 && (
-					<div className="px-4 pb-3">
+					<div className="px-4 pb-4">
 						<VendorSwitcher vendors={memberships} activeId={vendor.id} />
 					</div>
 				)}
@@ -72,11 +72,11 @@ export default async function VendorLayout({ children }: { children: ReactNode }
 				 * the account it ends, not among the links someone clicks all day.
 				 * The address stays as typed — uppercasing an email misrepresents it.
 				 */}
-				<div className="hidden border-t border-edge px-4 py-3 md:block">
-					<p className="truncate text-xs text-fog" title={user.email}>
+				<div className="hidden border-t border-edge px-5 py-4 md:block">
+					<p className="truncate text-[13px] text-fog" title={user.email}>
 						{user.email}
 					</p>
-					<div className="mt-2">
+					<div className="mt-2.5">
 						<SignOutButton />
 					</div>
 				</div>
