@@ -18,7 +18,7 @@ const REPORT = {
 	published: 0,
 	rows: [
 		{
-			domain: "des-ai.com",
+			domain: "acme.com",
 			kind: "company",
 			sessions: 5,
 			signups: 4,
@@ -72,7 +72,7 @@ describe("GET /api/vendor/observed", () => {
 		expect(body.observed).toBe(49);
 		expect(body.awaiting).toBe(45);
 		expect(body.domains[0]).toMatchObject({
-			domain: "des-ai.com",
+			domain: "acme.com",
 			events: 9,
 			status: "no-customer-record",
 		});
@@ -94,7 +94,7 @@ describe("POST /api/vendor/observed", () => {
 	it("requires a session", async () => {
 		vi.mocked(currentVendor).mockResolvedValue(null as never);
 
-		expect((await post({ domain: "des-ai.com" })).status).toBe(401);
+		expect((await post({ domain: "acme.com" })).status).toBe(401);
 	});
 
 	it("promotes against the session's vendor, ignoring any slug in the body", async () => {
@@ -102,31 +102,31 @@ describe("POST /api/vendor/observed", () => {
 		// a customer record on their account.
 		vi.mocked(promoteDomain).mockResolvedValue({
 			ok: true,
-			slug: "des-ai",
+			slug: "acme",
 			name: "Des Ai",
-			domain: "des-ai.com",
+			domain: "acme.com",
 		} as never);
 
-		await post({ domain: "des-ai.com", vendor: "some-other-vendor", vendorSlug: "another" });
+		await post({ domain: "acme.com", vendor: "some-other-vendor", vendorSlug: "another" });
 
-		expect(promoteDomain).toHaveBeenCalledWith("lettertrace", "des-ai.com");
+		expect(promoteDomain).toHaveBeenCalledWith("lettertrace", "acme.com");
 	});
 
 	it("returns the created record", async () => {
 		vi.mocked(promoteDomain).mockResolvedValue({
 			ok: true,
-			slug: "des-ai",
+			slug: "acme",
 			name: "Des Ai",
-			domain: "des-ai.com",
+			domain: "acme.com",
 		} as never);
 
-		const res = await post({ domain: "des-ai.com" });
+		const res = await post({ domain: "acme.com" });
 
 		expect(res.status).toBe(201);
 		expect((await res.json()).customer).toEqual({
-			slug: "des-ai",
+			slug: "acme",
 			name: "Des Ai",
-			domain: "des-ai.com",
+			domain: "acme.com",
 		});
 	});
 
@@ -151,10 +151,10 @@ describe("POST /api/vendor/observed", () => {
 		vi.mocked(promoteDomain).mockResolvedValue({
 			ok: false,
 			reason: "already_exists",
-			detail: 'already recorded as "des-ai"',
+			detail: 'already recorded as "acme"',
 		} as never);
 
-		expect((await post({ domain: "des-ai.com" })).status).toBe(409);
+		expect((await post({ domain: "acme.com" })).status).toBe(409);
 	});
 
 	it("400s with the refusal reason for an unobservable domain", async () => {
