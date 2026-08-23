@@ -4,6 +4,8 @@ import { currentVendor } from "@/lib/vendors/session";
 import { installSnippet, originFromHeaders } from "@/lib/vendors/install";
 import { StatusIndicator } from "./StatusIndicator";
 import { DomainCard } from "./DomainCard";
+import { StripeCard } from "./StripeCard";
+import { connectionFor } from "@/lib/stripe/credentials";
 import { dbClient } from "@/lib/db/client";
 import { expectedRecord, verificationHosts } from "@/lib/vendors/verification";
 
@@ -37,6 +39,10 @@ export default async function VendorHome() {
 				.maybeSingle()
 		: { data: null };
 
+	// Safe subset only — connectionFor() selects the last four, the mode and
+	// sync state, never the ciphertext.
+	const stripeConnection = await connectionFor(vendor.id);
+
 	return (
 		<>
 			<div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -57,6 +63,8 @@ export default async function VendorHome() {
 					hosts={verificationHosts(vendor.domain)}
 					verifiedAt={verification?.domain_verified_at ?? null}
 				/>
+
+				<StripeCard connection={stripeConnection} />
 
 				<section className="rounded-lg border border-edge bg-panel p-5">
 					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Publishable key</h2>

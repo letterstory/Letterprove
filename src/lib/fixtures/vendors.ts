@@ -72,6 +72,14 @@ export function consentOf(customer: CustomerFixture): Consent {
 }
 
 export interface VendorFixture {
+	/**
+	 * Row id. Carried because payment evidence and Stripe credentials are keyed
+	 * on it rather than on the slug — a slug is user-facing and could in
+	 * principle be renamed, and a renamed slug silently orphaning a vendor's
+	 * tier-3 evidence is not a failure worth risking. Every lookup in this file
+	 * already selected it; only toFixture was dropping it.
+	 */
+	id: string;
 	slug: string;
 	name: string;
 	domain: string;
@@ -91,6 +99,7 @@ export interface VendorFixture {
 export const FEATURES = ["sso", "audit_log", "api", "analytics", "sla"] as const;
 
 interface VendorRow {
+	id: string;
 	slug: string;
 	name: string;
 	domain: string;
@@ -114,6 +123,7 @@ interface CustomerRow {
 
 function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 	return {
+		id: row.id,
 		slug: row.slug,
 		name: row.name,
 		domain: row.domain,
