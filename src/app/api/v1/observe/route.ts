@@ -1,4 +1,5 @@
 import { hostnameOf } from "@/lib/vendors/domain";
+import { requestGeo } from "@/lib/telemetry/geo";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
@@ -100,6 +101,8 @@ export async function POST(request: Request) {
 		ev: payload.ev,
 		cfg: payload.cfg,
 		origin,
+		// From the edge, never the payload — same reason receipt_ts is ours.
+		geo: requestGeo(request.headers),
 	});
 
 	return collectorResponse(true);

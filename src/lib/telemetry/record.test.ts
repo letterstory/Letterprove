@@ -7,6 +7,7 @@ const PARAMS = {
 	ev: "session" as const,
 	cfg: 1,
 	origin: "vantage.example",
+	geo: { country: "US", region: "CA" },
 };
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
@@ -34,6 +35,8 @@ describe("recordObservation", () => {
 			ev: "session",
 			cfg: 1,
 			origin: "vantage.example",
+			country: "US",
+			region: "CA",
 		});
 	});
 
