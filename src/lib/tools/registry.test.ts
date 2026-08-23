@@ -678,7 +678,7 @@ describe("staff tools require an allowlisted user, not just the scope", () => {
 
 			const outcome = await dispatchTool(
 				tool,
-				{ vendor: "lettertrace", domain: "juvare.com" },
+				{ vendor: "lettertrace", domain: "globex.com" },
 				principal(["staff:read", "staff:write"], null),
 			);
 

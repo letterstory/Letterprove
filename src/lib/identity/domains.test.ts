@@ -87,7 +87,7 @@ describe("partitionDomains", () => {
 			"tenevents.com",
 			"snappykraken.com",
 			"gmail.com",
-			"juvare.com",
+			"globex.com",
 			"k9sportsnation.com",
 			"pricesmart.com",
 			"lettertrace.com",
@@ -99,7 +99,7 @@ describe("partitionDomains", () => {
 		expect(attributable).toEqual([
 			"tenevents.com",
 			"snappykraken.com",
-			"juvare.com",
+			"globex.com",
 			"k9sportsnation.com",
 			"pricesmart.com",
 		]);

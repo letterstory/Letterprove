@@ -8,7 +8,7 @@ vi.mock("./credentials", () => ({ credentialFor: vi.fn() }));
 vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn() }));
 
 /** Records every table touched and what was written to it. */
-function mockDb(observed: string[] = ["des-ai.com"]) {
+function mockDb(observed: string[] = ["acme.com"]) {
 	const inserts: Record<string, unknown[]> = {};
 	const deletes: string[] = [];
 	const updates: Record<string, unknown>[] = [];
@@ -71,14 +71,14 @@ describe("syncVendorPayments", () => {
 	});
 
 	it("stores evidence for a domain that both pays AND was observed", async () => {
-		const { db, inserts } = mockDb(["des-ai.com"]);
+		const { db, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
 		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
-			subscriptions: [sub("sub_1", "billing@des-ai.com")],
+			subscriptions: [sub("sub_1", "billing@acme.com")],
 		});
 
 		const result = await syncVendorPayments("v1", "lettertrace");
@@ -86,7 +86,7 @@ describe("syncVendorPayments", () => {
 		expect(result).toMatchObject({ ok: true, matched: 1, unmatched: 0, testMode: false });
 		expect(inserts["vendor_payment_evidence"]).toHaveLength(1);
 		expect(inserts["vendor_payment_evidence"][0]).toMatchObject({
-			domain: "des-ai.com",
+			domain: "acme.com",
 			monthly_amount: 400000,
 		});
 	});
@@ -95,14 +95,14 @@ describe("syncVendorPayments", () => {
 		// Test payments are invented by definition. A tier-3 claim built from
 		// them is the exact false corroboration this tier exists to rule out —
 		// but the vendor still needs to see their wiring works.
-		const { db, inserts } = mockDb(["des-ai.com"]);
+		const { db, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
 		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
-			subscriptions: [sub("sub_1", "billing@des-ai.com")],
+			subscriptions: [sub("sub_1", "billing@acme.com")],
 		});
 
 		const result = await syncVendorPayments("v1", "lettertrace");
@@ -113,7 +113,7 @@ describe("syncVendorPayments", () => {
 
 	it("does NOT publish payment for a company that was never observed", async () => {
 		// Payment alone is evidence about billing. Tier 3 is the join.
-		const { db, inserts } = mockDb(["des-ai.com"]);
+		const { db, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
 		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
@@ -140,7 +140,7 @@ describe("syncVendorPayments", () => {
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
-			subscriptions: [sub("sub_1", "billing@des-ai.com")],
+			subscriptions: [sub("sub_1", "billing@acme.com")],
 		});
 
 		const result = await syncVendorPayments("v1", "lettertrace");
@@ -152,7 +152,7 @@ describe("syncVendorPayments", () => {
 	it("replaces evidence rather than merging, so a cancellation disappears", async () => {
 		// The failure this prevents: a stale row asserting a customer still pays
 		// after they stopped, inside a signed claim.
-		const { db, deletes } = mockDb(["des-ai.com"]);
+		const { db, deletes } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
 		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
@@ -182,14 +182,14 @@ describe("syncVendorPayments", () => {
 	});
 
 	it("clears a previous error on a successful sync", async () => {
-		const { db, updates } = mockDb(["des-ai.com"]);
+		const { db, updates } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
 		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
-			subscriptions: [sub("sub_1", "billing@des-ai.com")],
+			subscriptions: [sub("sub_1", "billing@acme.com")],
 		});
 
 		await syncVendorPayments("v1", "lettertrace");
@@ -198,7 +198,7 @@ describe("syncVendorPayments", () => {
 	});
 
 	it("passes truncation through so a partial read is visible", async () => {
-		const { db } = mockDb(["des-ai.com"]);
+		const { db } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
 		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });

@@ -63,7 +63,7 @@ describe("aggregateBody", () => {
 	// The claim exists so a vendor can publish something real before any
 	// customer has agreed to be named.
 	it("counts companies and sums their events", async () => {
-		await withRollups([row("tenevents.com", 3, 1), row("juvare.com", 2), row("o3world.com", 1, 0, 4)]);
+		await withRollups([row("tenevents.com", 3, 1), row("globex.com", 2), row("o3world.com", 1, 0, 4)]);
 
 		const b = (await aggregateBody("lettertrace"))!;
 		expect(b.companies_observed).toBe(3);

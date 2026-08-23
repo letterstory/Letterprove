@@ -114,13 +114,13 @@ describe("mapPayments — unmatched payments are surfaced, never guessed at", ()
 		// usage we have never seen is evidence about billing, not about usage —
 		// publishing it would claim something we did not observe.
 		const { matched, unmatched } = mapPayments(
-			[sub({ customerEmail: "ap@parent-holdings.com" })],
+			[sub({ customerEmail: "ap@holdings-parent.com" })],
 			OBSERVED
 		);
 
 		expect(matched).toEqual([]);
 		expect(unmatched[0].reason).toBe("no_observed_traffic");
-		expect(unmatched[0].domain).toBe("parent-holdings.com");
+		expect(unmatched[0].domain).toBe("holdings-parent.com");
 	});
 
 	it("refuses to sum one domain paying in two currencies", () => {

@@ -115,7 +115,7 @@ describe("tierReport", () => {
 		await withRollups([
 			rollup("gmail.com", 5),
 			rollup("lettertrace.com", 4),
-			rollup("juvare.com", 2),
+			rollup("globex.com", 2),
 		]);
 
 		const r = await tierReport("lettertrace");
@@ -123,7 +123,7 @@ describe("tierReport", () => {
 		expect(byDomain["gmail.com"].status).toBe("not-attributable");
 		expect(byDomain["gmail.com"].kind).toBe("free_mail");
 		expect(byDomain["lettertrace.com"].kind).toBe("internal");
-		expect(byDomain["juvare.com"].status).toBe("no-customer-record");
+		expect(byDomain["globex.com"].status).toBe("no-customer-record");
 
 		expect(r!.observed).toBe(3);
 		expect(r!.attributable).toBe(1);
