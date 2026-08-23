@@ -22,6 +22,7 @@ import { useLayoutEffect, useRef, useState } from "react";
  */
 const TABS = [
 	{ href: "/vendor", label: "Dashboard", match: (p: string) => p === "/vendor" },
+	{ href: "/vendor/observed", label: "Observed", match: (p: string) => p.startsWith("/vendor/observed") },
 	{ href: "/vendor/customers", label: "Customers", match: (p: string) => p.startsWith("/vendor/customers") },
 	{ href: "/vendor/proof", label: "Proof", match: (p: string) => p.startsWith("/vendor/proof") },
 ];
