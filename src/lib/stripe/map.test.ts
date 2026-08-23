@@ -144,8 +144,21 @@ describe("mapPayments — unmatched payments are surfaced, never guessed at", ()
 });
 
 describe("mapPayments — determinism and edges", () => {
-	it("skips the observed-domain check when the caller passes an empty set", () => {
-		const { matched } = mapPayments([sub({ customerEmail: "ap@anywhere.com" })], new Set());
+	it("fails CLOSED when there are no observed domains", () => {
+		// The guard that matters most. An empty set is also what a failed
+		// database read returns, so emptiness must never mean "skip the check" —
+		// otherwise one bad query publishes every payment as corroborated with
+		// nothing corroborating it.
+		const { matched, unmatched } = mapPayments([sub()], new Set());
+
+		expect(matched).toEqual([]);
+		expect(unmatched[0].reason).toBe("no_observed_traffic");
+	});
+
+	it("publishes unobserved billing only when explicitly asked to", () => {
+		const { matched } = mapPayments([sub({ customerEmail: "ap@anywhere.com" })], new Set(), {
+			allowUnobserved: true,
+		});
 
 		expect(matched[0].domain).toBe("anywhere.com");
 	});

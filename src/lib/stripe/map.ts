@@ -95,16 +95,31 @@ function domainOfEmail(email: string): string | null {
 	return email.slice(at + 1).trim().toLowerCase() || null;
 }
 
+export interface MapOptions {
+	/**
+	 * Publish billing that has no observed usage behind it. Defaults to false
+	 * and should stay false anywhere near a signed document.
+	 *
+	 * This is an explicit flag rather than "pass an empty set" for a reason
+	 * worth keeping: an empty set is also what a failed database read returns.
+	 * Overloading emptiness to mean "skip the check" made the single most
+	 * important guard in this file fail OPEN — one bad query and every Stripe
+	 * payment publishes as corroborated with nothing corroborating it. The
+	 * default now fails closed: no observed domains means nothing matches.
+	 */
+	allowUnobserved?: boolean;
+}
+
 /**
  * @param observedDomains domains this vendor has actually been seen serving.
  *   A subscription for a company we have never observed is NOT evidence about
  *   usage — it is evidence about billing, and joining the two is the whole
- *   point. Pass an empty set to skip the check when the caller only wants the
- *   billing side.
+ *   point of tier 3.
  */
 export function mapPayments(
 	subscriptions: StripeSubscriptionLike[],
-	observedDomains: ReadonlySet<string>
+	observedDomains: ReadonlySet<string>,
+	{ allowUnobserved = false }: MapOptions = {}
 ): PaymentMapping {
 	const unmatched: UnmatchedPayment[] = [];
 	const byDomain = new Map<string, StripeSubscriptionLike[]>();
@@ -123,7 +138,7 @@ export function mapPayments(
 			continue;
 		}
 
-		if (observedDomains.size > 0 && !observedDomains.has(domain)) {
+		if (!allowUnobserved && !observedDomains.has(domain)) {
 			unmatched.push({ subscriptionId: sub.id, reason: "no_observed_traffic", domain });
 			continue;
 		}
