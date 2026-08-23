@@ -3,6 +3,7 @@ import { canonicalize } from "./canonical";
 import { buildChain } from "./chain";
 import { jwks } from "./keys";
 import { signAttestation } from "./sign";
+import { earned } from "./body";
 import { GENESIS_HASH, verifyAttestation, verifyChain } from "./verify";
 import type { AttestationBody, SignedAttestation } from "./types";
 
@@ -119,5 +120,62 @@ describe("chain", () => {
 	it("catches a dropped snapshot", async () => {
 		const chain = await buildChain(bodies);
 		expect(verifyChain([chain[1]], jwks()).ok).toBe(false);
+	});
+});
+
+describe("earned — tier 3, payment corroborated by Stripe", () => {
+	const customer = {
+		slug: "acme",
+		name: "Acme",
+		domain: "acme.com",
+		since: "2024-08",
+		tier: 1 as const,
+		verified: false,
+		features: [],
+		consent: "anonymous" as const,
+	};
+	const payment = {
+		currency: "usd",
+		monthlyAmount: 400000,
+		since: "2024-08-01T00:00:00.000Z",
+		subscriptionCount: 1,
+	};
+
+	it("awards tier 3 when Stripe corroborates payment", () => {
+		expect(earned(customer as never, true, true, payment)).toEqual({ tier: 3, verified: true });
+	});
+
+	it("is NOT capped by the vendor's asserted tier", () => {
+		// The asserted tier is a ceiling on VENDOR-ORIGINATED evidence. Payment
+		// read from the vendor's own Stripe did not pass through their hands —
+		// they can cancel a subscription but cannot fabricate one without
+		// defrauding themselves. A vendor's understatement must not suppress
+		// third-party corroboration.
+		expect(earned({ ...customer, tier: 1 } as never, true, true, payment).tier).toBe(3);
+	});
+
+	it("still requires the domain to be verified", () => {
+		// Money proves a commercial relationship. It does not prove we know who
+		// the origin belongs to.
+		expect(earned(customer as never, true, false, payment)).toEqual({ tier: 0, verified: false });
+	});
+
+	it("still requires observed usage", () => {
+		// This system only ever claims what it observed. Payment without usage
+		// is evidence about billing, not about the product being used.
+		expect(earned(customer as never, false, true, payment)).toEqual({ tier: 0, verified: false });
+	});
+
+	it("falls back to the asserted ceiling with no payment evidence", () => {
+		expect(earned(customer as never, true, true, null)).toEqual({ tier: 1, verified: false });
+		expect(earned(customer as never, true, true)).toEqual({ tier: 1, verified: false });
+	});
+
+	it("lets a countersignature still outrank payment", () => {
+		// Tier 4 is the customer themselves confirming — strictly stronger than
+		// the vendor's own payment records.
+		expect(
+			earned({ ...customer, countersignedAt: "2026-08-01T00:00:00Z" } as never, true, true, payment)
+		).toEqual({ tier: 4, verified: true });
 	});
 });

@@ -9,6 +9,7 @@ import { methodUrl } from "./method";
 import type { CustomerFixture, VendorFixture } from "../fixtures/vendors";
 import { currentSnapshot, type CustomerSnapshot } from "@/rollup/snapshots";
 import type { AttestationBody, Tier } from "./types";
+import { paymentEvidenceFor, type PaymentEvidence } from "./payment-evidence";
 
 const METHOD_PATH = "src/lib/attest/proofs.ts";
 
@@ -36,6 +37,7 @@ export function earned(
 	customer: CustomerFixture,
 	observed: boolean,
 	domainVerified: boolean,
+	payment?: PaymentEvidence | null,
 ): { tier: Tier; verified: boolean } {
 	if (customer.countersignedAt) return { tier: 4, verified: true };
 
@@ -46,6 +48,25 @@ export function earned(
 	// exactly what an assertion earns.
 	if (!domainVerified) return { tier: 0, verified: false };
 	if (!observed) return { tier: 0, verified: false };
+
+	/*
+	 * Tier 3 — payment corroborated by Stripe.
+	 *
+	 * Deliberately NOT capped by `customer.tier`, for the same reason tier 4
+	 * isn't. The asserted tier is a ceiling on VENDOR-ORIGINATED evidence,
+	 * because a vendor claiming more than they can show is the failure that
+	 * ceiling exists to stop. Payment read from the vendor's own Stripe account
+	 * did not pass through their hands: they can cancel a subscription, but
+	 * they cannot fabricate one without defrauding themselves. Capping it would
+	 * mean a vendor's own understatement suppressing third-party corroboration,
+	 * which is backwards.
+	 *
+	 * It still sits BELOW the observed/domainVerified gates above. Money proves
+	 * a commercial relationship; it does not prove the product was used, and
+	 * this system only ever claims what it observed.
+	 */
+	if (payment) return { tier: 3, verified: true };
+
 	return { tier: customer.tier, verified: customer.verified };
 }
 
@@ -63,7 +84,8 @@ export async function attestationBody(
 	customer: CustomerFixture
 ): Promise<{ body: Omit<AttestationBody, "prev_hash">; snapshot: CustomerSnapshot }> {
 	const snapshot = await currentSnapshot(vendor.slug, customer.domain);
-	const { tier, verified } = earned(customer, snapshot.observed, vendor.domainVerified);
+	const payment = vendor.id ? await paymentEvidenceFor(vendor.id, customer.domain) : null;
+	const { tier, verified } = earned(customer, snapshot.observed, vendor.domainVerified, payment);
 	const body = {
 		vendor: vendor.slug,
 		customer: customer.slug,
@@ -73,6 +95,16 @@ export async function attestationBody(
 		since: customer.since,
 		features: [...customer.features].sort(),
 		sessions_30d: snapshot.sessions_30d,
+		// Published only when Stripe corroborated it. Absent rather than zero
+		// for everyone else: a zero would read as "pays nothing", which is a
+		// claim, where absence is the truth — we have no payment evidence.
+		...(payment
+			? {
+					contract_currency: payment.currency,
+					contract_monthly: payment.monthlyAmount,
+					contract_since: payment.since,
+				}
+			: {}),
 		seats_active: snapshot.seats_active,
 		observed_through: snapshot.observed_through,
 		published_at: snapshot.published_at,

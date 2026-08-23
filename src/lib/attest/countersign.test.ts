@@ -11,6 +11,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 	const original = await importOriginal<typeof import("@/lib/fixtures/vendors")>();
 	const VENDORS: import("@/lib/fixtures/vendors").VendorFixture[] = [
 		{
+			id: "00000000-0000-0000-0000-000000000001",
 			slug: "vantage",
 			name: "Vantage",
 			domain: "vantage.example",
@@ -22,7 +23,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
 			],
 		},
-		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
+		{ id: "00000000-0000-0000-0000-000000000001", slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
 	];
 	return {
 		...original,

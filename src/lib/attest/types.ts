@@ -29,6 +29,19 @@ export interface AttestationBody {
 	features: string[];
 	sessions_30d: number;
 	seats_active: number;
+	/**
+	 * Payment corroborated by Stripe, present ONLY at tier 3. Absent rather
+	 * than zero for everyone else — a zero would assert "pays nothing", where
+	 * absence correctly says "we hold no payment evidence".
+	 *
+	 * Minor units, always an integer: canonical.ts serialises numbers with
+	 * JSON.stringify and is explicitly not float-safe, so a fractional amount
+	 * would break byte agreement with an independent verifier.
+	 */
+	contract_currency?: string;
+	contract_monthly?: number;
+	/** Earliest active subscription start, ISO. */
+	contract_since?: string;
 	/** End of the observation window this snapshot summarises. */
 	observed_through: string;
 	/** When this snapshot was cut. Distinct from observed_through on purpose. */
