@@ -90,7 +90,34 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 			}
 
 			const prevHash = last ? snapshotHash(last.attestation as SignedAttestation) : GENESIS_HASH;
-			const signed = await signAttestation({ ...body, prev_hash: prevHash });
+
+			/*
+			 * Signing failure isolates to ONE customer.
+			 *
+			 * countersign() throws on every failure path, deliberately — an
+			 * unsigned snapshot must never be published, and that part is right.
+			 * But the throw used to escape this loop, which meant a single
+			 * customer's problem halted the freeze for every customer and vendor
+			 * after them. The worst version of that: a fraud-check REFUSAL (403)
+			 * is a normal, expected outcome for one bad claim, and it stopped
+			 * everyone else's proofs from updating.
+			 *
+			 * Caught here and treated exactly like the failed-telemetry skip
+			 * above: this customer gets no entry for this hour, everyone else
+			 * carries on. A missing hour is already a designed-for state — the
+			 * chain links by prev_hash, not by contiguous hours, so a gap is a
+			 * less dense history rather than a broken one, and the live path
+			 * still serves a current entry.
+			 */
+			let signed;
+			try {
+				signed = await signAttestation({ ...body, prev_hash: prevHash });
+			} catch (error) {
+				skipped.push(
+					`${vendor.slug}/${customer.slug} (signing: ${error instanceof Error ? error.message : "unknown"})`
+				);
+				continue;
+			}
 
 			const { error: upsertError } = await db.from("published_snapshots").upsert(
 				{
