@@ -44,16 +44,36 @@ function runChecks() {
 	const migrations = migrationsText();
 	const verify = read("scripts/verify.mjs") ?? "";
 
-	const hasSupportRoutes = ["src/app/support", "src/app/help"].some((p) => existsSync(path.join(ROOT, p)));
 	// Structural signals only — no regex over comments/prose. "stripe" shows up
 	// in migration comments as a squatting-target example, and "customer" +
 	// "countersign" co-occur in countersign.ts's own comment explaining it is
 	// NOT this — both would false-positive a plain keyword search.
-	const pkg = JSON.parse(read("package.json") ?? "{}");
-	const hasStripeDependency = Boolean(pkg.dependencies?.stripe || pkg.devDependencies?.stripe);
-	const hasCustomerCountersignRoute = ["src/app/customer", "src/app/api/customer"].some((p) =>
-		existsSync(path.join(ROOT, p)),
-	);
+	//
+	// Each signal below pairs a file that must EXIST with a table that must be
+	// MIGRATED, so a half-landed feature can't read as done. They replace three
+	// checks that were looking for things this codebase was never going to
+	// grow, and so reported ⬜ long after the features shipped:
+	//
+	//   - Tier 3 looked for a `stripe` dependency in package.json. There isn't
+	//     one and there shouldn't be: every outbound call here is a plain fetch
+	//     (see lib/support/slack.ts, lib/alerts/notify.ts, lib/email/consent.ts).
+	//   - Tier 4 looked for src/app/customer. The consent page a customer
+	//     actually opens is src/app/attest/[vendor]/[customer]/consent.
+	//   - Support looked for src/app/support. It is src/app/vendor/support.
+	//
+	// That is the failure this file was written to prevent, in its own checks:
+	// a status line going stale while the code moved underneath it.
+	const hasSupportRoutes =
+		existsSync(path.join(ROOT, "src/app/vendor/support")) && existsSync(path.join(ROOT, "src/lib/support/slack.ts"));
+	const hasStripeSync =
+		existsSync(path.join(ROOT, "src/lib/stripe/sync.ts")) && /vendor_payment_evidence/.test(migrations);
+	const hasCustomerCountersignRoute =
+		existsSync(path.join(ROOT, "src/app/attest/[vendor]/[customer]/consent/page.tsx")) &&
+		/countersigned_at/.test(migrations);
+	// The delivery binding is what makes a counter-signature evidence rather
+	// than the vendor's own click — worth its own row, since tier 4 "existing"
+	// and tier 4 "meaning something" were different things for two days.
+	const consentIsDeliveryBound = existsSync(path.join(ROOT, "src/lib/vendors/consent-recipient.ts"));
 
 	return [
 		{
@@ -84,19 +104,32 @@ function runChecks() {
 				: "fraud-features.ts not found",
 		},
 		{
-			label: "Tier 3 — Stripe/IdP corroboration",
-			state: hasStripeDependency ? "partial" : "planned",
-			detail: "no Stripe dependency in package.json — schema designed for it, not built",
+			label: "Tier 3 — Stripe corroboration",
+			state: hasStripeSync ? "done" : "planned",
+			detail: hasStripeSync
+				? "lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing"
+				: "no lib/stripe/sync.ts or vendor_payment_evidence table — schema designed for it, not built",
 		},
 		{
 			label: "Tier 4 — customer counter-signing",
-			state: hasCustomerCountersignRoute ? "partial" : "planned",
-			detail: "no customer-facing consent/counter-sign flow exists — customers.ts's countersign.ts is the vendor→Letterstory fraud RPC, not this",
+			state: hasCustomerCountersignRoute ? "done" : "planned",
+			detail: hasCustomerCountersignRoute
+				? "attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof"
+				: "no customer-facing consent/counter-sign flow exists — countersign.ts is the vendor→Letterstory fraud RPC, not this",
+		},
+		{
+			label: "Counter-signature is bound to the customer's own domain",
+			state: consentIsDeliveryBound ? "done" : "planned",
+			detail: consentIsDeliveryBound
+				? "consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token"
+				: "the consent link is handed to the vendor, so nothing stops them approving on their customer's behalf",
 		},
 		{
 			label: "Support / help infrastructure",
 			state: hasSupportRoutes ? "done" : "planned",
-			detail: "no support or help routes in src/app",
+			detail: hasSupportRoutes
+				? "vendor/support posts through lib/support/slack.ts to a Slack incoming webhook"
+				: "no support or help routes in src/app",
 		},
 	];
 }

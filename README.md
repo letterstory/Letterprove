@@ -30,9 +30,10 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Collection refuses unverified vendors | observe/route.ts checks vendor.domainVerified before recording anything |
 | ✅ Self-serve vendor signup issues a domain-verification token | domain_verification_token has a DB default — every insert gets one, not just onboarding's |
 | ⬜ Fraud features (ASN distribution, hash counts) | fraud-features.ts still hardcodes these null — accepted gap, not wired to real ASN data yet |
-| ⬜ Tier 3 — Stripe/IdP corroboration | no Stripe dependency in package.json — schema designed for it, not built |
-| ⬜ Tier 4 — customer counter-signing | no customer-facing consent/counter-sign flow exists — customers.ts's countersign.ts is the vendor→Letterstory fraud RPC, not this |
-| ⬜ Support / help infrastructure | no support or help routes in src/app |
+| ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing |
+| ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
+| ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
+| ✅ Support / help infrastructure | vendor/support posts through lib/support/slack.ts to a Slack incoming webhook |
 <!-- STATUS:AUTO:END -->
 
 Every decision is tagged **Decided**, **Proposed**, or **Open**.
@@ -868,6 +869,43 @@ and carries the function signature the Letterstory RPC will have.
   updating, machine-readable usage attestation, or is that a new grant?** The
   narrow legal question worth asking. Not *"is GDPR ok with this"* — that's a
   month; this is twenty minutes.
+
+- **A customer's "no" has no memory.** Declining clears the consent token and
+  nothing else — no record that they declined. The vendor's customers page
+  then reads "Request consent" again, *identical to a customer who was never
+  asked*, so a vendor cannot tell a refusal from an email that never arrived,
+  and can re-send immediately and indefinitely. On a product whose subject is
+  consent, that should be a decision rather than an accident: is a decline
+  permanent, a cooldown, or just a visible state?
+
+- **Tier 3 has never run against a live-mode Stripe key.** The publish half is
+  proven against the real schema (`src/lib/stripe/publish.schema.test.ts`,
+  which runs the real sync with `livemode: true` through real migrations), but
+  `livemode` has only ever been `false` in production, because a test-mode key
+  deliberately stores nothing. Everything except Stripe setting that boolean is
+  covered; closing the remainder needs a real paying vendor.
+
+- **Every fraud threshold is calibrated on one vendor's traffic shape.** There
+  has only ever been one real vendor, so "normal" is a sample of one. The
+  timing-shape and domain-arrival gates were tuned against it — and twice had
+  to be loosened after flagging that vendor's own genuine traffic. A second
+  vendor is the only thing that turns those thresholds into something with a
+  denominator.
+
+- **A vendor row with no `vendor_members` row can never be claimed.**
+  `/vendor/onboarding` only ever CREATES a vendor; there is no join or invite
+  flow, so a seeded or orphaned vendor is unreachable by anyone and can only be
+  fixed by a service-role insert.
+
+- **The CLI grant includes staff scopes for everyone.** `letterprove_cli` is
+  registered with `allowed_scopes: ['*']` and consent narrows only vendor
+  scopes, so any signed-in user's token carries `staff:read`/`staff:write` and
+  the consent screen tells them so. Nothing is reachable — `dispatchTool`
+  re-checks `isStaffUser` on every call and returns `insufficient_scope` — so
+  this is defence-in-depth working, not a hole. But the consent screen
+  describes powers the holder will never have, at the exact moment it is asking
+  for trust. Related: `isStaffScoped()` in `lib/oauth/scopes.ts` is now dead
+  code whose docblock still claims staff scopes are narrowed at consent.
 
 ---
 
