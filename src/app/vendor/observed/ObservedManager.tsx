@@ -141,8 +141,8 @@ export function ObservedManager({
 			>
 				<p className="-mt-1 mb-4 text-sm text-fog">
 					Recording a company counts it in your published totals. It is{" "}
-					<strong className="text-[#e9efed]">never named publicly</strong> until they agree to be
-					— you send them a consent link from the Customers tab.
+					<strong className="text-[#e9efed]">never named publicly</strong> until they agree to be.
+					Request that from the Customers tab, and we email them directly.
 				</p>
 
 				{shown.length === 0 ? (
