@@ -129,8 +129,9 @@ export function classifyRow(
 	 * the proof will never actually carry.
 	 */
 	domainVerified: boolean,
+	vendorDomain?: string,
 ): DomainTierRow {
-	const { kind } = classifyDomain(domain);
+	const { kind } = classifyDomain(domain, vendorDomain);
 	const observed = totals.sessions + totals.signups + totals.logins > 0;
 
 	const base = {
@@ -201,7 +202,13 @@ export async function tierReport(vendorSlug: string): Promise<VendorTierReport |
 
 	const rows = [...domains]
 		.map((d) =>
-			classifyRow(d, totals.get(d) ?? { sessions: 0, signups: 0, logins: 0 }, byDomain.get(d), vendor.domainVerified),
+			classifyRow(
+				d,
+				totals.get(d) ?? { sessions: 0, signups: 0, logins: 0 },
+				byDomain.get(d),
+				vendor.domainVerified,
+				vendor.domain,
+			),
 		)
 		.sort((a, b) => b.sessions - a.sessions || a.domain.localeCompare(b.domain));
 

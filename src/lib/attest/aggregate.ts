@@ -126,7 +126,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 	const totals = await observedTotals(vendor.slug);
 	if (!totals) return null;
 
-	const { attributable, excluded } = partitionDomains(totals.keys());
+	const { attributable, excluded } = partitionDomains(totals.keys(), vendor.domain);
 	const summed = attributable.reduce<Totals>(
 		(acc, d) => {
 			const t = totals.get(d)!;

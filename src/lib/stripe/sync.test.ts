@@ -7,8 +7,14 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("./credentials", () => ({ credentialFor: vi.fn() }));
 vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn() }));
 
-/** Records every table touched and what was written to it. */
-function mockDb(observed: string[] = ["acme.com"]) {
+/**
+ * Records every table touched and what was written to it. `vendorDomain`
+ * backs the `.from("vendors").select("domain").eq(...).maybeSingle()` read
+ * `syncVendorPayments` does before mapping payments — defaults to a domain
+ * outside the Letter Company's own set, since these tests exercise ordinary
+ * vendor payment mapping, not the self-dealing check.
+ */
+function mockDb(observed: string[] = ["acme.com"], vendorDomain = "acme-vendor.com") {
 	const inserts: Record<string, unknown[]> = {};
 	const deletes: string[] = [];
 	const updates: Record<string, unknown>[] = [];
@@ -19,6 +25,7 @@ function mockDb(observed: string[] = ["acme.com"]) {
 				select: () => ({
 					eq: () => ({
 						gte: () => Promise.resolve({ data: observed.map((domain) => ({ domain })), error: null }),
+						maybeSingle: () => Promise.resolve({ data: { domain: vendorDomain }, error: null }),
 					}),
 				}),
 				insert: (rows: unknown[]) => {
