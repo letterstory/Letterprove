@@ -349,7 +349,7 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 					}
 					className="motion-safe:animate-[fade-in_200ms_ease-out]"
 				>
-					<form onSubmit={onAdd} className="grid gap-4 sm:grid-cols-2">
+					<form onSubmit={onAdd} className="grid items-start gap-4 sm:grid-cols-2">
 						<Field label="Slug" hint="Used in the attestation URL. Lowercase, no spaces.">
 							<TextInput
 								required
