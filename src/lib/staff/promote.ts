@@ -96,14 +96,33 @@ export function provisionalName(domain: string): string {
 export async function promoteDomain(vendorSlug: string, rawDomain: string): Promise<PromoteResult> {
 	const domain = rawDomain.trim().toLowerCase().replace(/\.+$/, "");
 
-	const classified = classifyDomain(domain);
+	// Vendor-agnostic pass first: free-mail, malformed, and reserved-TLD
+	// domains are refused the same way for every vendor, so this rejects them
+	// without a database round trip. INTERNAL domains are NOT decided here —
+	// whether one is self-dealing depends on which vendor is asking, so those
+	// fall through to the vendor-aware check below.
+	const preClassified = classifyDomain(domain);
+	if (preClassified.kind === "free_mail" || preClassified.kind === "unknown") {
+		return { ok: false, reason: "not_attributable", detail: preClassified.reason };
+	}
+
+	const db = dbClient();
+	if (!db) return { ok: false, reason: "storage_unavailable", detail: "no datastore configured" };
+
+	const { data: vendor } = await db.from("vendors").select("id, domain").eq("slug", vendorSlug).maybeSingle();
+	if (!vendor) return { ok: false, reason: "vendor_unreadable", detail: `no vendor "${vendorSlug}"` };
+
+	// Re-classify with the vendor's own domain in scope: an INTERNAL domain is
+	// only actually self-dealing when the vendor asking is also ours (see
+	// domains.ts's classifyDomain).
+	const classified = classifyDomain(domain, vendor.domain);
 	if (classified.kind !== "company") {
 		return { ok: false, reason: "not_attributable", detail: classified.reason };
 	}
 
 	// Read the report rather than re-querying: it already joins observation to
-	// existing records, and going through it means promotion can never disagree
-	// with the page the operator is looking at.
+	// existing records, and going through it means promotion can never
+	// disagree with the page the operator is looking at.
 	const report = await tierReport(vendorSlug);
 	if (!report) {
 		return { ok: false, reason: "vendor_unreadable", detail: `no readable report for "${vendorSlug}"` };
@@ -120,12 +139,6 @@ export async function promoteDomain(vendorSlug: string, rawDomain: string): Prom
 	if (row.customer) {
 		return { ok: false, reason: "already_exists", detail: `already recorded as "${row.customer}"` };
 	}
-
-	const db = dbClient();
-	if (!db) return { ok: false, reason: "storage_unavailable", detail: "no datastore configured" };
-
-	const { data: vendor } = await db.from("vendors").select("id").eq("slug", vendorSlug).maybeSingle();
-	if (!vendor) return { ok: false, reason: "vendor_unreadable", detail: `no vendor "${vendorSlug}"` };
 
 	const slug = slugForDomain(domain);
 	const name = provisionalName(domain);

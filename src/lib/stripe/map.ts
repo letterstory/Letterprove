@@ -108,6 +108,14 @@ export interface MapOptions {
 	 * default now fails closed: no observed domains means nothing matches.
 	 */
 	allowUnobserved?: boolean;
+
+	/**
+	 * The vendor's own domain, for classifyDomain's self-dealing check. Only
+	 * matters for the Letter Company's own vendors billing Letter Company
+	 * domains — a genuinely external vendor with a real Letter Company
+	 * subscription classifies as `company` either way.
+	 */
+	vendorDomain?: string;
 }
 
 /**
@@ -119,7 +127,7 @@ export interface MapOptions {
 export function mapPayments(
 	subscriptions: StripeSubscriptionLike[],
 	observedDomains: ReadonlySet<string>,
-	{ allowUnobserved = false }: MapOptions = {}
+	{ allowUnobserved = false, vendorDomain }: MapOptions = {}
 ): PaymentMapping {
 	const unmatched: UnmatchedPayment[] = [];
 	const byDomain = new Map<string, StripeSubscriptionLike[]>();
@@ -133,7 +141,7 @@ export function mapPayments(
 		}
 
 		const domain = domainOfEmail(sub.customerEmail);
-		if (!domain || classifyDomain(domain).kind !== "company") {
+		if (!domain || classifyDomain(domain, vendorDomain).kind !== "company") {
 			unmatched.push({ subscriptionId: sub.id, reason: "not_a_company", domain });
 			continue;
 		}

@@ -54,7 +54,8 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	}
 
 	const observed = await observedDomains(vendorSlug);
-	const mapping = mapPayments(fetched.subscriptions, observed);
+	const { data: vendorRow } = await db.from("vendors").select("domain").eq("id", vendorId).maybeSingle();
+	const mapping = mapPayments(fetched.subscriptions, observed, { vendorDomain: vendorRow?.domain });
 
 	const syncedAt = new Date().toISOString();
 

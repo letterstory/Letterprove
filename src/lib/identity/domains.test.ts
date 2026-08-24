@@ -68,6 +68,35 @@ describe("classifyDomain", () => {
 	it("defaults an unrecognised domain to company rather than to the bucket", () => {
 		expect(classifyDomain("some-startup-nobody-has-heard-of.io").kind).toBe("company");
 	});
+
+	describe("vendor-scoped internal check", () => {
+		// The risk is self-dealing: Letterprove attesting that Lettertrace is
+		// its own customer, with nobody independent involved. That's still
+		// refused when the asking vendor is itself one of ours.
+		it("still refuses our domains when the vendor asking is also ours", () => {
+			expect(classifyDomain("letterbrace.com", "lettertrace.com").kind).toBe("internal");
+			expect(classifyDomain("lettertrace.com", "letterbrace.com").kind).toBe("internal");
+		});
+
+		// A genuinely external vendor with The Letter Company as a real,
+		// DNS-verified, consent-linked customer has exactly the relationship
+		// any other customer has — no privileged position, same flow as Acme.
+		it("allows our domains as a real customer of a non-Letter-Company vendor", () => {
+			expect(classifyDomain("letterbrace.com", "acme-vendor.com").kind).toBe("company");
+			expect(classifyDomain("letterstory.com", "acme-vendor.com").kind).toBe("company");
+		});
+
+		// No vendorDomain — an unmigrated call site, or a passive read with no
+		// vendor in scope — must fail closed, not open.
+		it("fails closed to internal when the vendor is unknown", () => {
+			expect(classifyDomain("letterbrace.com").kind).toBe("internal");
+		});
+
+		it("never lets free_mail or unknown through regardless of vendor", () => {
+			expect(classifyDomain("gmail.com", "acme-vendor.com").kind).toBe("free_mail");
+			expect(classifyDomain("probe.invalid", "acme-vendor.com").kind).toBe("unknown");
+		});
+	});
 });
 
 describe("isAttributable", () => {

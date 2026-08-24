@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCustomer, updateCustomer, deleteCustomer } from "./customers";
 
-/** Enough of the supabase chain for insert().select().single() and update/delete().eq().eq().select().maybeSingle(). */
-function mockSupabase(row: unknown = { id: "c1", slug: "acme" }) {
+/**
+ * Enough of the supabase chain for insert().select().single(),
+ * update/delete().eq().eq().select().maybeSingle(), and the vendors-table
+ * read `vendorOwnDomain` does before every domain-gate check
+ * (.from("vendors").select("domain").eq("id", ...).maybeSingle()).
+ *
+ * `vendorDomain` defaults to a non-Letter-Company domain: none of the
+ * existing customer-CRUD tests below exercise INTERNAL customer domains, so
+ * the vendor's own domain is irrelevant to them either way — it only matters
+ * for the domain-gate tests, which override it.
+ */
+function mockSupabase(row: unknown = { id: "c1", slug: "acme" }, vendorDomain = "acme-vendor.com") {
 	const single = vi.fn().mockResolvedValue({ data: row, error: null });
 	const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
 	const select = vi.fn().mockReturnValue({ single, maybeSingle });
@@ -11,8 +21,15 @@ function mockSupabase(row: unknown = { id: "c1", slug: "acme" }) {
 	const insert = vi.fn().mockReturnValue({ select });
 	const update = vi.fn().mockReturnValue({ eq: eq1 });
 	const del = vi.fn().mockReturnValue({ eq: eq1 });
-	const from = vi.fn().mockReturnValue({ insert, update, delete: del });
-	return { from, insert, update, delete: del, maybeSingle };
+
+	const vendorMaybeSingle = vi.fn().mockResolvedValue({ data: { domain: vendorDomain }, error: null });
+	const vendorEq = vi.fn().mockReturnValue({ maybeSingle: vendorMaybeSingle });
+	const vendorSelect = vi.fn().mockReturnValue({ eq: vendorEq });
+
+	const from = vi.fn((table: string) =>
+		table === "vendors" ? { select: vendorSelect } : { insert, update, delete: del },
+	);
+	return { from, insert, update, delete: del, maybeSingle, vendorMaybeSingle };
 }
 
 describe("createCustomer", () => {
@@ -40,6 +57,33 @@ describe("createCustomer", () => {
 		const db = mockSupabase();
 		await createCustomer(db as never, "v1", { slug: "acme", name: "Acme", domain: "acme.com", since: "2024" });
 		expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({ consent: "anonymous", vendor_id: "v1" }));
+	});
+
+	describe("domain gate is vendor-scoped", () => {
+		it("refuses a Letter Company domain when the caller's own vendor is also ours", async () => {
+			const db = mockSupabase({ id: "c1", slug: "letterbrace" }, "lettertrace.com");
+			const result = await createCustomer(db as never, "v1", {
+				slug: "letterbrace",
+				name: "Letterbrace",
+				domain: "letterbrace.com",
+				since: "2024",
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.body.kind).toBe("internal");
+			expect(db.insert).not.toHaveBeenCalled();
+		});
+
+		it("allows a Letter Company domain as a real customer of a non-Letter-Company vendor", async () => {
+			const db = mockSupabase({ id: "c1", slug: "letterbrace" }, "acme-vendor.com");
+			const result = await createCustomer(db as never, "v1", {
+				slug: "letterbrace",
+				name: "Letterbrace",
+				domain: "letterbrace.com",
+				since: "2024",
+			});
+			expect(result.ok).toBe(true);
+			expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({ domain: "letterbrace.com" }));
+		});
 	});
 });
 
