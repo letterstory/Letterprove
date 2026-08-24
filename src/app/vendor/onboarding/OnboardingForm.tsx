@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Button, ErrorBanner, Field, TextInput } from "@/components/form";
 
 export function OnboardingForm() {
+	const router = useRouter();
 	const [name, setName] = useState("");
 	const [domain, setDomain] = useState("");
 	const [category, setCategory] = useState("");
@@ -33,7 +35,8 @@ export function OnboardingForm() {
 			return;
 		}
 
-		window.location.href = "/vendor";
+		router.push("/vendor");
+		router.refresh();
 	}
 
 	return (
