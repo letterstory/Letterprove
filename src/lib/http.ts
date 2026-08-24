@@ -26,6 +26,34 @@ export function proofJson(body: unknown, ttl = 3600): NextResponse {
 	});
 }
 
+/**
+ * A proof response that NAMES a third party, cached far more briefly.
+ *
+ * Consent is withdrawable, and withdrawal is the one operation that has to
+ * take effect now. `proofJson` caches for an hour with a DAY of
+ * stale-while-revalidate — correct for an aggregate that names nobody, and
+ * badly wrong here: a customer who withdraws could stay publicly named, and
+ * their attestation publicly fetchable, long after the database says
+ * otherwise. Measured in production: a revoked customer was still served from
+ * cache after the revert.
+ *
+ * 60 seconds, and no stale-while-revalidate at all. SWR is the specific
+ * hazard — it authorises serving a document the origin has already stopped
+ * publishing. Losing edge caching on these is the correct trade: the aggregate
+ * carries the numbers agents fetch in bulk, while a named per-customer
+ * document is read rarely and must be right.
+ */
+export function namedProofJson(body: unknown): NextResponse {
+	return NextResponse.json(body, {
+		headers: {
+			"content-type": "application/json; charset=utf-8",
+			"cache-control": "public, max-age=60, must-revalidate",
+			"access-control-allow-origin": "*",
+			"x-letterprove": "on",
+		},
+	});
+}
+
 export function notFound(what: string): NextResponse {
 	return NextResponse.json(
 		{ error: "not_found", detail: what },
