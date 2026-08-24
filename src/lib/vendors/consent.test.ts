@@ -13,17 +13,25 @@ function mockDb({
 	vendor,
 	customer,
 	updateResult,
+	pending,
 }: {
 	vendor?: unknown;
 	customer?: unknown;
 	updateResult?: { data: unknown; error: unknown };
+	/** Row returned by recordConsentDecision's `consent_sent_to` read (select + THREE eqs). */
+	pending?: { consent_sent_to: string | null } | null;
 }) {
 	const vendorMaybeSingle = vi.fn().mockResolvedValue({ data: vendor ?? null });
 	const vendorEq = vi.fn().mockReturnValue({ maybeSingle: vendorMaybeSingle });
 	const vendorSelect = vi.fn().mockReturnValue({ eq: vendorEq });
 
 	const customerMaybeSingle = vi.fn().mockResolvedValue({ data: customer ?? null });
-	const customerEq2 = vi.fn().mockReturnValue({ maybeSingle: customerMaybeSingle });
+	// lookupConsentRequest stops at two eqs; recordConsentDecision adds a third
+	// (consent_token) to read who the link was delivered to, so eq2 has to offer
+	// both a terminal maybeSingle and a further eq.
+	const pendingMaybeSingle = vi.fn().mockResolvedValue({ data: pending ?? null });
+	const customerEq3 = vi.fn().mockReturnValue({ maybeSingle: pendingMaybeSingle });
+	const customerEq2 = vi.fn().mockReturnValue({ maybeSingle: customerMaybeSingle, eq: customerEq3 });
 	const customerEq1 = vi.fn().mockReturnValue({ eq: customerEq2 });
 	const customerSelect = vi.fn().mockReturnValue({ eq: customerEq1 });
 
@@ -205,18 +213,42 @@ describe("recordConsentDecision", () => {
 		});
 	});
 
-	it("sets consent=named and countersigned_at on approve", async () => {
+	it("sets consent=named and countersigned_at on approve, and records who approved", async () => {
 		const { dbClient } = await import("@/lib/db/client");
-		const db = mockDb({ vendor: VENDOR, updateResult: { data: { id: "c1" }, error: null } });
+		const db = mockDb({
+			vendor: VENDOR,
+			updateResult: { data: { id: "c1" }, error: null },
+			pending: { consent_sent_to: "ops@widgets.co" },
+		});
 		vi.mocked(dbClient).mockReturnValue(db as never);
 
 		const result = await recordConsentDecision("acme", "widgets", "tok", "approve");
 
 		expect(result).toEqual({ ok: true });
 		expect(db.update).toHaveBeenCalledWith(
-			expect.objectContaining({ consent: "named", consent_token: null, consent_token_expires_at: null }),
+			expect.objectContaining({
+				consent: "named",
+				consent_token: null,
+				consent_token_expires_at: null,
+				consent_sent_to: null,
+				countersigned_by: "ops@widgets.co",
+			}),
 		);
 		expect(db.update.mock.calls[0][0].countersigned_at).toEqual(expect.any(String));
+	});
+
+	/*
+	 * Rows countersigned before delivery-binding shipped have no
+	 * consent_sent_to. That must record a null provenance rather than throw —
+	 * an approval is still an approval.
+	 */
+	it("records a null countersigned_by when there's no delivery record", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		const db = mockDb({ vendor: VENDOR, updateResult: { data: { id: "c1" }, error: null }, pending: null });
+		vi.mocked(dbClient).mockReturnValue(db as never);
+
+		expect(await recordConsentDecision("acme", "widgets", "tok", "approve")).toEqual({ ok: true });
+		expect(db.update.mock.calls[0][0].countersigned_by).toBeNull();
 	});
 
 	it("only clears the token on decline, leaving consent and countersigned_at untouched", async () => {
@@ -227,6 +259,10 @@ describe("recordConsentDecision", () => {
 		const result = await recordConsentDecision("acme", "widgets", "tok", "decline");
 
 		expect(result).toEqual({ ok: true });
-		expect(db.update).toHaveBeenCalledWith({ consent_token: null, consent_token_expires_at: null });
+		expect(db.update).toHaveBeenCalledWith({
+			consent_token: null,
+			consent_token_expires_at: null,
+			consent_sent_to: null,
+		});
 	});
 });

@@ -15,6 +15,9 @@ export interface CustomerRow {
 	features: string[];
 	consent: "named" | "anonymous";
 	countersigned_at: string | null;
+	/** Address a live consent request went to, so the button can read "Resend request". */
+	consent_sent_to: string | null;
+	countersigned_by: string | null;
 }
 
 interface Props {
@@ -48,10 +51,13 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 	// which renders in OS chrome and ignores the page entirely.
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [showForm, setShowForm] = useState(false);
-	// The freshly-minted consent link for one row at a time — shown inline
-	// under that row until the vendor closes it or opens a different one.
-	const [consentLink, setConsentLink] = useState<{ slug: string; url: string; expiresAt: string } | null>(null);
-	const [generatingLinkFor, setGeneratingLinkFor] = useState<string | null>(null);
+	// Which row is asking for a contact address, and what's been typed. The
+	// vendor never receives the link itself — see onRequestConsent below.
+	const [requestingFor, setRequestingFor] = useState<string | null>(null);
+	const [contactEmail, setContactEmail] = useState("");
+	// Confirmation that an email went out, shown inline under that row.
+	const [consentSent, setConsentSent] = useState<{ slug: string; sentTo: string; expiresAt: string } | null>(null);
+	const [sendingFor, setSendingFor] = useState<string | null>(null);
 
 	async function onAdd(e: FormEvent) {
 		e.preventDefault();
@@ -111,25 +117,37 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 		setEditingSlug(null);
 	}
 
-	async function onGenerateConsentLink(slug: string) {
+	/**
+	 * Asks Letterprove to email the consent link to the customer. The response
+	 * carries no URL by design: if the vendor could read the link, they could
+	 * approve on their customer's behalf, and a counter-signature that the
+	 * vendor can produce alone is not evidence of anything.
+	 */
+	async function onRequestConsent(e: FormEvent, slug: string) {
+		e.preventDefault();
 		setError(null);
-		setConsentLink(null);
-		setGeneratingLinkFor(slug);
+		setConsentSent(null);
+		setSendingFor(slug);
 
 		const res = await fetch(`/api/vendor/customers/${encodeURIComponent(slug)}/consent-link`, {
 			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ contactEmail }),
 		});
 
-		setGeneratingLinkFor(null);
+		setSendingFor(null);
 
 		if (!res.ok) {
 			const body = await res.json().catch(() => null);
-			setError(body?.error ?? `Failed to create a consent link for ${slug} (${res.status})`);
+			setError(body?.error ?? `Couldn't send a consent request for ${slug} (${res.status})`);
 			return;
 		}
 
-		const { path, expiresAt } = (await res.json()) as { path: string; expiresAt: string };
-		setConsentLink({ slug, url: `${window.location.origin}${path}`, expiresAt });
+		const { sentTo, expiresAt } = (await res.json()) as { sentTo: string; expiresAt: string };
+		setConsentSent({ slug, sentTo, expiresAt });
+		setRequestingFor(null);
+		setContactEmail("");
+		setCustomers((prev) => prev.map((c) => (c.slug === slug ? { ...c, consent_sent_to: sentTo } : c)));
 	}
 
 	return (
@@ -220,11 +238,14 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 												{!c.countersigned_at && (
 													<button
 														type="button"
-														onClick={() => onGenerateConsentLink(c.slug)}
-														disabled={generatingLinkFor === c.slug}
-														className="text-xs text-fog transition hover:text-mint disabled:opacity-60"
+														onClick={() => {
+															setConsentSent(null);
+															setContactEmail("");
+															setRequestingFor(requestingFor === c.slug ? null : c.slug);
+														}}
+														className="text-xs text-fog transition hover:text-mint"
 													>
-														{generatingLinkFor === c.slug ? "Generating…" : "Consent link"}
+														{c.consent_sent_to ? "Resend request" : "Request consent"}
 													</button>
 												)}
 												<button
@@ -247,30 +268,69 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 								</tr>
 							),
 						)}
-					{consentLink && customers.some((c) => c.slug === consentLink.slug) && (
-						<tr className="bg-ink/40">
-							<Td colSpan={6}>
-								<div className="flex flex-wrap items-center gap-3 py-0.5">
-									<span className="shrink-0 text-xs text-fog">
-										Send this link to confirm and be named — expires {shortDate(consentLink.expiresAt)}:
-									</span>
-									<input
-										readOnly
-										value={consentLink.url}
-										onFocus={(e) => e.currentTarget.select()}
-										className="min-w-0 flex-1 rounded border border-edge bg-ink px-2 py-1 font-mono text-xs text-[#e9efed] outline-none focus:border-mint"
-									/>
-									<button
-										type="button"
-										onClick={() => setConsentLink(null)}
-										className="shrink-0 text-xs text-fog transition hover:text-mint"
+						{requestingFor && customers.some((c) => c.slug === requestingFor) && (
+							<tr className="bg-ink/40">
+								<Td colSpan={6}>
+									<form
+										onSubmit={(e) => onRequestConsent(e, requestingFor)}
+										className="flex flex-wrap items-center gap-3 py-0.5"
 									>
-										Close
-									</button>
-								</div>
-							</Td>
-						</tr>
-					)}
+										<span className="shrink-0 text-xs text-fog">
+											Email their confirmation link to someone at{" "}
+											<span className="font-mono text-[#e9efed]">
+												{customers.find((c) => c.slug === requestingFor)?.domain}
+											</span>
+											:
+										</span>
+										<input
+											type="email"
+											required
+											value={contactEmail}
+											onChange={(e) => setContactEmail(e.target.value)}
+											placeholder={`name@${customers.find((c) => c.slug === requestingFor)?.domain ?? "customer.com"}`}
+											className="min-w-0 flex-1 rounded border border-edge bg-ink px-2 py-1 font-mono text-xs text-[#e9efed] outline-none focus:border-mint"
+										/>
+										<button
+											type="submit"
+											disabled={sendingFor === requestingFor}
+											className="shrink-0 rounded border border-mint/40 px-2 py-1 text-xs text-mint transition hover:bg-mint/10 disabled:opacity-60"
+										>
+											{sendingFor === requestingFor ? "Sending..." : "Send"}
+										</button>
+										<button
+											type="button"
+											onClick={() => setRequestingFor(null)}
+											className="shrink-0 text-xs text-fog transition hover:text-mint"
+										>
+											Cancel
+										</button>
+										<p className="w-full text-xs text-fog">
+											We send it directly, so you never see the link. That is what makes their approval
+											evidence rather than your word for it.
+										</p>
+									</form>
+								</Td>
+							</tr>
+						)}
+						{consentSent && customers.some((c) => c.slug === consentSent.slug) && (
+							<tr className="bg-ink/40">
+								<Td colSpan={6}>
+									<div className="flex flex-wrap items-center gap-3 py-0.5">
+										<span className="text-xs text-mint">
+											Sent to <span className="font-mono">{consentSent.sentTo}</span>. It expires{" "}
+											{shortDate(consentSent.expiresAt)}, and nothing is published unless they approve.
+										</span>
+										<button
+											type="button"
+											onClick={() => setConsentSent(null)}
+											className="shrink-0 text-xs text-fog transition hover:text-mint"
+										>
+											Close
+										</button>
+									</div>
+								</Td>
+							</tr>
+						)}
 					</tbody>
 				</TableWrap>
 			)}

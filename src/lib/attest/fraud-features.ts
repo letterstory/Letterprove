@@ -19,6 +19,7 @@
 
 import { dbClient } from "@/lib/db/client";
 import { domainArrivals, type DomainArrivals } from "./domain-arrivals";
+import { geoDistribution, type GeoDistribution } from "./geo-distribution";
 
 export interface FraudFeatures {
 	schema_version: 1;
@@ -42,6 +43,17 @@ export interface FraudFeatures {
 	 * ignores it, a newer one uses it, and neither ordering breaks signing.
 	 */
 	domain_arrivals?: DomainArrivals;
+	/**
+	 * Where observed events arrived from, per region. REPORTED, NOT SCORED —
+	 * see geo-distribution.ts. Single-region concentration is evidence of a
+	 * regional business at least as often as it is evidence of fraud, so the
+	 * countersigner must not reject on this alone; it exists so a human, and
+	 * later a fraud model with multi-vendor data, can weigh it.
+	 *
+	 * Additive and optional for the same reason as domain_arrivals: bumping
+	 * schema_version would fail every signature until both deploys lined up.
+	 */
+	geo_distribution?: GeoDistribution;
 }
 
 const WINDOW_DAYS = 30;
@@ -80,7 +92,8 @@ export async function fraudFeatures(
 	const db = dbClient();
 	if (!db) return empty;
 
-	const arrivals = await domainArrivals(vendorSlug);
+	// Independent of each other and of the rollup query below.
+	const [arrivals, geo] = await Promise.all([domainArrivals(vendorSlug), geoDistribution(vendorSlug)]);
 
 	let query = db
 		.from("hot_rollups")
@@ -104,5 +117,5 @@ export async function fraudFeatures(
 	// relative share, so summing all three event kinds per row is enough.
 	const hourly_buckets = rows.map((r) => r.sessions + r.signups + r.logins);
 
-	return { ...empty, events: { sessions, signups, logins }, hourly_buckets, domain_arrivals: arrivals };
+	return { ...empty, events: { sessions, signups, logins }, hourly_buckets, domain_arrivals: arrivals, geo_distribution: geo };
 }

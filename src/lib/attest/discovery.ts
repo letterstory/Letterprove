@@ -1,6 +1,7 @@
 import { isDemonstration, signingMode } from "./keys";
 import { methodUrl } from "./method";
 import { vendorSlugs } from "./proofs";
+import { tierLadderDocument } from "./tiers";
 
 /**
  * The discovery document, built once and served two ways: as JSON at
@@ -19,6 +20,7 @@ export interface DiscoveryDocument {
 		mode: string;
 	};
 	verifier: string;
+	tiers: ReturnType<typeof tierLadderDocument>;
 	proofs: {
 		vendor: string;
 		url: string;
@@ -45,6 +47,11 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 			mode: signingMode(),
 		},
 		verifier: methodUrl("scripts/verify.mjs"),
+		// Beside the verifier on purpose. Those two answer the two separate
+		// questions an agent has — "is this document genuine" and "how much is
+		// the claim inside it worth" — and shipping only the first is what let a
+		// signed tier-0 body read as "attested".
+		tiers: tierLadderDocument(),
 		// The aggregate is listed beside the report on purpose. It is the only
 		// claim most vendors will ever publish — naming a customer needs that
 		// customer's consent — so an agent that only found `report` would miss

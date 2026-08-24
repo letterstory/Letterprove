@@ -5,6 +5,16 @@ import { freezeSnapshots } from "./freeze";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
+// Signing is mocked so a FAILURE can be simulated: countersign() throws on
+// every failure path by design, and the point of the cases below is what the
+// freeze loop does with that throw.
+vi.mock("@/lib/attest/sign", async (importOriginal) => {
+	const real = await importOriginal<typeof import("@/lib/attest/sign")>();
+	// Defaults to the REAL signer so the existing cases are unaffected; the
+	// signing-failure cases below override it to simulate a throw, which is the
+	// only way to exercise what the freeze loop does with one.
+	return { ...real, signAttestation: vi.fn(real.signAttestation) };
+});
 
 // allVendors() now reads through the same dbClient mocked above, but this
 // suite's mockDb() below stubs the query chain freeze.ts itself issues
@@ -16,6 +26,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 	const original = await importOriginal<typeof import("@/lib/fixtures/vendors")>();
 	const VENDORS: import("@/lib/fixtures/vendors").VendorFixture[] = [
 		{
+			id: "00000000-0000-0000-0000-000000000001",
 			slug: "vantage",
 			name: "Vantage",
 			domain: "vantage.example",
@@ -27,7 +38,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
 			],
 		},
-		{ slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
+		{ id: "00000000-0000-0000-0000-000000000001", slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
 	];
 	return {
 		...original,
@@ -215,5 +226,37 @@ describe("freezeSnapshots", () => {
 		expect(result).toEqual({ ok: true, frozen: 3 });
 		const [row] = (db.upsert.mock.calls[0] as [Record<string, unknown>]) ?? [];
 		expect((row.attestation as { tier: number }).tier).toBe(0);
+	});
+});
+
+describe("freezeSnapshots — a signing failure must not halt everyone else", () => {
+	it("skips only the customer whose signature failed, and freezes the rest", async () => {
+		// The failure this prevents: countersign() throws on every failure path
+		// (correctly — an unsigned snapshot must never be published), and that
+		// throw used to escape the loop. A fraud-check REFUSAL is a normal
+		// outcome for one bad claim, and it stopped every other customer's and
+		// vendor's proofs from updating.
+		const { signAttestation } = await import("@/lib/attest/sign");
+		vi.mocked(signAttestation).mockImplementation((async (body: { customer?: string }) => {
+			if (body.customer === "globex") throw new Error("countersign refused: burst pattern");
+			return { ...body, signature: "sig", key_id: "k" };
+		}) as unknown as typeof signAttestation);
+
+		const result = await freezeSnapshots();
+
+		// Nothing unsigned published, and the run still completes.
+		expect(result.ok).toBe(true);
+		expect(result.skipped?.some((s) => s.includes("globex"))).toBe(true);
+		expect(result.frozen).toBeGreaterThan(0);
+	});
+
+	it("reports WHY a customer was skipped, not just that it was", async () => {
+		const { signAttestation } = await import("@/lib/attest/sign");
+		vi.mocked(signAttestation).mockRejectedValue(new Error("countersign RPC failed: 503"));
+
+		const result = await freezeSnapshots();
+
+		expect(result.frozen).toBe(0);
+		expect(result.skipped?.[0]).toMatch(/signing:.*503/);
 	});
 });

@@ -2,82 +2,54 @@
 
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import { useLayoutEffect, useRef, useState } from "react";
 
 /**
- * Vendor section tabs.
+ * Vendor section nav — a vertical rail on desktop, a wrapping row on phones.
  *
- * Two things beyond a list of links:
+ * Was a horizontal tab strip with a sliding indicator. The rail replaces it
+ * for two reasons beyond matching the sibling product: a fifth section had
+ * nowhere to go without crowding the wordmark, and section nav in the header
+ * competed with account actions (sign out, support) that are not navigation
+ * at all. Splitting them puts "where am I" on the left and "my account" top
+ * right, which is where people already look.
  *
- * 1. A single indicator that slides between tabs, rather than a background
- *    that pops on and off. It is measured from the active tab's own box, so
- *    it stays correct when a label changes or a tab is added — nothing is
- *    hardcoded to three equal widths.
- *
- * 2. An immediate pending state, from Next's own useLinkStatus rather than
- *    hand-tracked state. Every page under /vendor is force-dynamic and
- *    queries the database, so a click has nothing to show for a beat. The tab
- *    dims the moment it is pressed, which makes the wait feel answered rather
- *    than ignored — the skeletons in each loading.tsx do the rest.
+ * The pending state is kept from the old strip. Every /vendor page is
+ * force-dynamic and queries the database, so a click has a real round-trip
+ * behind it; without this the click reads as ignored until the new page
+ * paints. useLinkStatus is Next's own signal rather than hand-tracked state.
  */
-const TABS = [
-	{ href: "/vendor", label: "Dashboard", match: (p: string) => p === "/vendor" },
-	{ href: "/vendor/customers", label: "Customers", match: (p: string) => p.startsWith("/vendor/customers") },
-	{ href: "/vendor/proof", label: "Proof", match: (p: string) => p.startsWith("/vendor/proof") },
+const ITEMS = [
+	{ href: "/vendor", label: "Dashboard", exact: true },
+	{ href: "/vendor/observed", label: "Observed" },
+	{ href: "/vendor/customers", label: "Customers" },
+	{ href: "/vendor/proof", label: "Proof" },
 ];
 
 export function VendorNav() {
 	const pathname = usePathname() ?? "";
-	const activeIndex = Math.max(0, TABS.findIndex((t) => t.match(pathname)));
-
-	const containerRef = useRef<HTMLElement>(null);
-	const tabRefs = useRef<(HTMLAnchorElement | null)[]>([]);
-	const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
-
-	useLayoutEffect(() => {
-		function place() {
-			const el = tabRefs.current[activeIndex];
-			const container = containerRef.current;
-			if (!el || !container) return;
-			setIndicator({
-				left: el.offsetLeft - container.clientLeft,
-				width: el.offsetWidth,
-			});
-		}
-		place();
-
-		// Fonts landing after hydration change tab widths, so re-measure.
-		const observer = new ResizeObserver(place);
-		if (containerRef.current) observer.observe(containerRef.current);
-		return () => observer.disconnect();
-	}, [activeIndex]);
 
 	return (
-		<nav
-			ref={containerRef}
-			className="relative flex items-center gap-1 rounded-md border border-edge bg-panel p-1"
-		>
-			{indicator && (
-				<span
-					aria-hidden="true"
-					className="absolute top-1 bottom-1 rounded-sm bg-mint/10 ring-1 ring-mint/25 transition-[left,width] duration-300 ease-out motion-reduce:transition-none"
-					style={{ left: indicator.left, width: indicator.width }}
-				/>
-			)}
-
-			{TABS.map((tab, i) => {
-				const active = i === activeIndex;
+		<nav className="flex flex-row flex-wrap gap-1 md:flex-col md:flex-nowrap md:gap-0.5">
+			{ITEMS.map((item) => {
+				const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
 				return (
 					<Link
-						key={tab.href}
-						href={tab.href}
-						ref={(el) => {
-							tabRefs.current[i] = el;
-						}}
+						key={item.href}
+						href={item.href}
 						aria-current={active ? "page" : undefined}
-						className="relative z-10 rounded-sm px-3 py-1 text-[11px] tracking-widest uppercase"
+						className={`group relative rounded-lg px-3.5 py-2.5 text-[15px] font-medium transition-colors ${
+							active ? "bg-mint/10 text-mint" : "text-fog hover:bg-ink/60 hover:text-[#e9efed]"
+						}`}
 					>
-						<TabLabel label={tab.label} active={active} />
+						{/* A rail rather than an underline: it reads as "you are here"
+						    in a vertical list, where an underline reads as a link. */}
+						<span
+							aria-hidden="true"
+							className={`absolute top-2 bottom-2 -left-px w-[3px] rounded-full transition-colors ${
+								active ? "bg-mint" : "bg-transparent"
+							}`}
+						/>
+						<NavLabel>{item.label}</NavLabel>
 					</Link>
 				);
 			})}
@@ -85,24 +57,8 @@ export function VendorNav() {
 	);
 }
 
-/**
- * Must be a child of the Link — useLinkStatus reports the pending state of the
- * navigation its enclosing Link started, which is exactly the beat between the
- * click and the new page's first byte.
- */
-function TabLabel({ label, active }: { label: string; active: boolean }) {
+/** Dims the instant the link is pressed, so the wait feels answered. */
+function NavLabel({ children }: { children: React.ReactNode }) {
 	const { pending } = useLinkStatus();
-	return (
-		<span
-			className={`transition-colors duration-200 ${
-				active
-					? "font-medium text-mint"
-					: pending
-						? "text-mint/70"
-						: "text-fog hover:text-mint"
-			}`}
-		>
-			{label}
-		</span>
-	);
+	return <span className={pending ? "opacity-50" : undefined}>{children}</span>;
 }

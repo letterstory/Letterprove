@@ -30,9 +30,10 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Collection refuses unverified vendors | observe/route.ts checks vendor.domainVerified before recording anything |
 | ✅ Self-serve vendor signup issues a domain-verification token | domain_verification_token has a DB default — every insert gets one, not just onboarding's |
 | ⬜ Fraud features (ASN distribution, hash counts) | fraud-features.ts still hardcodes these null — accepted gap, not wired to real ASN data yet |
-| ⬜ Tier 3 — Stripe/IdP corroboration | no Stripe dependency in package.json — schema designed for it, not built |
-| ⬜ Tier 4 — customer counter-signing | no customer-facing consent/counter-sign flow exists — customers.ts's countersign.ts is the vendor→Letterstory fraud RPC, not this |
-| ⬜ Support / help infrastructure | no support or help routes in src/app |
+| ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing |
+| ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
+| ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
+| ✅ Support / help infrastructure | vendor/support posts through lib/support/slack.ts to a Slack incoming webhook |
 <!-- STATUS:AUTO:END -->
 
 Every decision is tagged **Decided**, **Proposed**, or **Open**.
@@ -694,16 +695,15 @@ proof in the system.
 ### Customer counter-signing — **Built (08-21)**
 
 The consent step above is no longer just a vendor-side flag — there's now a
-real path for the customer themselves to sign off. A vendor mints a
-single-use, expiring link (`generate_consent_link`, 7-day TTL, same
-unguessable-token-in-a-column shape as `vendors.domain_verification_token`)
-and hands it to their customer. That link resolves to
-`/attest/{vendor}/{customer}/consent` — deliberately **outside** the
-vendor/staff auth gate in `src/proxy.ts`, since the person opening it has no
-Letterprove account at all, may be reading it from an email client, and can't
-be asked to sign in. The page is a plain HTML form (no client JS required);
-approving or declining POSTs to `.../consent/respond`, which redirects back
-with the result.
+real path for the customer themselves to sign off. A vendor requests consent
+(`request_consent`, 7-day TTL, same unguessable-token-in-a-column shape as
+`vendors.domain_verification_token`) and **Letterprove emails the link to the
+customer**. That link resolves to `/attest/{vendor}/{customer}/consent` —
+deliberately **outside** the vendor/staff auth gate in `src/proxy.ts`, since
+the person opening it has no Letterprove account at all, may be reading it
+from an email client, and can't be asked to sign in. The page is a plain HTML
+form (no client JS required); approving or declining POSTs to
+`.../consent/respond`, which redirects back with the result.
 
 Approval sets `countersigned_at` on `vendor_customers` — once, never
 cleared — and `earned()` in `src/lib/attest/body.ts` treats its presence as
@@ -712,6 +712,39 @@ pipeline entirely. That's the point: tier 4 is supposed to not run through
 the vendor at all. Declining, expiry, an already-used token, and an
 already-countersigned customer are all distinct terminal states on the same
 page, not a generic error.
+
+#### Why delivery is the binding — **Fixed (08-23)**
+
+As first built, the link was returned **to the vendor** to forward. Nothing
+checked that they did. Combined with the short-circuit above — tier 4 is
+evaluated *ahead of* the domain-verified and observed gates — a vendor could
+open their own link and publish the strongest tier in the system with no DNS
+proof and no telemetry behind it. On a product whose pitch is "a logo wall
+can be faked, this can't", that was the one failure mode that mattered most.
+
+So the vendor no longer receives the link. They name a recipient, that
+address **must be on the customer's own domain** (exact match or a subdomain
+of it — see `src/lib/vendors/consent-recipient.ts`), and the API answers with
+`{ sentTo, expiresAt }` and nothing else. The domain is read from the stored
+customer row, never from the request, so a vendor cannot supply both sides of
+the comparison. Approving therefore requires a mailbox at the customer's
+domain, which a vendor attesting to a real third party does not control.
+
+Delivery is **fail-closed**, unlike the Slack senders: with `RESEND_API_KEY`
+unset, or on any send failure, the freshly minted token is rolled back and the
+request 502s. "Couldn't send" has to mean "no link exists" — degrading to
+"here, you deliver it" would restore the hole exactly.
+
+`countersigned_by` records which address approved. It is deliberately **not
+published**: naming the individual would leak a person the customer never
+agreed to expose. It exists so a disputed claim can be traced.
+
+**What this does not claim to stop.** A vendor who registers a domain and
+invents a company on it controls both ends and can still self-approve. Email
+delivery cannot fix that, and documenting it beats pretending otherwise —
+fraud scoring in Letterstory remains the backstop for a fabricated-company
+rig. What this closes is the easy case: self-approving for a customer whose
+domain you do not control.
 
 ### How it is enforced — **Built (08-13)**
 
@@ -820,7 +853,7 @@ and carries the function signature the Letterstory RPC will have.
 | 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
-| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), and [Customer counter-signing](#customer-counter-signing--built-08-21) |
+| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), [Customer counter-signing](#customer-counter-signing--built-08-21), and [Why delivery is the binding](#why-delivery-is-the-binding--fixed-08-23) |
 | 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |
@@ -836,6 +869,43 @@ and carries the function signature the Letterstory RPC will have.
   updating, machine-readable usage attestation, or is that a new grant?** The
   narrow legal question worth asking. Not *"is GDPR ok with this"* — that's a
   month; this is twenty minutes.
+
+- **A customer's "no" has no memory.** Declining clears the consent token and
+  nothing else — no record that they declined. The vendor's customers page
+  then reads "Request consent" again, *identical to a customer who was never
+  asked*, so a vendor cannot tell a refusal from an email that never arrived,
+  and can re-send immediately and indefinitely. On a product whose subject is
+  consent, that should be a decision rather than an accident: is a decline
+  permanent, a cooldown, or just a visible state?
+
+- **Tier 3 has never run against a live-mode Stripe key.** The publish half is
+  proven against the real schema (`src/lib/stripe/publish.schema.test.ts`,
+  which runs the real sync with `livemode: true` through real migrations), but
+  `livemode` has only ever been `false` in production, because a test-mode key
+  deliberately stores nothing. Everything except Stripe setting that boolean is
+  covered; closing the remainder needs a real paying vendor.
+
+- **Every fraud threshold is calibrated on one vendor's traffic shape.** There
+  has only ever been one real vendor, so "normal" is a sample of one. The
+  timing-shape and domain-arrival gates were tuned against it — and twice had
+  to be loosened after flagging that vendor's own genuine traffic. A second
+  vendor is the only thing that turns those thresholds into something with a
+  denominator.
+
+- **A vendor row with no `vendor_members` row can never be claimed.**
+  `/vendor/onboarding` only ever CREATES a vendor; there is no join or invite
+  flow, so a seeded or orphaned vendor is unreachable by anyone and can only be
+  fixed by a service-role insert.
+
+- **The CLI grant includes staff scopes for everyone.** `letterprove_cli` is
+  registered with `allowed_scopes: ['*']` and consent narrows only vendor
+  scopes, so any signed-in user's token carries `staff:read`/`staff:write` and
+  the consent screen tells them so. Nothing is reachable — `dispatchTool`
+  re-checks `isStaffUser` on every call and returns `insufficient_scope` — so
+  this is defence-in-depth working, not a hole. But the consent screen
+  describes powers the holder will never have, at the exact moment it is asking
+  for trust. Related: `isStaffScoped()` in `lib/oauth/scopes.ts` is now dead
+  code whose docblock still claims staff scopes are narrowed at consent.
 
 ---
 

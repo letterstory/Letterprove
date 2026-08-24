@@ -3,12 +3,54 @@ import { notFound } from "next/navigation";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { vendorJsonLd } from "@/lib/attest/jsonld";
 import { vendorProof, type CustomerProof } from "@/lib/attest/proofs";
-import { FEATURES } from "@/lib/fixtures/vendors";
+import { vendorAggregate } from "@/lib/attest/aggregate";
+import { AttestedAt, RelativeAge } from "./AttestedAt";
+import { FEATURES, findVendor } from "@/lib/fixtures/vendors";
+
+/**
+ * Per-vendor page title, replacing the generic site-wide one.
+ *
+ * This does NOT fix the 404 status — `layout.tsx` does, and the reasoning
+ * lives there. Measured, not assumed: with the status bug still present, a
+ * `notFound()` here left the response on `200` just as the component's did.
+ * Metadata is resolved as part of the same streamed render, so it is no
+ * earlier than anything else inside the loading boundary.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ vendor: string }> }) {
+	const { vendor: slug } = await params;
+	const vendor = await findVendor(slug);
+	if (!vendor) notFound();
+
+	return {
+		title: `${vendor.name} — attested proof`,
+		description: `Signed, independently verifiable proof of real product usage for ${vendor.name}.`,
+	};
+}
 
 export default async function ProofPage({ params }: { params: Promise<{ vendor: string }> }) {
 	const { vendor: slug } = await params;
-	const proof = await vendorProof(slug);
+	const [proof, aggregate] = await Promise.all([vendorProof(slug), vendorAggregate(slug)]);
 	if (!proof) notFound();
+
+	/*
+	 * Read from the SIGNED aggregate, not from a live report.
+	 *
+	 * This number used to come straight from tierReport() and publish as
+	 * "Unverified customers" — an unsigned figure on a page where everything
+	 * else is signed and chained, describing observed domains as "customers".
+	 * An agent fetching /attest/{vendor}.json saw `companies_observed`; a human
+	 * reading this page saw a different label for the same fact from a
+	 * different source, and only one of the two was verifiable.
+	 *
+	 * Now both read the same signed document. Falls back to 0 rather than to
+	 * the live number if the aggregate can't be built: a page that silently
+	 * swaps a signed figure for an unsigned one is the exact confusion this
+	 * change removes.
+	 */
+	const observedNotClaimed = Math.max(
+		0,
+		(aggregate?.companies_observed ?? 0) - proof.summary.attested_customers,
+	);
 
 	const host = (await headers()).get("host") ?? "localhost";
 	const origin = `${host.startsWith("localhost") ? "http" : "https"}://${host}`;
@@ -27,18 +69,38 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					{proof.vendor.category} · {proof.vendor.domain}
 				</p>
 
-				<dl className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-5">
+				{/* Four tiles, not five. "Unverified customers" was removed rather
+				    than restyled: it published an UNSIGNED live number on a page
+				    where every other figure is signed and chained, and it named
+				    observed domains "customers", which is the logo-wall claim this
+				    product exists to refute. The same fact now appears below as
+				    "companies observed", read from the SIGNED aggregate — so an
+				    agent reading /attest/{vendor}.json and a human reading this
+				    page finally see the same number from the same source. */}
+				<dl className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-4">
 					<Tile label="Attested customers" value={String(proof.summary.attested_customers)} />
-					{/* Real activity that hasn't crossed into a published claim yet —
-					    no customer record, or a record without consent to be named.
-					    Without this, zero attested customers and zero of anything
-					    else look identical, when one of those is "nothing is
-					    happening" and the other is "a backlog nobody has worked." */}
-					<Tile label="Unverified customers" value={String(proof.summary.unverified_customers)} />
 					<Tile label="Features proven" value={String(proof.summary.features_proven.length)} />
 					<Tile label="Sessions / 30d" value={proof.summary.sessions_30d.toLocaleString("en-US")} />
-					<Tile label="Last attested" value={shortStamp(proof.summary.last_attested)} />
+					<Tile
+						label="Last attested"
+						value={<AttestedAt iso={proof.summary.last_attested} />}
+						sub={<RelativeAge iso={proof.summary.last_attested} />}
+					/>
 				</dl>
+
+				{/* Observed-but-not-yet-claimed, stated as what it is. Without a
+				    line like this, a vendor with real traffic and no published
+				    customers looks identical to one with no activity at all — but
+				    the honest word is "observed", not "customers". */}
+				{observedNotClaimed > 0 && (
+					<p className="mt-4 rounded-lg border border-edge bg-panel px-4 py-3 text-sm text-fog">
+						<span className="font-semibold text-mint">{observedNotClaimed}</span> more{" "}
+						{observedNotClaimed === 1 ? "company has" : "companies have"} been observed using{" "}
+						{proof.vendor.name} but {observedNotClaimed === 1 ? "is" : "are"} not published as a
+						customer — either not yet recorded, or recorded without consent to be named. Not
+						counted above.
+					</p>
+				)}
 
 				{/* NOT "verified customers" — this list includes tier-1 observations,
 				    which are published and labelled as such. A heading that rounds
@@ -52,11 +114,32 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
 					Published claims
 				</h2>
-				<div className="mt-4 grid gap-4 sm:grid-cols-2">
-					{proof.customers.map((c) => (
-						<CustomerCard key={c.current.customer} proof={c} vendor={slug} />
-					))}
-				</div>
+				{/* An empty state, not an empty gap. This list only ever holds
+				    customers who consented to be NAMED, so a vendor with real
+				    attested customers who have all stayed anonymous renders a
+				    heading over nothing — which reads as broken rather than as
+				    the deliberate consent behaviour it is. */}
+				{proof.customers.length === 0 ? (
+					<p className="mt-4 rounded-lg border border-dashed border-edge px-6 py-8 text-center text-sm text-fog">
+						{proof.summary.attested_customers > 0 ? (
+							<>
+								No customer has agreed to be named publicly yet. Their attestations exist and
+								are counted in the totals above — naming is theirs to consent to.
+							</>
+						) : (
+							<>
+								Nothing published yet. Claims appear here once a customer is recorded and
+								their usage has been observed.
+							</>
+						)}
+					</p>
+				) : (
+					<div className="mt-4 grid gap-4 sm:grid-cols-2">
+						{proof.customers.map((c) => (
+							<CustomerCard key={c.current.customer} proof={c} vendor={slug} />
+						))}
+					</div>
+				)}
 
 				{/* Says the quiet part out loud. Without this the page looks like the
 				    vendor has one customer, when what it has is one customer who
@@ -68,18 +151,6 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						{proof.summary.attested_unnamed === 1 ? "customer is" : "customers are"} counted in the
 						totals above but not named here. Their attestations exist and are signed; publishing
 						a customer&rsquo;s name is theirs to agree to, not the vendor&rsquo;s.
-					</p>
-				)}
-
-				{/* The "Unverified" tile has no room for the "why" — this is that
-				    room. Same domain-only discipline as everywhere else on this
-				    page: a count, never a name. */}
-				{proof.summary.unverified_customers > 0 && (
-					<p className="mt-4 rounded-lg border border-edge bg-panel px-4 py-3 text-sm text-fog">
-						<span className="text-mint">{proof.summary.unverified_customers}</span> more{" "}
-						{proof.summary.unverified_customers === 1 ? "domain shows" : "domains show"} real activity but
-						{proof.summary.unverified_customers === 1 ? " hasn't" : " haven't"} been recorded as a
-						customer, or consented to be named, yet — not counted above.
 					</p>
 				)}
 
@@ -197,11 +268,23 @@ function shortStamp(iso: string): string {
 	return iso.replace("T", " ").replace(/:\d{2}(\.\d+)?Z$/, "Z");
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
+function Tile({
+	label,
+	value,
+	sub,
+}: {
+	label: string;
+	value: React.ReactNode;
+	sub?: React.ReactNode;
+}) {
 	return (
-		<div className="bg-panel px-4 py-5">
-			<dt className="text-xs tracking-wider text-fog uppercase">{label}</dt>
-			<dd className="mt-1 text-xl font-semibold tabular-nums">{value}</dd>
+		<div className="flex flex-col bg-panel px-4 py-5">
+			<dt className="text-[11px] tracking-widest text-fog uppercase">{label}</dt>
+			{/* Fixed leading and a reserved sub-line keep the five tiles the same
+			    height whether or not they carry a second line — the timestamp tile
+			    used to wrap onto two lines and drag the whole row taller. */}
+			<dd className="mt-1.5 text-xl leading-7 font-semibold tabular-nums">{value}</dd>
+			{sub && <div className="mt-0.5 leading-4">{sub}</div>}
 		</div>
 	);
 }

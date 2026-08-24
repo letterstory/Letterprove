@@ -34,8 +34,8 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("slugForDomain", () => {
 	it("uses the registrable label, not the whole host", () => {
-		expect(slugForDomain("juvare.com")).toBe("juvare");
-		expect(slugForDomain("properti.ai")).toBe("properti");
+		expect(slugForDomain("globex.com")).toBe("globex");
+		expect(slugForDomain("northwind.ai")).toBe("northwind");
 	});
 
 	// A two-part public suffix would otherwise leave the country code as the slug.
@@ -63,7 +63,7 @@ describe("slugForDomain", () => {
 	});
 
 	it("normalises case and a trailing dot", () => {
-		expect(slugForDomain("Bornwest.COM.")).toBe("bornwest");
+		expect(slugForDomain("Umbrella.COM.")).toBe("umbrella");
 	});
 
 	it("produces a name a human is expected to correct", () => {
@@ -100,19 +100,19 @@ describe("what promotion refuses", () => {
 	// A record with no evidence behind it is a vendor assertion with extra
 	// steps, and it would publish as tier 0 anyway.
 	it("refuses a domain nothing has been observed for", async () => {
-		const { insert } = await setup([row("juvare.com", { sessions: 0, signups: 0, logins: 0 })]);
-		expect(await promoteDomain("lettertrace", "juvare.com")).toMatchObject({ ok: false, reason: "not_observed" });
+		const { insert } = await setup([row("globex.com", { sessions: 0, signups: 0, logins: 0 })]);
+		expect(await promoteDomain("lettertrace", "globex.com")).toMatchObject({ ok: false, reason: "not_observed" });
 		expect(insert).not.toHaveBeenCalled();
 	});
 
 	it("refuses a domain absent from the report entirely", async () => {
-		await setup([row("juvare.com")]);
+		await setup([row("globex.com")]);
 		expect(await promoteDomain("lettertrace", "never-seen.com")).toMatchObject({ ok: false, reason: "not_observed" });
 	});
 
 	it("refuses a domain that already has a record", async () => {
-		const { insert } = await setup([row("juvare.com", { customer: "juvare" })]);
-		expect(await promoteDomain("lettertrace", "juvare.com")).toMatchObject({ ok: false, reason: "already_exists" });
+		const { insert } = await setup([row("globex.com", { customer: "globex" })]);
+		expect(await promoteDomain("lettertrace", "globex.com")).toMatchObject({ ok: false, reason: "already_exists" });
 		expect(insert).not.toHaveBeenCalled();
 	});
 
@@ -121,40 +121,40 @@ describe("what promotion refuses", () => {
 	it("refuses when the report cannot be read at all", async () => {
 		const { tierReport } = await import("@/lib/tiers/report");
 		vi.mocked(tierReport).mockResolvedValue(null);
-		expect(await promoteDomain("lettertrace", "juvare.com")).toMatchObject({ ok: false, reason: "vendor_unreadable" });
+		expect(await promoteDomain("lettertrace", "globex.com")).toMatchObject({ ok: false, reason: "vendor_unreadable" });
 	});
 
 	it("reports a slug collision as a conflict rather than a write failure", async () => {
-		await setup([row("juvare.com")], { error: { code: "23505", message: "duplicate key" } });
-		expect(await promoteDomain("lettertrace", "juvare.com")).toMatchObject({ ok: false, reason: "already_exists" });
+		await setup([row("globex.com")], { error: { code: "23505", message: "duplicate key" } });
+		expect(await promoteDomain("lettertrace", "globex.com")).toMatchObject({ ok: false, reason: "already_exists" });
 	});
 });
 
 describe("what promotion writes", () => {
 	it("creates the record anonymous, never named", async () => {
-		const { insert } = await setup([row("juvare.com")]);
-		await promoteDomain("lettertrace", "juvare.com");
+		const { insert } = await setup([row("globex.com")]);
+		await promoteDomain("lettertrace", "globex.com");
 		expect(insert.mock.calls[0][0]).toMatchObject({ consent: "anonymous" });
 	});
 
 	// tier is a CEILING re-derived by earned() at publish time. Storing
 	// verified: true here would make provenance an assertion again.
 	it("stores a tier-1 ceiling and never marks it verified", async () => {
-		const { insert } = await setup([row("juvare.com")]);
-		await promoteDomain("lettertrace", "juvare.com");
+		const { insert } = await setup([row("globex.com")]);
+		await promoteDomain("lettertrace", "globex.com");
 		expect(insert.mock.calls[0][0]).toMatchObject({ tier: 1, verified: false, features: [] });
 	});
 
 	it("scopes the record to the vendor it was promoted for", async () => {
-		const { insert } = await setup([row("juvare.com")], { vendorId: "vendor-abc" });
-		await promoteDomain("lettertrace", "juvare.com");
-		expect(insert.mock.calls[0][0]).toMatchObject({ vendor_id: "vendor-abc", domain: "juvare.com" });
+		const { insert } = await setup([row("globex.com")], { vendorId: "vendor-abc" });
+		await promoteDomain("lettertrace", "globex.com");
+		expect(insert.mock.calls[0][0]).toMatchObject({ vendor_id: "vendor-abc", domain: "globex.com" });
 	});
 
 	it("normalises the domain before writing it", async () => {
-		const { insert } = await setup([row("juvare.com")]);
-		const r = await promoteDomain("lettertrace", "  Juvare.COM.  ");
-		expect(r).toMatchObject({ ok: true, slug: "juvare", domain: "juvare.com" });
-		expect(insert.mock.calls[0][0]).toMatchObject({ domain: "juvare.com" });
+		const { insert } = await setup([row("globex.com")]);
+		const r = await promoteDomain("lettertrace", "  Globex.COM.  ");
+		expect(r).toMatchObject({ ok: true, slug: "globex", domain: "globex.com" });
+		expect(insert.mock.calls[0][0]).toMatchObject({ domain: "globex.com" });
 	});
 });
