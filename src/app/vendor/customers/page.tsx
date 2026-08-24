@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createServerSupabaseClient } from "@/lib/auth/server";
 import { currentVendor } from "@/lib/vendors/session";
 import { FEATURES } from "@/lib/fixtures/vendors";
+import { listCustomers } from "@/lib/vendors/customers";
 import { CustomersManager, type CustomerRow } from "./CustomersManager";
 import { PageHeader } from "@/components/ui";
 
@@ -24,13 +25,14 @@ export default async function VendorCustomersPage() {
 	if (!vendor) redirect("/vendor/login");
 
 	const supabase = await createServerSupabaseClient();
-	const { data } = await supabase
-		.from("vendor_customers")
-		.select("id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
-		.eq("vendor_id", vendor.id)
-		.order("created_at", { ascending: true });
-
-	const customers = (data ?? []) as CustomerRow[];
+	// Through listCustomers() rather than a hand-written select. This page used
+	// to repeat the column list, and it silently drifted: `consent_sent_to`
+	// shipped, listCustomers() knew about it, this query didn't, so the row
+	// always arrived with the field undefined and the button could never read
+	// "Resend request" — a vendor had no way to see a request was already out.
+	// One source of truth for the columns means that can't recur.
+	const result = await listCustomers(supabase, vendor.id);
+	const customers = (result.ok ? result.data : []) as CustomerRow[];
 
 	return (
 		<>

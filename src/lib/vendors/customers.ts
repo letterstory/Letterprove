@@ -26,7 +26,14 @@ export type CustomerRow = {
 	countersigned_by: string | null;
 };
 
-const CUSTOMER_COLUMNS =
+/**
+ * Exported so the drift that hid `consent_sent_to` from the dashboard can be
+ * asserted against rather than re-introduced: the vendor customers page used
+ * to repeat this list by hand, and when a column was added here the page kept
+ * selecting the old set. Every reader goes through listCustomers(); this
+ * constant is exported for the guard test, not for building queries elsewhere.
+ */
+export const CUSTOMER_COLUMNS =
 	"id, slug, name, domain, since, tier, verified, features, consent, countersigned_at, consent_sent_to, countersigned_by";
 
 export type ServiceResult<T> = { ok: true; data: T } | { ok: false; status: number; body: Record<string, unknown> };
