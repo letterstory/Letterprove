@@ -132,7 +132,7 @@ export function StripeCard({ connection }: { connection: StripeConnectionView | 
 					    that screen and picks a template, ending up with 34
 					    permissions instead of 2 — which would make our own "we
 					    only ask for what we need" claim false in practice. */}
-					<Field label="Restricted API key" hint="Create it in Stripe → Developers → API keys → Create restricted key.">
+					<Field label="Restricted API key" hint="Starts with rk_live_ or rk_test_.">
 						<TextInput
 							value={key}
 							onChange={(e) => setKey(e.target.value)}
@@ -141,6 +141,30 @@ export function StripeCard({ connection }: { connection: StripeConnectionView | 
 							spellCheck={false}
 						/>
 					</Field>
+					{/*
+					 * A link, not the menu path it replaced ("Stripe → Developers →
+					 * API keys"). Menu paths rot: Stripe moved its own Connect
+					 * settings between the page their docs named and the one that
+					 * actually holds it, and a vendor following stale directions
+					 * gives up somewhere we never hear about. A URL survives a
+					 * dashboard reorganisation.
+					 *
+					 * Outside the Field on purpose — `hint` renders inside the
+					 * <label>, and an anchor in there would toggle the input on
+					 * click.
+					 */}
+					<p className="text-xs text-fog">
+						Create one at{" "}
+						<a
+							href="https://dashboard.stripe.com/apikeys"
+							target="_blank"
+							rel="noreferrer noopener"
+							className="text-mint hover:underline"
+						>
+							dashboard.stripe.com/apikeys
+						</a>{" "}
+						→ <strong className="text-[#e9efed]">Create restricted key</strong>, then:
+					</p>
 					<ol className="ml-4 list-decimal space-y-1 text-xs text-fog marker:text-fog/60">
 						<li>
 							Asked how you&rsquo;ll use it, choose{" "}
