@@ -95,6 +95,30 @@ export default async function VerifyPage() {
 						</div>
 					</Card>
 
+					{/*
+					 * Rendered here because this page is the discovery document
+					 * shown to people — if the JSON carries the ladder and the
+					 * page doesn't, the two describe different schemes, which is
+					 * the exact drift this shared builder exists to stop.
+					 */}
+					<Card title="What the tiers mean">
+						<p className="text-sm text-fog">{doc.tiers.note}</p>
+						<ul className="mt-4 grid gap-2">
+							{doc.tiers.levels.map((level) => (
+								<li key={level.tier} className="rounded border border-edge bg-ink/40 px-3 py-2.5">
+									<div className="flex flex-wrap items-baseline gap-x-2">
+										<span className="font-mono text-xs text-mint">tier {level.tier}</span>
+										<span className="font-medium text-[#e9efed]">{level.name}</span>
+									</div>
+									<p className="mt-1 text-sm text-fog">{level.means}</p>
+									<p className="mt-1.5 text-xs text-fog">
+										<span className="text-fog/70">Forgeable by:</span> {level.forgeable_by}
+									</p>
+								</li>
+							))}
+						</ul>
+					</Card>
+
 					<Card title={`Published proofs (${doc.proofs.length})`}>
 						{doc.proofs.length === 0 ? (
 							<p className="text-sm text-fog">Nothing is published yet.</p>
