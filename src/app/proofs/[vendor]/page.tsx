@@ -5,7 +5,27 @@ import { vendorJsonLd } from "@/lib/attest/jsonld";
 import { vendorProof, type CustomerProof } from "@/lib/attest/proofs";
 import { vendorAggregate } from "@/lib/attest/aggregate";
 import { AttestedAt, RelativeAge } from "./AttestedAt";
-import { FEATURES } from "@/lib/fixtures/vendors";
+import { FEATURES, findVendor } from "@/lib/fixtures/vendors";
+
+/**
+ * Per-vendor page title, replacing the generic site-wide one.
+ *
+ * This does NOT fix the 404 status — `layout.tsx` does, and the reasoning
+ * lives there. Measured, not assumed: with the status bug still present, a
+ * `notFound()` here left the response on `200` just as the component's did.
+ * Metadata is resolved as part of the same streamed render, so it is no
+ * earlier than anything else inside the loading boundary.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ vendor: string }> }) {
+	const { vendor: slug } = await params;
+	const vendor = await findVendor(slug);
+	if (!vendor) notFound();
+
+	return {
+		title: `${vendor.name} — attested proof`,
+		description: `Signed, independently verifiable proof of real product usage for ${vendor.name}.`,
+	};
+}
 
 export default async function ProofPage({ params }: { params: Promise<{ vendor: string }> }) {
 	const { vendor: slug } = await params;
