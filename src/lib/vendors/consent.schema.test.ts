@@ -125,6 +125,7 @@ async function seedVendorAndCustomer(overrides: {
 	consentToken?: string | null;
 	consentTokenExpiresAt?: string | null;
 	countersignedAt?: string | null;
+	consentSentTo?: string | null;
 }) {
 	const vendorId = randomUUID();
 	const customerId = randomUUID();
@@ -141,8 +142,8 @@ async function seedVendorAndCustomer(overrides: {
 	]);
 	await db.query(
 		`insert into vendor_customers
-			(id, vendor_id, slug, name, domain, since, features, consent_token, consent_token_expires_at, countersigned_at)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			(id, vendor_id, slug, name, domain, since, features, consent_token, consent_token_expires_at, countersigned_at, consent_sent_to)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		[
 			customerId,
 			vendorId,
@@ -154,6 +155,7 @@ async function seedVendorAndCustomer(overrides: {
 			overrides.consentToken ?? null,
 			overrides.consentTokenExpiresAt ?? null,
 			overrides.countersignedAt ?? null,
+			overrides.consentSentTo ?? null,
 		],
 	);
 
@@ -176,21 +178,86 @@ beforeEach(async () => {
 });
 
 describe("customer consent/countersign, against a real Postgres schema", () => {
-	it("generateConsentLink writes a real token and expiry onto the real row", async () => {
+	it("generateConsentLink writes a real token, expiry and recipient onto the real row", async () => {
 		const { generateConsentLink } = await import("./customers");
 		const { vendorId, customerSlug, customerId } = await seedVendorAndCustomer({});
 
-		const result = await generateConsentLink(pgliteClient() as never, vendorId, customerSlug);
+		const result = await generateConsentLink(
+			pgliteClient() as never,
+			vendorId,
+			customerSlug,
+			"ops@acme-regression.example",
+		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 
 		const { rows } = await db.query(
-			"select consent_token, consent_token_expires_at from vendor_customers where id = $1",
+			"select consent_token, consent_token_expires_at, consent_sent_to from vendor_customers where id = $1",
 			[customerId],
 		);
-		const row = rows[0] as { consent_token: string; consent_token_expires_at: string };
+		const row = rows[0] as {
+			consent_token: string;
+			consent_token_expires_at: string;
+			consent_sent_to: string;
+		};
 		expect(row.consent_token).toBe(result.data.token);
 		expect(new Date(row.consent_token_expires_at).toISOString()).toBe(result.data.expiresAt);
+		expect(row.consent_sent_to).toBe("ops@acme-regression.example");
+		expect(result.data.customerName).toBe("Acme Regression");
+	});
+
+	/*
+	 * The binding, proven against the real schema rather than a mock: the
+	 * domain is read from the stored customer row, so a vendor cannot supply
+	 * both sides of the comparison. Without this, a vendor mails themselves the
+	 * link and countersigns their own attestation — and earned() promotes that
+	 * to tier 4 ahead of the domain-verified and observed gates.
+	 */
+	it("generateConsentLink refuses an address off the customer's domain, and writes nothing", async () => {
+		const { generateConsentLink } = await import("./customers");
+		const { vendorId, customerSlug, customerId } = await seedVendorAndCustomer({});
+
+		const result = await generateConsentLink(
+			pgliteClient() as never,
+			vendorId,
+			customerSlug,
+			"me@regression-vendor.example",
+		);
+
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.status).toBe(422);
+
+		const { rows } = await db.query(
+			"select consent_token, consent_sent_to from vendor_customers where id = $1",
+			[customerId],
+		);
+		const row = rows[0] as { consent_token: string | null; consent_sent_to: string | null };
+		expect(row.consent_token).toBeNull();
+		expect(row.consent_sent_to).toBeNull();
+	});
+
+	it("clearConsentToken rolls back only the exact token it was given", async () => {
+		const { clearConsentToken } = await import("./customers");
+		const { vendorId, customerSlug, customerId } = await seedVendorAndCustomer({
+			consentToken: "live-token",
+			consentTokenExpiresAt: new Date(Date.now() + 1000_000).toISOString(),
+			consentSentTo: "ops@acme-regression.example",
+		});
+
+		// A stale token from an earlier, already-superseded mint must not wipe the
+		// live one that replaced it.
+		await clearConsentToken(pgliteClient() as never, vendorId, customerSlug, "some-older-token");
+		let { rows } = await db.query("select consent_token from vendor_customers where id = $1", [customerId]);
+		expect((rows[0] as { consent_token: string | null }).consent_token).toBe("live-token");
+
+		await clearConsentToken(pgliteClient() as never, vendorId, customerSlug, "live-token");
+		({ rows } = await db.query("select consent_token, consent_sent_to from vendor_customers where id = $1", [
+			customerId,
+		]));
+		const row = rows[0] as { consent_token: string | null; consent_sent_to: string | null };
+		expect(row.consent_token).toBeNull();
+		expect(row.consent_sent_to).toBeNull();
 	});
 
 	it("the partial unique index rejects two live rows sharing one consent_token", async () => {
@@ -255,19 +322,32 @@ describe("customer consent/countersign, against a real Postgres schema", () => {
 		const { vendorSlug, customerSlug, customerId } = await seedVendorAndCustomer({
 			consentToken: "tok-approve",
 			consentTokenExpiresAt: new Date(Date.now() + 1000_000).toISOString(),
+			consentSentTo: "ops@acme-regression.example",
 		});
 
 		const first = await recordConsentDecision(vendorSlug, customerSlug, "tok-approve", "approve");
 		expect(first).toEqual({ ok: true });
 
 		const { rows } = await db.query(
-			"select consent, countersigned_at, consent_token from vendor_customers where id = $1",
+			"select consent, countersigned_at, countersigned_by, consent_token, consent_sent_to from vendor_customers where id = $1",
 			[customerId],
 		);
-		const row = rows[0] as { consent: string; countersigned_at: string | null; consent_token: string | null };
+		const row = rows[0] as {
+			consent: string;
+			countersigned_at: string | null;
+			countersigned_by: string | null;
+			consent_token: string | null;
+			consent_sent_to: string | null;
+		};
 		expect(row.consent).toBe("named");
 		expect(row.countersigned_at).not.toBeNull();
 		expect(row.consent_token).toBeNull();
+
+		// Provenance: countersigned_at says a customer approved, countersigned_by
+		// says which address did. Carried over from the delivery record, which is
+		// then cleared along with the token — the link is spent either way.
+		expect(row.countersigned_by).toBe("ops@acme-regression.example");
+		expect(row.consent_sent_to).toBeNull();
 
 		// Replaying the same (now-cleared) token must not re-run the update —
 		// this is the scoped eq(consent_token, token) chain doing its job as

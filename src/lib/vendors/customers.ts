@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FEATURES, type Consent } from "@/lib/fixtures/vendors";
 import { classifyDomain } from "@/lib/identity/domains";
+import { checkConsentRecipient } from "@/lib/vendors/consent-recipient";
 
 /** Slugs that would publish to an unreachable URL — see attest/[vendor]/chain. */
 const RESERVED_CUSTOMER_SLUGS = new Set(["chain"]);
@@ -19,9 +20,14 @@ export type CustomerRow = {
 	features: string[];
 	consent: Consent;
 	countersigned_at: string | null;
+	/** Where the live consent link went, so the vendor can see the request is genuinely pending elsewhere. */
+	consent_sent_to: string | null;
+	/** Who approved. Published nowhere — this is the vendor's own audit trail. */
+	countersigned_by: string | null;
 };
 
-const CUSTOMER_COLUMNS = "id, slug, name, domain, since, tier, verified, features, consent, countersigned_at";
+const CUSTOMER_COLUMNS =
+	"id, slug, name, domain, since, tier, verified, features, consent, countersigned_at, consent_sent_to, countersigned_by";
 
 export type ServiceResult<T> = { ok: true; data: T } | { ok: false; status: number; body: Record<string, unknown> };
 
@@ -175,14 +181,29 @@ export async function updateCustomer(
 /** How long a consent link stays live before a vendor has to re-issue it. */
 const CONSENT_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type ConsentLink = { token: string; expiresAt: string };
+export type ConsentLink = { token: string; expiresAt: string; sentTo: string; customerName: string };
 
 /**
- * Mints (or re-mints) the unguessable link a vendor hands their customer to
- * approve their own attestation — the tier-4 counter-signature (README §
- * Consent). Generating a new one overwrites any live token, which is the
- * vendor's way to invalidate a stale link (sent to the wrong inbox, expired,
- * customer lost it).
+ * Mints (or re-mints) the unguessable consent link — the tier-4
+ * counter-signature (README § Consent). Generating a new one overwrites any
+ * live token, which is how a vendor invalidates a stale link (sent to the
+ * wrong inbox, expired, customer lost it).
+ *
+ * `contactEmail` must be on the customer's own domain. That check is the
+ * whole binding: the link is emailed to the customer, and the vendor never
+ * receives the token. Before it existed, the vendor got the URL and could
+ * simply open it themselves — and because earned() treats `countersigned_at`
+ * as tier-4 proof ahead of the domain-verified and observed gates, that
+ * published the strongest tier in the system with nothing behind it.
+ *
+ * Note this reads the customer's domain from the row rather than taking it
+ * from the caller. A vendor supplying both sides of the comparison would be
+ * no check at all.
+ *
+ * The token is persisted here but the email is sent by the caller, which must
+ * clear it via `clearConsentToken` if delivery fails — a live token the vendor
+ * can't reach is harmless, but a live token nobody received is a dead end the
+ * vendor can't see.
  *
  * Deliberately not exposed as an `update_customer` field: a vendor being able
  * to PATCH `countersigned_at` or `consent_token` directly would let them
@@ -195,13 +216,27 @@ export async function generateConsentLink(
 	supabase: SupabaseClient,
 	vendorId: string,
 	slug: string,
+	contactEmail: unknown,
 ): Promise<ServiceResult<ConsentLink>> {
+	const { data: customer, error: readError } = await supabase
+		.from("vendor_customers")
+		.select("id, name, domain")
+		.eq("vendor_id", vendorId)
+		.eq("slug", slug)
+		.maybeSingle();
+
+	if (readError) return { ok: false, status: 400, body: { error: readError.message } };
+	if (!customer) return { ok: false, status: 404, body: { error: "not_found" } };
+
+	const recipient = checkConsentRecipient(contactEmail, customer.domain);
+	if (!recipient.ok) return { ok: false, status: 422, body: { error: recipient.error } };
+
 	const token = randomUUID();
 	const expiresAt = new Date(Date.now() + CONSENT_LINK_TTL_MS).toISOString();
 
 	const { data, error } = await supabase
 		.from("vendor_customers")
-		.update({ consent_token: token, consent_token_expires_at: expiresAt })
+		.update({ consent_token: token, consent_token_expires_at: expiresAt, consent_sent_to: recipient.email })
 		.eq("vendor_id", vendorId)
 		.eq("slug", slug)
 		.select("id")
@@ -209,7 +244,33 @@ export async function generateConsentLink(
 
 	if (error) return { ok: false, status: 400, body: { error: error.message } };
 	if (!data) return { ok: false, status: 404, body: { error: "not_found" } };
-	return { ok: true, data: { token, expiresAt } };
+	return { ok: true, data: { token, expiresAt, sentTo: recipient.email, customerName: customer.name } };
+}
+
+/**
+ * Undo for a link whose email never went out. Scoped to the exact token so a
+ * failed send can't wipe a *different*, live link that was minted in between.
+ */
+export async function clearConsentToken(
+	supabase: SupabaseClient,
+	vendorId: string,
+	slug: string,
+	token: string,
+): Promise<void> {
+	// `.select().maybeSingle()` rather than awaiting the builder: it makes the
+	// statement's effect observable (did it actually match?) instead of
+	// fire-and-forget, which matters for a rollback whose whole job is to leave
+	// no live token behind.
+	const { error } = await supabase
+		.from("vendor_customers")
+		.update({ consent_token: null, consent_token_expires_at: null, consent_sent_to: null })
+		.eq("vendor_id", vendorId)
+		.eq("slug", slug)
+		.eq("consent_token", token)
+		.select("id")
+		.maybeSingle();
+
+	if (error) console.error("[consent] failed to roll back an unsent consent token", error.message);
 }
 
 export async function deleteCustomer(

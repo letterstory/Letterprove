@@ -14,6 +14,7 @@ import {
 	createCustomer,
 	updateCustomer,
 	deleteCustomer,
+	clearConsentToken,
 	generateConsentLink,
 	type CreateCustomerInput,
 	type UpdateCustomerInput,
@@ -25,6 +26,7 @@ import { vendorSlugs, vendorSnapshots } from "@/lib/attest/proofs";
 import { installSnippet } from "@/lib/vendors/install";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
+import { sendConsentRequest } from "@/lib/email/consent";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -165,22 +167,44 @@ export const TOOLS: ToolDef[] = [
 		},
 	},
 	{
-		name: "generate_consent_link",
+		name: "request_consent",
 		description:
-			"Mint (or re-mint) the unguessable link to send a customer so they can approve their own attestation — the tier-4 counter-signature. Args: slug (required). Re-issuing invalidates any link already sent.",
+			"Email a customer the link to approve their own attestation — the tier-4 counter-signature. Args: slug (required), contact_email (required, must be an address on that customer's own domain). Re-issuing invalidates any link already sent. The link is never returned to the caller: it goes to the customer, which is what makes their approval evidence rather than the vendor's assertion.",
 		capability: "vendor:write",
-		handler: async (args, principal) => {
+		handler: async (args, principal, context) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
 			if (!slug) return { ok: false, status: 400, body: { error: "slug is required" } };
+			const contactEmail = record.contact_email;
 
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
+			// Same reasoning as get_install_snippet: the link has to be absolute
+			// and must point at the host actually serving this app.
+			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const result = await generateConsentLink(db, vendorId, slug);
+
+			const { data: vendor } = await db.from("vendors").select("slug, name").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const result = await generateConsentLink(db, vendorId, slug, contactEmail);
 			if (!result.ok) return result;
-			return { ok: true, body: { token: result.data.token, expiresAt: result.data.expiresAt } };
+
+			const sent = await sendConsentRequest({
+				to: result.data.sentTo,
+				vendorName: vendor.name,
+				customerName: result.data.customerName,
+				url: `${context.origin}/attest/${vendor.slug}/${slug}/consent?token=${result.data.token}`,
+				expiresAt: result.data.expiresAt,
+			});
+
+			if (!sent.ok) {
+				await clearConsentToken(db, vendorId, slug, result.data.token);
+				return { ok: false, status: 502, body: { error: sent.error } };
+			}
+
+			return { ok: true, body: { sentTo: result.data.sentTo, expiresAt: result.data.expiresAt } };
 		},
 	},
 	{

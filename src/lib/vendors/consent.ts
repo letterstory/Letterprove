@@ -103,15 +103,33 @@ export async function recordConsentDecision(
 	const { data: vendorRow } = await db.from("vendors").select("id").eq("slug", vendorSlug).maybeSingle();
 	if (!vendorRow) return { ok: false, reason: "invalid" };
 
+	// Which address this link was delivered to, so an approval can record who
+	// made it. Read under the same predicates as the update below; the update
+	// is still the authoritative check, so a link that gets used or re-issued
+	// between these two statements simply matches nothing and we bail.
+	const { data: pending } = await db
+		.from("vendor_customers")
+		.select("consent_sent_to")
+		.eq("vendor_id", vendorRow.id)
+		.eq("slug", customerSlug)
+		.eq("consent_token", token)
+		.maybeSingle();
+
 	const patch =
 		decision === "approve"
 			? {
 					consent: "named" as const,
 					countersigned_at: new Date().toISOString(),
+					// Provenance for the counter-signature: countersigned_at says a
+					// customer approved, this says which address did. Not published —
+					// naming the individual would be a privacy leak the customer never
+					// agreed to. It exists so a disputed claim can be traced.
+					countersigned_by: pending?.consent_sent_to ?? null,
 					consent_token: null,
 					consent_token_expires_at: null,
+					consent_sent_to: null,
 				}
-			: { consent_token: null, consent_token_expires_at: null };
+			: { consent_token: null, consent_token_expires_at: null, consent_sent_to: null };
 
 	const { data, error } = await db
 		.from("vendor_customers")
