@@ -1,6 +1,6 @@
 import { logProofAccess } from "@/lib/access/log";
 import { vendorProof } from "@/lib/attest/proofs";
-import { notFound, proofJson } from "@/lib/http";
+import { notFound, namedProofJson } from "@/lib/http";
 
 /** The machine half of /proofs/{vendor} — see src/proxy.ts. */
 export async function GET(request: Request, { params }: { params: Promise<{ vendor: string }> }) {
@@ -10,7 +10,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 	const proof = await vendorProof(vendor);
 	if (!proof) return notFound(`no vendor "${vendor}"`);
 
-	return proofJson({
+	return namedProofJson({
 		vendor: proof.vendor,
 		summary: proof.summary,
 		// The full chain is one fetch away per customer rather than inlined —

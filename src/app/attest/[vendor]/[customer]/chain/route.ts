@@ -1,6 +1,6 @@
 import { logProofAccess } from "@/lib/access/log";
 import { customerChain } from "@/lib/attest/proofs";
-import { notFound, proofJson } from "@/lib/http";
+import { notFound, namedProofJson } from "@/lib/http";
 
 /**
  * A customer's full attestation history, oldest first.
@@ -19,5 +19,5 @@ export async function GET(
 	const chain = await customerChain(vendor, customer);
 	if (!chain) return notFound(`no attestation for "${vendor}/${customer}"`);
 
-	return proofJson({ vendor, customer, length: chain.length, chain });
+	return namedProofJson({ vendor, customer, length: chain.length, chain });
 }
