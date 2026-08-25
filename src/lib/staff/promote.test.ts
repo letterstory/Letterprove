@@ -10,11 +10,17 @@ function row(domain: string, over: Partial<Row> = {}): Row {
 	return { domain, sessions: 3, signups: 0, logins: 0, customer: null, ...over };
 }
 
-/** Captures the insert so tests can assert on what was actually written. */
-function mockDb(opts: { vendorId?: string | null; error?: { code?: string; message: string } } = {}) {
+/**
+ * Captures the insert so tests can assert on what was actually written.
+ * `vendorDomain` defaults to something that is never in the INTERNAL set, so
+ * existing tests exercising ordinary company domains are unaffected by the
+ * vendor-scoped self-dealing check — only the tests that care about it
+ * override it.
+ */
+function mockDb(opts: { vendorId?: string | null; vendorDomain?: string; error?: { code?: string; message: string } } = {}) {
 	const insert = vi.fn().mockResolvedValue({ error: opts.error ?? null });
 	const maybeSingle = vi.fn().mockResolvedValue({
-		data: opts.vendorId === null ? null : { id: opts.vendorId ?? "v1" },
+		data: opts.vendorId === null ? null : { id: opts.vendorId ?? "v1", domain: opts.vendorDomain ?? "acme-vendor.com" },
 		error: null,
 	});
 	const chain = { maybeSingle, eq: () => chain, select: () => chain };
@@ -82,12 +88,26 @@ describe("what promotion refuses", () => {
 	});
 
 	// Attesting our own usage is the vendor-asserted circularity the product
-	// exists to replace.
-	it("refuses our own domains", async () => {
+	// exists to replace — but only when the promoting vendor is also ours.
+	// "lettertrace" is a Letter Company vendor (lettertrace.com), so this is
+	// the self-dealing case.
+	it("refuses our own domains when the promoting vendor is also ours", async () => {
+		await setup([], { vendorDomain: "lettertrace.com" });
 		expect(await promoteDomain("lettertrace", "letterstory.com")).toMatchObject({
 			ok: false,
 			reason: "not_attributable",
+			detail: expect.stringContaining("self-dealing"),
 		});
+	});
+
+	// A genuinely external vendor promoting a real, observed Letter Company
+	// visitor into a customer record is not self-dealing — same flow as any
+	// other company.
+	it("promotes our domain for a vendor that isn't ours", async () => {
+		const { insert } = await setup([row("letterstory.com")], { vendorDomain: "acme-vendor.com" });
+		const r = await promoteDomain("acme-vendor", "letterstory.com");
+		expect(r).toMatchObject({ ok: true, domain: "letterstory.com" });
+		expect(insert).toHaveBeenCalled();
 	});
 
 	it("refuses a reserved-TLD fixture domain", async () => {
@@ -119,6 +139,7 @@ describe("what promotion refuses", () => {
 	// A failed telemetry read must not read as "nothing observed" — the report
 	// returns null for both, and only one of them is an absence of evidence.
 	it("refuses when the report cannot be read at all", async () => {
+		await setup([]);
 		const { tierReport } = await import("@/lib/tiers/report");
 		vi.mocked(tierReport).mockResolvedValue(null);
 		expect(await promoteDomain("lettertrace", "globex.com")).toMatchObject({ ok: false, reason: "vendor_unreadable" });

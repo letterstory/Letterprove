@@ -159,6 +159,12 @@ async function vendorAuthGate(request: NextRequest) {
 		return NextResponse.redirect(loginUrl);
 	}
 
+	// Staff and vendors share one Supabase Auth pool with open self-signup, so
+	// a staff account landing here has no vendor_members row either — without
+	// this carve-out they'd fall into the same "no membership yet" branch
+	// below and get sent into vendor onboarding instead of their own dashboard.
+	if (isStaffUser(user.id)) return redirectTo("/staff");
+
 	// Showing a signed-in visitor a sign-in form is incoherent, and the layout
 	// wraps it in the full vendor shell — so they got working Dashboard /
 	// Customers / Proof tabs sitting above a form asking them to log in.

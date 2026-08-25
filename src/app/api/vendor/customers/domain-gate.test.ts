@@ -5,8 +5,14 @@ import { PATCH } from "./[slug]/route";
 vi.mock("@/lib/vendors/session", () => ({ currentVendor: vi.fn() }));
 vi.mock("@/lib/auth/server", () => ({ createServerSupabaseClient: vi.fn() }));
 
-/** Enough of the supabase chain for insert().select().single() and update()…maybeSingle(). */
-function mockSupabase() {
+/**
+ * Enough of the supabase chain for insert().select().single(), update()…
+ * maybeSingle(), and the vendors-table read the domain gate does before
+ * every check (.from("vendors").select("domain").eq("id", ...).maybeSingle()).
+ * The caller's own vendor domain defaults to a non-Letter-Company one, since
+ * these tests are exercising the domain gate for an ordinary, external vendor.
+ */
+function mockSupabase(vendorDomain = "acme-vendor.com") {
 	const row = { id: "c1", slug: "acme", name: "Acme", domain: "acme.com" };
 	const single = vi.fn().mockResolvedValue({ data: row, error: null });
 	const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
@@ -15,8 +21,13 @@ function mockSupabase() {
 	const eq1 = vi.fn().mockReturnValue({ eq: eq2, select });
 	const insert = vi.fn().mockReturnValue({ select });
 	const update = vi.fn().mockReturnValue({ eq: eq1 });
-	const from = vi.fn().mockReturnValue({ insert, update });
-	return { from, insert, update };
+
+	const vendorMaybeSingle = vi.fn().mockResolvedValue({ data: { domain: vendorDomain }, error: null });
+	const vendorEq = vi.fn().mockReturnValue({ maybeSingle: vendorMaybeSingle });
+	const vendorSelect = vi.fn().mockReturnValue({ eq: vendorEq });
+
+	const from = vi.fn((table: string) => (table === "vendors" ? { select: vendorSelect } : { insert, update }));
+	return { from, insert, update, vendorMaybeSingle };
 }
 
 function createReq(domain: string, consent = "named") {
@@ -63,11 +74,24 @@ describe("customer domain gate — create", () => {
 	});
 
 	// Dogfooding puts our own domains in the same table as customers, and
-	// attesting our own usage of our own product is self-dealing.
-	it("refuses our own domains", async () => {
-		const res = await POST(createReq("lettertrace.com"));
+	// attesting our own usage of our own product — one Letter Company vendor
+	// claiming another as its customer — is self-dealing.
+	it("refuses our own domains when the calling vendor is also ours", async () => {
+		const { createServerSupabaseClient } = await import("@/lib/auth/server");
+		vi.mocked(createServerSupabaseClient).mockResolvedValue(mockSupabase("lettertrace.com") as never);
+
+		const res = await POST(createReq("letterbrace.com"));
 		expect(res.status).toBe(422);
 		expect((await res.json()).kind).toBe("internal");
+	});
+
+	// Not a privileged position: a genuinely external vendor verifying The
+	// Letter Company as a real customer goes through the exact same gate and
+	// consent flow as any other company.
+	it("allows our domain as a real customer of a vendor that isn't ours", async () => {
+		const res = await POST(createReq("letterbrace.com"));
+		expect(res.status).toBe(201);
+		expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({ domain: "letterbrace.com" }));
 	});
 
 	it("refuses fixtures and probes", async () => {
@@ -106,8 +130,17 @@ describe("customer domain gate — edit", () => {
 		expect(db.update).not.toHaveBeenCalled();
 	});
 
-	it("refuses an edit onto our own domain", async () => {
+	it("refuses an edit onto our own domain when the calling vendor is also ours", async () => {
+		const { createServerSupabaseClient } = await import("@/lib/auth/server");
+		vi.mocked(createServerSupabaseClient).mockResolvedValue(mockSupabase("letterstory.com") as never);
+
 		expect((await PATCH(patchReq("letterstory.com"), PARAMS)).status).toBe(422);
 		expect(db.update).not.toHaveBeenCalled();
+	});
+
+	it("allows an edit onto our domain for a vendor that isn't ours", async () => {
+		const res = await PATCH(patchReq("letterstory.com"), PARAMS);
+		expect(res.status).toBe(200);
+		expect(db.update).toHaveBeenCalled();
 	});
 });

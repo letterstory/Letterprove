@@ -9,6 +9,21 @@ const RESERVED_CUSTOMER_SLUGS = new Set(["chain"]);
 
 const FEATURE_SET: readonly string[] = FEATURES;
 
+/**
+ * The calling vendor's own domain, for the self-dealing check in
+ * classifyDomain. Looked up here rather than threaded in by every caller —
+ * the session route already has it on hand (`currentVendor()`), but the
+ * bearer-token dispatcher only resolves a vendorId, and a check this
+ * security-relevant shouldn't depend on every caller remembering to pass it
+ * correctly. RLS ("vendor members can read their own vendor") covers the
+ * session client the same way it covers everything else here; the
+ * service-role client just reads the row directly.
+ */
+async function vendorOwnDomain(supabase: SupabaseClient, vendorId: string): Promise<string | undefined> {
+	const { data } = await supabase.from("vendors").select("domain").eq("id", vendorId).maybeSingle();
+	return data?.domain ?? undefined;
+}
+
 export type CustomerRow = {
 	id: string;
 	slug: string;
@@ -97,7 +112,7 @@ export async function createCustomer(
 	}
 
 	const domain = input.domain.trim();
-	const classified = classifyDomain(domain);
+	const classified = classifyDomain(domain, await vendorOwnDomain(supabase, vendorId));
 	if (classified.kind !== "company") {
 		return {
 			ok: false,
@@ -148,7 +163,7 @@ export async function updateCustomer(
 		// Same refusal as creation — gating only create would leave the rule
 		// trivially bypassable (make a customer on a real domain, then edit it).
 		const domain = input.domain.trim();
-		const classified = classifyDomain(domain);
+		const classified = classifyDomain(domain, await vendorOwnDomain(supabase, vendorId));
 		if (classified.kind !== "company") {
 			return {
 				ok: false,

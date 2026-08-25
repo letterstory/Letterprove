@@ -28,6 +28,15 @@
  * consultancy.com` working inside Acme's tenant is a real company domain that
  * still shouldn't be attributed to Acme. No list can catch that; it needs a
  * human-correctable mapping, which is the alias map's job, not this one's.
+ *
+ * "internal" is relative to who's asking. The risk is self-dealing —
+ * Letterprove attesting that Lettertrace is its own customer, with nobody
+ * independent involved — not the domain in the abstract. A genuinely
+ * external vendor with The Letter Company as a real, DNS-verified,
+ * consent-linked customer is exactly the same relationship any other
+ * customer has, so `classifyDomain` takes the asking vendor's own domain and
+ * only refuses when that vendor is *also* one of ours. Omit it and the
+ * check fails closed to the old, vendor-agnostic behavior.
  */
 
 export type DomainKind =
@@ -124,7 +133,7 @@ function normalise(domain: string): string {
 	return d;
 }
 
-export function classifyDomain(domain: string): DomainClass {
+export function classifyDomain(domain: string, vendorDomain?: string): DomainClass {
 	const d = normalise(domain);
 
 	if (!d) return { kind: "unknown", reason: "empty" };
@@ -149,7 +158,20 @@ export function classifyDomain(domain: string): DomainClass {
 	}
 
 	if (INTERNAL.has(d)) {
-		return { kind: "internal", reason: "The Letter Company's own domain — attesting our own usage is self-dealing" };
+		// Self-dealing only exists when the vendor asking is also ours. No
+		// vendorDomain (an unmigrated call site, or a passive read with no
+		// vendor in scope) fails closed to the original, always-internal
+		// behavior — an unknown asker is never treated as "safe".
+		if (!vendorDomain || INTERNAL.has(normalise(vendorDomain))) {
+			return {
+				kind: "internal",
+				reason: "The Letter Company's own domain — attesting our own usage is self-dealing",
+			};
+		}
+		return {
+			kind: "company",
+			reason: "The Letter Company, verified as a genuine customer of a non-Letter-Company vendor",
+		};
 	}
 
 	if (FREE_MAIL.has(d)) {
@@ -165,8 +187,8 @@ export function classifyDomain(domain: string): DomainClass {
 }
 
 /** Can this domain ever be attributed to a customer? Consent is a separate question. */
-export function isAttributable(domain: string): boolean {
-	return classifyDomain(domain).kind === "company";
+export function isAttributable(domain: string, vendorDomain?: string): boolean {
+	return classifyDomain(domain, vendorDomain).kind === "company";
 }
 
 /**
@@ -177,7 +199,10 @@ export function isAttributable(domain: string): boolean {
  * would understate real usage with no way to explain the gap; this keeps them
  * counted and inspectable while never letting them reach a published claim.
  */
-export function partitionDomains(domains: Iterable<string>): {
+export function partitionDomains(
+	domains: Iterable<string>,
+	vendorDomain?: string,
+): {
 	attributable: string[];
 	excluded: { domain: string; kind: DomainKind; reason: string }[];
 } {
@@ -185,7 +210,7 @@ export function partitionDomains(domains: Iterable<string>): {
 	const excluded: { domain: string; kind: DomainKind; reason: string }[] = [];
 
 	for (const domain of domains) {
-		const { kind, reason } = classifyDomain(domain);
+		const { kind, reason } = classifyDomain(domain, vendorDomain);
 		if (kind === "company") attributable.push(domain);
 		else excluded.push({ domain, kind, reason });
 	}

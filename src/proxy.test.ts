@@ -192,6 +192,25 @@ describe("proxy — /vendor auth gate", () => {
 		expect(res?.headers.get("location")).toContain("/vendor/onboarding");
 	});
 
+	// The bug this change fixes: staff share the vendor pool's user IDs and
+	// have no vendor_members row either, so without this carve-out they fell
+	// into the same "no membership yet" branch and landed in vendor onboarding
+	// instead of their own dashboard.
+	it("sends a staff-allowlisted user to /staff instead of vendor onboarding", async () => {
+		setAuthEnv(true);
+		process.env.STAFF_USER_IDS = "u1";
+		mockSupabaseUserAndMembership({ id: "u1", email: "staff@letterbrace.com" }, null);
+		const { proxy: p } = await freshProxy();
+
+		const res = await p(new NextRequest("https://app.letterprove.com/vendor"));
+
+		expect(res?.status).toBe(307);
+		const location = new URL(res!.headers.get("location")!);
+		expect(location.pathname).toBe("/staff");
+
+		delete process.env.STAFF_USER_IDS;
+	});
+
 	it("lets /vendor/onboarding through for a signed-in user with no membership yet", async () => {
 		setAuthEnv(true);
 		mockSupabaseUserAndMembership({ id: "u1", email: "vendor@example.com" }, null);
