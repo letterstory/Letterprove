@@ -221,6 +221,65 @@ export const TOOLS: ToolDef[] = [
 		},
 	},
 	{
+		name: "list_observed",
+		description:
+			"Companies the caller's vendor has been observed serving in the publishing window, with what each one is blocked on. Args: none. Read-only — use record_customer to turn one into a customer record.",
+		capability: "vendor:read",
+		/*
+		 * The vendor-facing half of the observed view.
+		 *
+		 * `tier_report` reports the same rows but is staff:read and takes a
+		 * vendor slug, so it will happily answer for anyone — sharing it here
+		 * would put a single `if` between one vendor and every other vendor's
+		 * customer list. This resolves the slug from the caller's own principal
+		 * instead, so there is no argument to tamper with. Exactly the reasoning
+		 * that made /api/vendor/observed a separate route from the staff one.
+		 *
+		 * Until now this surface had no API at all: the dashboard read it over a
+		 * cookie session, which nothing outside a browser can present. A vendor
+		 * on the CLI, or another Letter Company app embedding this, could see
+		 * customers and proofs but not the one list that tells them what to do
+		 * next.
+		 */
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const report = await tierReport(vendor.slug);
+			// A failed telemetry read is NOT "no companies observed". Reporting
+			// zero would tell a vendor their install is broken when it may be
+			// fine — the same distinction the aggregate makes when it refuses to
+			// publish rather than publish a zero.
+			if (!report) return { ok: false, status: 503, body: { error: "telemetry_unavailable" } };
+
+			return {
+				ok: true,
+				body: {
+					observed: report.observed,
+					attributable: report.attributable,
+					awaiting: report.unpublishedEvidence,
+					published: report.published,
+					domains: report.rows.map((row) => ({
+						domain: row.domain,
+						kind: row.kind,
+						sessions: row.sessions,
+						signups: row.signups,
+						logins: row.logins,
+						customer: row.customer,
+						status: row.status,
+						detail: row.detail,
+					})),
+				},
+			};
+		},
+	},
+	{
 		name: "record_customer",
 		description:
 			"Turn a domain observed for a vendor into a customer record (anonymous, tier-1 ceiling). Args: vendor (slug), domain.",

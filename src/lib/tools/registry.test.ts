@@ -376,6 +376,109 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	/*
+	 * list_observed reports the same rows tier_report does, at vendor:read
+	 * instead of staff:read. The whole reason it is a separate tool rather than
+	 * a role check on the existing one is that tier_report takes a slug and will
+	 * answer for anybody — so the tests that matter here are about where the
+	 * slug comes from, not about the row shape.
+	 */
+	it("lists observed domains for the caller's OWN vendor", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { tierReport } = await import("@/lib/tiers/report");
+		vi.mocked(tierReport).mockResolvedValue({
+			vendor: "acme",
+			observed: 3,
+			attributable: 2,
+			unpublishedEvidence: 1,
+			published: 1,
+			rows: [
+				{
+					domain: "widgets.co",
+					kind: "company",
+					sessions: 4,
+					signups: 1,
+					logins: 0,
+					customer: null,
+					assertedTier: null,
+					earnedTier: null,
+					consent: null,
+					status: "no-customer-record",
+					detail: "Observed, but nobody has recorded it as a customer.",
+				},
+			],
+		} as never);
+
+		const outcome = await dispatchTool("list_observed", {}, principal(["vendor:read"]));
+
+		// vendorRow.slug — resolved from the principal's vendor id, never an argument.
+		expect(tierReport).toHaveBeenCalledWith("acme");
+		expect(outcome).toMatchObject({
+			kind: "result",
+			result: {
+				ok: true,
+				body: {
+					observed: 3,
+					attributable: 2,
+					awaiting: 1,
+					published: 1,
+					domains: [{ domain: "widgets.co", status: "no-customer-record", sessions: 4 }],
+				},
+			},
+		});
+	});
+
+	/*
+	 * The security property, asserted directly: there is no argument that can
+	 * redirect this at somebody else's data. Passing a foreign slug must be
+	 * ignored, not honoured — that is the difference between this tool and
+	 * exposing tier_report to vendors.
+	 */
+	it("ignores a vendor slug passed in args, and reports on the caller's own", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { tierReport } = await import("@/lib/tiers/report");
+		vi.mocked(tierReport).mockResolvedValue({
+			vendor: "acme",
+			observed: 0,
+			attributable: 0,
+			unpublishedEvidence: 0,
+			published: 0,
+			rows: [],
+		} as never);
+
+		await dispatchTool("list_observed", { vendor: "lettertrace" }, principal(["vendor:read"]));
+
+		expect(tierReport).toHaveBeenCalledWith("acme");
+		expect(tierReport).not.toHaveBeenCalledWith("lettertrace");
+	});
+
+	/*
+	 * A telemetry read that FAILED is not "no companies observed". Answering
+	 * with zeros would tell a vendor their install is broken when it may be
+	 * fine — the same distinction the aggregate makes when it refuses to
+	 * publish rather than publish a zero.
+	 */
+	it("reports unavailable rather than zero when telemetry can't be read", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { tierReport } = await import("@/lib/tiers/report");
+		vi.mocked(tierReport).mockResolvedValue(null);
+
+		const outcome = await dispatchTool("list_observed", {}, principal(["vendor:read"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 503, body: { error: "telemetry_unavailable" } },
+		});
+	});
+
+	it("denies list_observed without vendor:read", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("list_observed", {}, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({ kind: "denied", capability: "vendor:read" });
+	});
+
 	it("runs tier_report across every vendor when none is named", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { vendorSlugs } = await import("@/lib/attest/proofs");
