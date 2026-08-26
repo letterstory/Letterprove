@@ -23,10 +23,20 @@
 -- would make "which proofs does this workspace publish?" ambiguous, and the
 -- honest place to fail that is on write.
 --
--- NULLABLE because most vendors have no org and never will: anyone who signed
--- up through Letterprove's own onboarding, plus every vendor that exists today.
--- Backfilling a placeholder would turn "no linked workspace" into a uuid that
--- looks real, which is worse than absent.
+-- NULLABLE because `/vendor/onboarding` still exists and creates vendors with
+-- no org at all — `insertVendor` takes slug, name, domain, category and key,
+-- and nothing else. While that path is reachable, an org-less vendor is a
+-- legitimate state and NOT NULL would simply reject it.
+--
+-- That is the only reason. It is deliberately NOT justified by what the table
+-- currently holds: those rows are test data and should not shape a schema. If
+-- anything the current contents argue the other way — if Letterprove becomes a
+-- surface inside Letterstory, most vendors from here on will HAVE an org.
+--
+-- So the condition for tightening this is a product decision, not a migration:
+-- **the day standalone Letterprove signup is removed, make this NOT NULL** and
+-- delete the org-less rows rather than backfilling them. A placeholder uuid
+-- would turn "no linked workspace" into something that looks real.
 alter table vendors
 	add column letterstory_org_id uuid;
 

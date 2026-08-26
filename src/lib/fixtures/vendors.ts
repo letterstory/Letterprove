@@ -208,10 +208,9 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
  * function that crosses that line, and it crosses it by id alone: no join, no
  * knowledge of Letterstory's schema, nothing that would break when it changes.
  *
- * Returns undefined for an org that has no vendor yet, which is the ordinary
- * case rather than an error. Most orgs never publish proofs, and the ones that
- * do have to be linked deliberately — there is no auto-provisioning, so a
- * caller finding nothing here should offer to create one, not fail.
+ * Returns undefined for an org that has no vendor yet. That is a real state
+ * rather than an error: linking is deliberate, there is no auto-provisioning,
+ * so a caller finding nothing should offer to create one rather than fail.
  *
  * The uniqueness that makes "the vendor" meaningful is a partial unique index,
  * not something enforced here. Two rows sharing an org would make this return
