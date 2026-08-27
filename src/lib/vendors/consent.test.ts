@@ -19,7 +19,11 @@ function mockDb({
 	customer?: unknown;
 	updateResult?: { data: unknown; error: unknown };
 	/** Row returned by recordConsentDecision's `consent_sent_to` read (select + THREE eqs). */
-	pending?: { consent_sent_to: string | null } | null;
+	// `consent_decline_count` is nullable here despite being `not null` in the
+	// schema: rows written before that column existed read back as null through
+	// this mock's shape, and the decline path has to survive that rather than
+	// producing NaN on the increment.
+	pending?: { consent_sent_to: string | null; consent_decline_count?: number | null } | null;
 }) {
 	const vendorMaybeSingle = vi.fn().mockResolvedValue({ data: vendor ?? null });
 	const vendorEq = vi.fn().mockReturnValue({ maybeSingle: vendorMaybeSingle });
@@ -251,18 +255,70 @@ describe("recordConsentDecision", () => {
 		expect(db.update.mock.calls[0][0].countersigned_by).toBeNull();
 	});
 
-	it("only clears the token on decline, leaving consent and countersigned_at untouched", async () => {
+	/*
+	 * This test used to assert that a decline ONLY cleared the token. That was
+	 * the bug, not the contract: nothing recorded that a human had been asked
+	 * and said no, so the vendor's Customers page rendered a decline exactly
+	 * like a customer who was never asked — and re-sending was free, instant,
+	 * and unlimited.
+	 */
+	it("records the decline, and still leaves consent and countersigned_at untouched", async () => {
 		const { dbClient } = await import("@/lib/db/client");
-		const db = mockDb({ vendor: VENDOR, updateResult: { data: { id: "c1" }, error: null } });
+		const db = mockDb({
+			vendor: VENDOR,
+			updateResult: { data: { id: "c1" }, error: null },
+			pending: { consent_sent_to: "ops@globex.com", consent_decline_count: 0 },
+		});
 		vi.mocked(dbClient).mockReturnValue(db as never);
 
 		const result = await recordConsentDecision("acme", "widgets", "tok", "decline");
-
 		expect(result).toEqual({ ok: true });
-		expect(db.update).toHaveBeenCalledWith({
-			consent_token: null,
-			consent_token_expires_at: null,
-			consent_sent_to: null,
+
+		const patch = db.update.mock.calls[0][0];
+
+		// The decline is now durable.
+		expect(patch.consent_declined_at).toEqual(expect.any(String));
+		expect(patch.consent_decline_count).toBe(1);
+
+		// The link is still dead, exactly as before.
+		expect(patch.consent_token).toBeNull();
+		expect(patch.consent_token_expires_at).toBeNull();
+		expect(patch.consent_sent_to).toBeNull();
+
+		// And declining still grants nothing. A "no" must never be able to
+		// produce the tier-4 state that only an approval can.
+		expect(patch.consent).toBeUndefined();
+		expect(patch.countersigned_at).toBeUndefined();
+		expect(patch.countersigned_by).toBeUndefined();
+	});
+
+	it("counts repeat declines rather than resetting to one", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		const db = mockDb({
+			vendor: VENDOR,
+			updateResult: { data: { id: "c1" }, error: null },
+			pending: { consent_sent_to: "ops@globex.com", consent_decline_count: 2 },
 		});
+		vi.mocked(dbClient).mockReturnValue(db as never);
+
+		await recordConsentDecision("acme", "widgets", "tok", "decline");
+
+		// Three refusals reads very differently from one "not right now" — that
+		// distinction is the whole reason the column isn't a boolean.
+		expect(db.update.mock.calls[0][0].consent_decline_count).toBe(3);
+	});
+
+	it("starts the count at one for a row that predates the decline columns", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		const db = mockDb({
+			vendor: VENDOR,
+			updateResult: { data: { id: "c1" }, error: null },
+			pending: { consent_sent_to: "ops@globex.com", consent_decline_count: null },
+		});
+		vi.mocked(dbClient).mockReturnValue(db as never);
+
+		await recordConsentDecision("acme", "widgets", "tok", "decline");
+
+		expect(db.update.mock.calls[0][0].consent_decline_count).toBe(1);
 	});
 });

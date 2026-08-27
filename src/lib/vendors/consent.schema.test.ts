@@ -126,6 +126,7 @@ async function seedVendorAndCustomer(overrides: {
 	consentTokenExpiresAt?: string | null;
 	countersignedAt?: string | null;
 	consentSentTo?: string | null;
+	consentDeclinedAt?: string | null;
 }) {
 	const vendorId = randomUUID();
 	const customerId = randomUUID();
@@ -142,8 +143,8 @@ async function seedVendorAndCustomer(overrides: {
 	]);
 	await db.query(
 		`insert into vendor_customers
-			(id, vendor_id, slug, name, domain, since, features, consent_token, consent_token_expires_at, countersigned_at, consent_sent_to)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			(id, vendor_id, slug, name, domain, since, features, consent_token, consent_token_expires_at, countersigned_at, consent_sent_to, consent_declined_at)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		[
 			customerId,
 			vendorId,
@@ -156,6 +157,7 @@ async function seedVendorAndCustomer(overrides: {
 			overrides.consentTokenExpiresAt ?? null,
 			overrides.countersignedAt ?? null,
 			overrides.consentSentTo ?? null,
+			overrides.consentDeclinedAt ?? null,
 		],
 	);
 
@@ -366,13 +368,83 @@ describe("customer consent/countersign, against a real Postgres schema", () => {
 		const result = await recordConsentDecision(vendorSlug, customerSlug, "tok-decline", "decline");
 		expect(result).toEqual({ ok: true });
 
-		const { rows } = await db.query("select consent, countersigned_at, consent_token from vendor_customers where id = $1", [
-			customerId,
-		]);
-		const row = rows[0] as { consent: string; countersigned_at: string | null; consent_token: string | null };
+		const { rows } = await db.query(
+			"select consent, countersigned_at, consent_token, consent_declined_at, consent_decline_count from vendor_customers where id = $1",
+			[customerId],
+		);
+		const row = rows[0] as {
+			consent: string;
+			countersigned_at: string | null;
+			consent_token: string | null;
+			consent_declined_at: Date | null;
+			consent_decline_count: number;
+		};
 		expect(row.consent).toBe("anonymous");
 		expect(row.countersigned_at).toBeNull();
 		expect(row.consent_token).toBeNull();
+
+		// The "no" now survives the request that carried it. Without these two
+		// columns the row above is byte-for-byte identical to a customer who was
+		// never asked, which is what let a vendor re-send forever.
+		expect(row.consent_declined_at).not.toBeNull();
+		expect(row.consent_decline_count).toBe(1);
+	});
+
+	it("a decline blocks the next consent request against the real row", async () => {
+		const { recordConsentDecision } = await import("./consent");
+		const { generateConsentLink } = await import("./customers");
+		const { vendorId, vendorSlug, customerSlug, customerId } = await seedVendorAndCustomer({
+			consentToken: "tok-cooldown",
+			consentTokenExpiresAt: new Date(Date.now() + 1000_000).toISOString(),
+		});
+
+		expect(await recordConsentDecision(vendorSlug, customerSlug, "tok-cooldown", "decline")).toEqual({ ok: true });
+
+		const retry = await generateConsentLink(
+			pgliteClient() as never,
+			vendorId,
+			customerSlug,
+			"ops@acme-regression.example",
+		);
+
+		expect(retry.ok).toBe(false);
+		if (!retry.ok) {
+			expect(retry.status).toBe(429);
+			expect(retry.body.error).toBe("consent_declined");
+			// The vendor is told when they may ask again — a refusal with no date
+			// is indistinguishable from a broken button.
+			expect(retry.body.canAskAgainAt).toEqual(expect.any(String));
+		}
+
+		// And nothing was minted. A refused request that still wrote a live token
+		// would hand the vendor the very link the cooldown exists to withhold.
+		const { rows } = await db.query("select consent_token, consent_sent_to from vendor_customers where id = $1", [
+			customerId,
+		]);
+		expect(rows[0]).toMatchObject({ consent_token: null, consent_sent_to: null });
+	});
+
+	it("allows the ask again once the cooldown has passed, and the decline stays on the row", async () => {
+		const { generateConsentLink } = await import("./customers");
+		const thirtyOneDaysAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+		const { vendorId, customerSlug, customerId } = await seedVendorAndCustomer({
+			consentDeclinedAt: thirtyOneDaysAgo,
+		});
+
+		const retry = await generateConsentLink(
+			pgliteClient() as never,
+			vendorId,
+			customerSlug,
+			"ops@acme-regression.example",
+		);
+
+		expect(retry.ok).toBe(true);
+
+		// The decline is history, not current state: it stops blocking, but it is
+		// never erased. A vendor looking at this row should still be able to see
+		// that this customer said no once.
+		const { rows } = await db.query("select consent_declined_at from vendor_customers where id = $1", [customerId]);
+		expect(rows[0]).toMatchObject({ consent_declined_at: expect.anything() });
 	});
 
 	it("drives the real POST /consent/respond handler over a real NextRequest against the real DB", async () => {
