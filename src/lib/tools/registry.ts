@@ -1,3 +1,5 @@
+import { z } from "zod";
+import * as S from "@/lib/tools/schemas";
 import type { OAuthPrincipal } from "@/lib/oauth/core";
 import type { Capability } from "@/lib/oauth/scopes";
 import { dbClient } from "@/lib/db/client";
@@ -64,8 +66,39 @@ export type ToolDef = {
 	name: string;
 	description: string;
 	capability: Capability;
+	/** The arguments this tool accepts. Advertised by GET /api/v1/tools. */
+	inputSchema: z.ZodType;
+	/** The success payload this tool returns. Advertised alongside the input. */
+	outputSchema: z.ZodType;
 	handler: ToolHandler;
 };
+
+/**
+ * A tool that went through `defineTool`.
+ *
+ * The brand is a module-private symbol, so it cannot be forged from outside
+ * this file — a plain object literal added to TOOLS is a compile error rather
+ * than a tool that quietly ships with no schema. That matters because the
+ * failure it prevents is invisible: a schema-less tool works perfectly, and
+ * only the DOCUMENTATION is wrong, which nothing at runtime would ever notice.
+ *
+ * Same construction as Letterstory's BoundTool (#1130/#1160), for the same
+ * reason and so the two registries stay legible to the same reader.
+ */
+declare const bound: unique symbol;
+export type BoundTool = ToolDef & { readonly [bound]: true };
+
+/**
+ * The only way to add a tool.
+ *
+ * Requiring both schemas in the type means "I'll document it later" is not
+ * expressible. Taking the handler here too keeps the schema next to the code
+ * whose output it claims to describe, which is the pairing that drifts when
+ * they live in separate files.
+ */
+export function defineTool(def: ToolDef): BoundTool {
+	return def as BoundTool;
+}
 
 function asRecord(args: unknown): Record<string, unknown> {
 	return args && typeof args === "object" ? (args as Record<string, unknown>) : {};
@@ -98,11 +131,13 @@ const PROMOTE_STATUS: Record<PromoteFailure, number> = {
 	write_failed: 500,
 };
 
-export const TOOLS: ToolDef[] = [
-	{
+export const TOOLS: BoundTool[] = [
+	defineTool({
 		name: "list_customers",
 		description: "List every customer recorded for the caller's vendor.",
 		capability: "vendor:read",
+		inputSchema: S.listCustomersInput,
+		outputSchema: S.listCustomersOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -112,11 +147,13 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return result;
 			return { ok: true, body: { customers: result.data } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "create_customer",
-		description: "Create a customer for the caller's vendor. Args: slug, name, domain, since, consent?.",
+		description: "Create a customer for the caller's vendor.",
 		capability: "vendor:write",
+		inputSchema: S.createCustomerInput,
+		outputSchema: S.createCustomerOutput,
 		handler: async (args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -126,11 +163,13 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return result;
 			return { ok: true, status: 201, body: { customer: result.data } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "update_customer",
-		description: "Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features.",
+		description: "Update one of the caller's customers.",
 		capability: "vendor:write",
+		inputSchema: S.updateCustomerInput,
+		outputSchema: S.updateCustomerOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
@@ -144,11 +183,13 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return result;
 			return { ok: true, body: { customer: result.data } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "delete_customer",
-		description: "Delete one of the caller's customers. Args: slug (required).",
+		description: "Delete one of the caller's customers.",
 		capability: "vendor:write",
+		inputSchema: S.deleteCustomerInput,
+		outputSchema: S.deleteCustomerOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
@@ -165,12 +206,14 @@ export const TOOLS: ToolDef[] = [
 			// response), so an empty-body success is expressed as a flag instead.
 			return { ok: true, body: { deleted: true } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "request_consent",
 		description:
-			"Email a customer the link to approve their own attestation — the tier-4 counter-signature. Args: slug (required), contact_email (required, must be an address on that customer's own domain). Re-issuing invalidates any link already sent. The link is never returned to the caller: it goes to the customer, which is what makes their approval evidence rather than the vendor's assertion.",
+			"Email a customer the link to approve their own attestation — the tier-4 counter-signature. Re-issuing invalidates any link already sent. The link is never returned to the caller: it goes to the customer, which is what makes their approval evidence rather than the vendor's assertion.",
 		capability: "vendor:write",
+		inputSchema: S.requestConsentInput,
+		outputSchema: S.requestConsentOutput,
 		handler: async (args, principal, context) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
@@ -206,12 +249,14 @@ export const TOOLS: ToolDef[] = [
 
 			return { ok: true, body: { sentTo: result.data.sentTo, expiresAt: result.data.expiresAt } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "get_status",
 		description:
 			"Whether the caller's vendor has received any events in the last 24h and how many, plus whether the tracking script has ever successfully checked in at all.",
 		capability: "vendor:read",
+		inputSchema: S.getStatusInput,
+		outputSchema: S.getStatusOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -219,12 +264,14 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
 			return { ok: true, body: { receiving: result.receiving, installed: result.installed, count: result.count } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "list_observed",
 		description:
-			"Companies the caller's vendor has been observed serving in the publishing window, with what each one is blocked on. Args: none. Read-only — use record_customer to turn one into a customer record.",
+			"Companies the caller's vendor has been observed serving in the publishing window, with what each one is blocked on. Read-only — use record_customer to turn one into a customer record.",
 		capability: "vendor:read",
+		inputSchema: S.listObservedInput,
+		outputSchema: S.listObservedOutput,
 		/*
 		 * The vendor-facing half of the observed view.
 		 *
@@ -278,12 +325,14 @@ export const TOOLS: ToolDef[] = [
 				},
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "record_customer",
 		description:
-			"Turn a domain observed for a vendor into a customer record (anonymous, tier-1 ceiling). Args: vendor (slug), domain.",
+			"Turn a domain observed for a vendor into a customer record (anonymous, tier-1 ceiling).",
 		capability: "staff:write",
+		inputSchema: S.recordCustomerInput,
+		outputSchema: S.recordCustomerOutput,
 		// Staff tools act across vendors by slug, not principal.vendorId — a
 		// staff-only grant has no vendor of its own (see requireVendorId).
 		handler: async (args) => {
@@ -298,12 +347,14 @@ export const TOOLS: ToolDef[] = [
 			}
 			return { ok: true, status: 201, body: { customer: result } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "tier_report",
 		description:
-			"Per-domain tier status for a vendor: what's observed, what's a customer record, what's actually published. Args: vendor (slug, optional — every vendor if omitted).",
+			"Per-domain tier status for a vendor: what's observed, what's a customer record, what's actually published.",
 		capability: "staff:read",
+		inputSchema: S.tierReportInput,
+		outputSchema: S.tierReportOutput,
 		handler: async (args) => {
 			const record = asRecord(args);
 			const requested = typeof record.vendor === "string" && record.vendor.trim() ? record.vendor.trim() : null;
@@ -322,11 +373,13 @@ export const TOOLS: ToolDef[] = [
 				},
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "get_install_snippet",
-		description: "The <script> tag to install on the caller's site, pointed at this server's own origin. Args: none.",
+		description: "The <script> tag to install on the caller's site, pointed at this server's own origin.",
 		capability: "vendor:read",
+		inputSchema: S.getInstallSnippetInput,
+		outputSchema: S.getInstallSnippetOutput,
 		handler: async (_args, principal, context) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -341,12 +394,14 @@ export const TOOLS: ToolDef[] = [
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
 			return { ok: true, body: { snippet: installSnippet(context.origin, vendor.key), origin: context.origin } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "rotate_key",
 		description:
-			"Replace the caller's vendor publishable/collector key with a freshly generated one. The old key stops working immediately — every existing install must be updated. Args: none.",
+			"Replace the caller's vendor publishable/collector key with a freshly generated one. The old key stops working immediately — every existing install must be updated.",
 		capability: "vendor:write",
+		inputSchema: S.rotateKeyInput,
+		outputSchema: S.rotateKeyOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -359,12 +414,14 @@ export const TOOLS: ToolDef[] = [
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { key } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "verify_domain",
 		description:
 			"Check DNS for this vendor's domain-verification TXT record and record the result. No args.",
 		capability: "vendor:write",
+		inputSchema: S.verifyDomainInput,
+		outputSchema: S.verifyDomainOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -404,11 +461,13 @@ export const TOOLS: ToolDef[] = [
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { verified: true, checked: true, message, verified_at: verifiedAt } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "update_vendor",
-		description: "Update the caller's own vendor account. Args: any of name, domain, category.",
+		description: "Update the caller's own vendor account.",
 		capability: "vendor:write",
+		inputSchema: S.updateVendorInput,
+		outputSchema: S.updateVendorOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const update: Record<string, unknown> = {};
@@ -452,12 +511,14 @@ export const TOOLS: ToolDef[] = [
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { vendor: { ...vendor, ...update } } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "list_snapshots",
 		description:
-			"Attestation chain summaries for the caller's customers — chain length and current snapshot. Args: customer (slug, optional — every customer if omitted).",
+			"Attestation chain summaries for the caller's customers — chain length and current snapshot.",
 		capability: "vendor:read",
+		inputSchema: S.listSnapshotsInput,
+		outputSchema: S.listSnapshotsOutput,
 		handler: async (args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -472,11 +533,13 @@ export const TOOLS: ToolDef[] = [
 			if (snapshots === null) return { ok: false, status: 404, body: { error: "not_found" } };
 			return { ok: true, body: { snapshots } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "submit_support_request",
-		description: "Send a support message to the team, attributed to the caller's vendor and account. Args: message.",
+		description: "Send a support message to the team, attributed to the caller's vendor and account.",
 		capability: "vendor:write",
+		inputSchema: S.submitSupportRequestInput,
+		outputSchema: S.submitSupportRequestOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const message = typeof record.message === "string" ? record.message.trim() : "";
@@ -507,7 +570,7 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return { ok: false, status: 502, body: { error: result.error ?? "Failed to send your message" } };
 			return { ok: true, body: { ok: true } };
 		},
-	},
+	}),
 ];
 
 export type DispatchOutcome =
@@ -573,5 +636,44 @@ export async function dispatchTool(
 	}
 
 	const result = await tool.handler(args, principal, context);
+	assertOutputMatchesSchema(tool, result);
 	return { kind: "result", result };
+}
+
+/**
+ * Checks that a tool actually returned what it advertises, everywhere except
+ * production.
+ *
+ * An output schema is a claim about someone else's code, and the failure mode
+ * is silent: a handler that grows a field, renames one, or starts returning
+ * null keeps working perfectly, and only the published contract becomes a lie.
+ * Nothing at runtime notices, because nothing at runtime reads the schema.
+ *
+ * Doing the check here rather than in a dedicated test is what makes it cheap:
+ * registry.test.ts already drives all 15 handlers through ~900 lines of
+ * happy-path and failure cases with real arguments, so every one of those
+ * becomes a conformance test for free — and any test added later is one too,
+ * without its author having to know this exists.
+ *
+ * PRODUCTION IS DELIBERATELY EXEMPT. A schema bug must never turn a working
+ * vendor call into a 500: the contract being wrong is a documentation problem,
+ * and breaking the caller to announce it would be a strictly worse outcome
+ * than serving the payload and fixing the schema. Failures surface in CI,
+ * where they are free.
+ *
+ * Only successes are checked. Errors all share ToolResult's uniform
+ * `{ ok: false, status, body }`, which is documented once at the dispatcher
+ * rather than per tool.
+ */
+function assertOutputMatchesSchema(tool: BoundTool, result: ToolResult): void {
+	if (process.env.NODE_ENV === "production") return;
+	if (!result.ok) return;
+
+	const parsed = tool.outputSchema.safeParse(result.body);
+	if (parsed.success) return;
+
+	throw new Error(
+		`${tool.name} returned a body its outputSchema rejects — the advertised contract is wrong, or the handler is: ` +
+			JSON.stringify(parsed.error.issues),
+	);
 }
