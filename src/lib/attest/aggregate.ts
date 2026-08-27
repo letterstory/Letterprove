@@ -34,6 +34,7 @@ import { signAttestation } from "./sign";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import { partitionDomains } from "@/lib/identity/domains";
 import { findVendor } from "@/lib/fixtures/vendors";
+import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { loadAggregateHistory } from "@/rollup/aggregate-history";
 import type { Tier } from "./types";
@@ -91,19 +92,31 @@ async function observedTotals(vendorSlug: string): Promise<Map<string, Totals> |
 	if (!db) return null;
 
 	const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-	const { data, error } = await db
-		.from("hot_rollups")
-		.select("domain, sessions, signups, logins")
-		.eq("vendor_slug", vendorSlug)
-		.gte("window_start", since);
-
-	if (error) {
-		console.error("[letterprove:aggregate] rollup query failed", error.message);
+	// Paged: these totals are summed into a SIGNED document, so a silently
+	// truncated read publishes a claim that understates its own evidence.
+	// Ordered because paging an unordered query can repeat or skip rows.
+	let data: { domain: string; sessions: number; signups: number; logins: number }[];
+	try {
+		data = await readAllRows(`rollups for ${vendorSlug}`, (from, to) =>
+			db
+				.from("hot_rollups")
+				.select("domain, sessions, signups, logins")
+				.eq("vendor_slug", vendorSlug)
+				.gte("window_start", since)
+				.order("window_start", { ascending: true })
+				.order("domain", { ascending: true })
+				.range(from, to),
+		);
+	} catch (e) {
+		// null, never an empty map. aggregateBody turns null into "publish
+		// nothing"; an empty map would publish a confident zero, which is a
+		// false signed claim rather than a missing one.
+		console.error("[letterprove:aggregate] rollup query failed", e instanceof Error ? e.message : String(e));
 		return null;
 	}
 
 	const totals = new Map<string, Totals>();
-	for (const row of (data ?? []) as (Totals & { domain: string })[]) {
+	for (const row of data as (Totals & { domain: string })[]) {
 		const prev = totals.get(row.domain) ?? { sessions: 0, signups: 0, logins: 0 };
 		totals.set(row.domain, {
 			sessions: prev.sessions + row.sessions,

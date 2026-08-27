@@ -4,10 +4,11 @@ import { loadAggregateHistory } from "./aggregate-history";
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
 function mockDb(result: { data: unknown; error: unknown }) {
-	const order = vi.fn().mockResolvedValue(result);
+	const range = vi.fn().mockResolvedValue(result);
+	const order = vi.fn().mockReturnValue({ range });
 	const eq = vi.fn().mockReturnValue({ order });
 	const select = vi.fn().mockReturnValue({ eq });
-	return { from: vi.fn().mockReturnValue({ select }), select, eq, order };
+	return { from: vi.fn().mockReturnValue({ select }), select, eq, order, range };
 }
 
 beforeEach(() => vi.clearAllMocks());

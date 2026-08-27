@@ -4,12 +4,13 @@ import { loadPersistedChain } from "./history";
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
 function mockDb(result: { data: unknown; error: unknown }) {
-	const order = vi.fn().mockResolvedValue(result);
+	const range = vi.fn().mockResolvedValue(result);
+	const order = vi.fn().mockReturnValue({ range });
 	const eq2 = vi.fn().mockReturnValue({ order });
 	const eq1 = vi.fn().mockReturnValue({ eq: eq2 });
 	const select = vi.fn().mockReturnValue({ eq: eq1 });
 	const from = vi.fn().mockReturnValue({ select });
-	return { from, select, eq1, eq2, order };
+	return { from, select, eq1, eq2, order, range };
 }
 
 describe("loadPersistedChain", () => {

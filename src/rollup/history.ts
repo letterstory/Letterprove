@@ -5,6 +5,7 @@
  * appends one live entry on top of whatever this returns.
  */
 
+import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import type { SignedAttestation } from "@/lib/attest/types";
 
@@ -37,19 +38,29 @@ export async function loadPersistedChain(vendorSlug: string, customerSlug: strin
 	// frozen, so an empty history is the truth.
 	if (!db) return [];
 
-	const { data, error } = await db
-		.from("published_snapshots")
-		.select("hour_bucket, attestation")
-		.eq("vendor_slug", vendorSlug)
-		.eq("customer_slug", customerSlug)
-		.order("hour_bucket", { ascending: true });
-
-	if (error) {
-		console.error("[letterprove:history] query failed", error.message);
-		throw new Error(`cannot read published history for ${vendorSlug}/${customerSlug}: ${error.message}`);
+	// Paged, not a bare select. An unbounded read is capped at 1000 rows with no
+	// error and no marker, and buildChainFor links the next attestation onto
+	// `persisted.at(-1)` — so a truncated history silently chains onto a stale
+	// predecessor and forks the chain, in rows that are immutable by design.
+	// See src/lib/db/read-all.ts.
+	let rows: { hour_bucket: number; attestation: SignedAttestation }[];
+	try {
+		rows = await readAllRows(`published history for ${vendorSlug}/${customerSlug}`, (from, to) =>
+			db
+				.from("published_snapshots")
+				.select("hour_bucket, attestation")
+				.eq("vendor_slug", vendorSlug)
+				.eq("customer_slug", customerSlug)
+				.order("hour_bucket", { ascending: true })
+				.range(from, to),
+		);
+	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e);
+		console.error("[letterprove:history] query failed", message);
+		throw new Error(`cannot read ${message}`);
 	}
 
-	return (data ?? []).map((row: { hour_bucket: number; attestation: SignedAttestation }) => ({
+	return rows.map((row) => ({
 		hourBucket: row.hour_bucket,
 		attestation: row.attestation,
 	}));

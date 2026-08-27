@@ -20,6 +20,7 @@
 import { classifyDomain, type DomainKind } from "@/lib/identity/domains";
 import { earned } from "@/lib/attest/body";
 import { allVendors, consentOf, type Consent, type CustomerFixture } from "@/lib/fixtures/vendors";
+import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import type { Tier } from "@/lib/attest/types";
 
@@ -86,19 +87,31 @@ async function observedTotals(vendorSlug: string): Promise<Map<string, RollupTot
 	if (!db) return null;
 
 	const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-	const { data, error } = await db
-		.from("hot_rollups")
-		.select("domain, sessions, signups, logins")
-		.eq("vendor_slug", vendorSlug)
-		.gte("window_start", since);
-
-	if (error) {
-		console.error("[letterprove:tiers] rollup query failed", error.message);
+	// Paged: these totals are summed into a SIGNED document, so a silently
+	// truncated read publishes a claim that understates its own evidence.
+	// Ordered because paging an unordered query can repeat or skip rows.
+	let data: { domain: string; sessions: number; signups: number; logins: number }[];
+	try {
+		data = await readAllRows(`rollups for ${vendorSlug}`, (from, to) =>
+			db
+				.from("hot_rollups")
+				.select("domain, sessions, signups, logins")
+				.eq("vendor_slug", vendorSlug)
+				.gte("window_start", since)
+				.order("window_start", { ascending: true })
+				.order("domain", { ascending: true })
+				.range(from, to),
+		);
+	} catch (e) {
+		// null, never an empty map: callers treat null as "couldn't read" and
+		// report unavailable, where an empty map would claim the vendor has been
+		// observed serving nobody.
+		console.error("[letterprove:tiers] rollup query failed", e instanceof Error ? e.message : String(e));
 		return null;
 	}
 
 	const totals = new Map<string, RollupTotals>();
-	for (const row of (data ?? []) as (RollupTotals & { domain: string })[]) {
+	for (const row of data as (RollupTotals & { domain: string })[]) {
 		const prev = totals.get(row.domain) ?? { sessions: 0, signups: 0, logins: 0 };
 		totals.set(row.domain, {
 			sessions: prev.sessions + row.sessions,

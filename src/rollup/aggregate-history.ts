@@ -9,6 +9,7 @@
  * indirection than duplication saves at this size.
  */
 
+import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import type { SignedAggregate } from "@/lib/attest/aggregate";
 
@@ -35,18 +36,26 @@ export async function loadAggregateHistory(vendorSlug: string): Promise<Persiste
 	// frozen, so an empty history is the truth.
 	if (!db) return [];
 
-	const { data, error } = await db
-		.from("published_aggregates")
-		.select("hour_bucket, attestation")
-		.eq("vendor_slug", vendorSlug)
-		.order("hour_bucket", { ascending: true });
-
-	if (error) {
-		console.error("[letterprove:aggregate-history] query failed", error.message);
-		throw new Error(`cannot read published aggregate history for ${vendorSlug}: ${error.message}`);
+	// Paged — same reason as loadPersistedChain. This chain grows one row per
+	// vendor per hour, so a bare select quietly stops being the whole history
+	// after ~six weeks and the next freeze links onto a stale tail.
+	let rows: { hour_bucket: number; attestation: SignedAggregate }[];
+	try {
+		rows = await readAllRows(`published aggregate history for ${vendorSlug}`, (from, to) =>
+			db
+				.from("published_aggregates")
+				.select("hour_bucket, attestation")
+				.eq("vendor_slug", vendorSlug)
+				.order("hour_bucket", { ascending: true })
+				.range(from, to),
+		);
+	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e);
+		console.error("[letterprove:aggregate-history] query failed", message);
+		throw new Error(`cannot read ${message}`);
 	}
 
-	return ((data ?? []) as { hour_bucket: number; attestation: SignedAggregate }[]).map((row) => ({
+	return rows.map((row) => ({
 		hourBucket: row.hour_bucket,
 		attestation: row.attestation,
 	}));

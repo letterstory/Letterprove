@@ -53,13 +53,22 @@ async function withVendors() {
 	vi.mocked(allVendors).mockResolvedValue([VANTAGE, LETTERTRACE] as never);
 }
 
-/** Mimics the chainable `.from().select().eq().gte()` shape the query uses. */
+/**
+ * Mimics the chainable `.from().select().eq().gte().order().range()` shape.
+ *
+ * The read pages now (see src/lib/db/read-all.ts), so it finishes at `.range()`
+ * rather than `.gte()`. One page is returned, which readAllRows correctly
+ * treats as the last — paging past the cap is proven separately in
+ * read-all.test.ts, where it can actually be exercised.
+ */
 function mockDb(result: { data: unknown; error: unknown }) {
-	const gte = vi.fn().mockResolvedValue(result);
+	const range = vi.fn().mockResolvedValue(result);
+	const order: ReturnType<typeof vi.fn> = vi.fn(() => ({ order, range }));
+	const gte = vi.fn().mockReturnValue({ order, range });
 	const eq = vi.fn().mockReturnValue({ gte });
 	const select = vi.fn().mockReturnValue({ eq });
 	const from = vi.fn().mockReturnValue({ select });
-	return { from, select, eq, gte };
+	return { from, select, eq, gte, order, range };
 }
 
 function rollup(domain: string, sessions: number, signups = 0, logins = 0) {
