@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { Button, ErrorBanner, Field, TextInput } from "@/components/form";
 import { Badge, Card, EmptyState, Td, Th, TableWrap } from "@/components/ui";
+import { consentCooldown } from "@/lib/vendors/consent-cooldown";
 
 export interface CustomerRow {
 	id: string;
@@ -18,6 +19,9 @@ export interface CustomerRow {
 	/** Address a live consent request went to, so the button can read "Resend request". */
 	consent_sent_to: string | null;
 	countersigned_by: string | null;
+	/** When they last said no. Without this, a decline looked exactly like never having been asked. */
+	consent_declined_at: string | null;
+	consent_decline_count: number;
 }
 
 interface Props {
@@ -39,6 +43,19 @@ const selectClass =
 /** `2026-08-28T06:00:00.000Z` → `2026-08-28`, all a vendor needs to know before resending. */
 function shortDate(iso: string): string {
 	return iso.slice(0, 10);
+}
+
+/**
+ * When this customer can be asked again, or null if they can be asked now.
+ *
+ * Delegates to the same `consentCooldown` the server enforces with, rather
+ * than re-deriving "30 days after the decline" here. Two copies of that
+ * arithmetic would drift, and the way they'd drift is the UI offering a button
+ * that the API then refuses — which reads as a broken dashboard rather than as
+ * the deliberate rule it is.
+ */
+function cooldownFor(c: CustomerRow): string | null {
+	return consentCooldown(c.consent_declined_at)?.canAskAgainAt ?? null;
 }
 
 export function CustomersManager({ initialCustomers, features }: Props) {
@@ -235,19 +252,47 @@ export function CustomersManager({ initialCustomers, features }: Props) {
 											</span>
 										) : (
 											<span className="inline-flex items-center gap-3">
-												{!c.countersigned_at && (
-													<button
-														type="button"
-														onClick={() => {
-															setConsentSent(null);
-															setContactEmail("");
-															setRequestingFor(requestingFor === c.slug ? null : c.slug);
-														}}
-														className="text-xs text-fog transition hover:text-mint"
-													>
-														{c.consent_sent_to ? "Resend request" : "Request consent"}
-													</button>
-												)}
+												{/* A decline is shown as its own state rather than falling back to
+												    the same "Request consent" button a never-asked customer gets.
+												    That collapse was the bug: the vendor could not tell refusal
+												    from an email that never arrived, so the rational move was to
+												    keep re-sending. During the cooldown the button is replaced
+												    outright, not merely disabled — there is nothing to click and
+												    nothing to retry. */}
+												{!c.countersigned_at &&
+													(cooldownFor(c) ? (
+														<span
+															className="text-xs text-fog/70"
+															title={`Declined ${shortDate(c.consent_declined_at!)}${
+																c.consent_decline_count > 1
+																	? ` — ${c.consent_decline_count} times`
+																	: ""
+															}. You can ask again from ${shortDate(cooldownFor(c)!)}.`}
+														>
+															Declined {shortDate(c.consent_declined_at!)}
+															{c.consent_decline_count > 1 && ` (×${c.consent_decline_count})`}
+															<span className="text-fog/50">
+																{" "}
+																· ask again {shortDate(cooldownFor(c)!)}
+															</span>
+														</span>
+													) : (
+														<button
+															type="button"
+															onClick={() => {
+																setConsentSent(null);
+																setContactEmail("");
+																setRequestingFor(requestingFor === c.slug ? null : c.slug);
+															}}
+															className="text-xs text-fog transition hover:text-mint"
+														>
+															{c.consent_declined_at
+																? "Ask again"
+																: c.consent_sent_to
+																	? "Resend request"
+																	: "Request consent"}
+														</button>
+													))}
 												<button
 													type="button"
 													onClick={() => setEditingSlug(c.slug)}

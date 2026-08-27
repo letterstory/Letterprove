@@ -83,8 +83,12 @@ export type ConsentDecision = "approve" | "decline";
  * Consent) — it sets `consent: "named"` and `countersigned_at` together,
  * since the customer reviewing and approving their own attestation is both
  * the strongest evidence in the system and their actual consent to be named.
- * Declining touches neither; it only clears the token so the link can't be
- * replayed.
+ * Declining touches neither, but it is no longer silent: it stamps
+ * `consent_declined_at` and increments `consent_decline_count`, which is what
+ * lets the vendor's Customers page distinguish "they said no" from "the email
+ * never arrived", and what the cooldown in generateConsentLink() reads. Before
+ * that, a decline cleared the token and left nothing behind — the customer's
+ * only available signal, dropped.
  *
  * The update is scoped by vendor_id + slug + the exact live, unexpired token
  * in one statement — that scoping is the real authorization check, not the
@@ -109,7 +113,7 @@ export async function recordConsentDecision(
 	// between these two statements simply matches nothing and we bail.
 	const { data: pending } = await db
 		.from("vendor_customers")
-		.select("consent_sent_to")
+		.select("consent_sent_to, consent_decline_count")
 		.eq("vendor_id", vendorRow.id)
 		.eq("slug", customerSlug)
 		.eq("consent_token", token)
@@ -129,7 +133,18 @@ export async function recordConsentDecision(
 					consent_token_expires_at: null,
 					consent_sent_to: null,
 				}
-			: { consent_token: null, consent_token_expires_at: null, consent_sent_to: null };
+			: {
+					// The decline itself, recorded. Read-then-write on the count is
+					// safe despite the obvious shape of a race: the update below is
+					// scoped to this exact live token and clears it, so of two
+					// concurrent declines on the same link only one can ever match.
+					// A second tab's statement updates nothing and returns invalid.
+					consent_declined_at: new Date().toISOString(),
+					consent_decline_count: (pending?.consent_decline_count ?? 0) + 1,
+					consent_token: null,
+					consent_token_expires_at: null,
+					consent_sent_to: null,
+				};
 
 	const { data, error } = await db
 		.from("vendor_customers")

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { FEATURES, type Consent } from "@/lib/fixtures/vendors";
 import { classifyDomain } from "@/lib/identity/domains";
 import { checkConsentRecipient } from "@/lib/vendors/consent-recipient";
+import { consentCooldown } from "@/lib/vendors/consent-cooldown";
 
 /** Slugs that would publish to an unreachable URL — see attest/[vendor]/chain. */
 const RESERVED_CUSTOMER_SLUGS = new Set(["chain"]);
@@ -39,6 +40,10 @@ export type CustomerRow = {
 	consent_sent_to: string | null;
 	/** Who approved. Published nowhere — this is the vendor's own audit trail. */
 	countersigned_by: string | null;
+	/** When the customer last declined. Never cleared, never published. */
+	consent_declined_at: string | null;
+	/** How many times they've declined — one "not now" reads differently from four. */
+	consent_decline_count: number;
 };
 
 /**
@@ -49,7 +54,7 @@ export type CustomerRow = {
  * constant is exported for the guard test, not for building queries elsewhere.
  */
 export const CUSTOMER_COLUMNS =
-	"id, slug, name, domain, since, tier, verified, features, consent, countersigned_at, consent_sent_to, countersigned_by";
+	"id, slug, name, domain, since, tier, verified, features, consent, countersigned_at, consent_sent_to, countersigned_by, consent_declined_at, consent_decline_count";
 
 export type ServiceResult<T> = { ok: true; data: T } | { ok: false; status: number; body: Record<string, unknown> };
 
@@ -203,6 +208,7 @@ export async function updateCustomer(
 /** How long a consent link stays live before a vendor has to re-issue it. */
 const CONSENT_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+
 export type ConsentLink = { token: string; expiresAt: string; sentTo: string; customerName: string };
 
 /**
@@ -242,13 +248,29 @@ export async function generateConsentLink(
 ): Promise<ServiceResult<ConsentLink>> {
 	const { data: customer, error: readError } = await supabase
 		.from("vendor_customers")
-		.select("id, name, domain")
+		.select("id, name, domain, consent_declined_at")
 		.eq("vendor_id", vendorId)
 		.eq("slug", slug)
 		.maybeSingle();
 
 	if (readError) return { ok: false, status: 400, body: { error: readError.message } };
 	if (!customer) return { ok: false, status: 404, body: { error: "not_found" } };
+
+	// Checked before the recipient binding, so a vendor probing addresses during
+	// a cooldown learns nothing about which ones would have been accepted.
+	const cooldown = consentCooldown(customer.consent_declined_at);
+	if (cooldown) {
+		return {
+			ok: false,
+			status: 429,
+			body: {
+				error: "consent_declined",
+				reason: "this customer declined; asking again is available after the cooldown",
+				declinedAt: cooldown.declinedAt,
+				canAskAgainAt: cooldown.canAskAgainAt,
+			},
+		};
+	}
 
 	const recipient = checkConsentRecipient(contactEmail, customer.domain);
 	if (!recipient.ok) return { ok: false, status: 422, body: { error: recipient.error } };
