@@ -15,6 +15,12 @@ vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
 vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
 vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn(), vendorSnapshots: vi.fn() }));
 vi.mock("@/lib/vendors/keys", () => ({ generateKey: vi.fn() }));
+vi.mock("@/lib/vendors/verification", () => ({
+	checkDomainVerification: vi.fn(),
+	expectedRecord: vi.fn(() => "letterprove-verify=tok"),
+	verificationHosts: vi.fn(() => ["_letterprove.acme.com", "acme.com"]),
+	verificationMessage: vi.fn(() => "checked"),
+}));
 vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
 vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
 
@@ -70,6 +76,7 @@ let vendorRow: {
 	domain?: string;
 	category?: string;
 	domain_verified_at?: string | null;
+	domain_verification_token?: string | null;
 } | null = {
 	key: "lp_live_acme_old",
 	slug: "acme",
@@ -939,4 +946,47 @@ describe("vendor tools require current membership, not just the scope", () => {
 
 		expect(outcome.kind).toBe("result");
 	});
+
+	/*
+	 * verify_domain was the one tool no test ever dispatched, which made its
+	 * output — the only union in the registry, and so the shape most likely to
+	 * be modelled wrong — the one contract nothing validated. Both branches are
+	 * exercised here so dispatchTool's schema check actually reaches them.
+	 */
+	it("verify_domain reports success with the timestamp it recorded", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { checkDomainVerification } = await import("@/lib/vendors/verification");
+		vendorRow = { domain: "acme.com", domain_verification_token: "tok", domain_verified_at: null };
+		vi.mocked(checkDomainVerification).mockResolvedValue({ verified: true } as never);
+
+		const outcome = await dispatchTool("verify_domain", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || !outcome.result.ok) throw new Error("expected success");
+		const body = outcome.result.body as Record<string, unknown>;
+		expect(body.verified).toBe(true);
+		expect(body.checked).toBe(true);
+		expect(body.verified_at).toEqual(expect.any(String));
+	});
+
+	it("verify_domain preserves prior verification when the lookup fails, rather than un-verifying", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { checkDomainVerification } = await import("@/lib/vendors/verification");
+		// Already proven once; DNS is briefly unreachable now.
+		vendorRow = { domain: "acme.com", domain_verification_token: "tok", domain_verified_at: "2026-01-01T00:00:00.000Z" };
+		vi.mocked(checkDomainVerification).mockResolvedValue({ verified: false } as never);
+
+		const outcome = await dispatchTool("verify_domain", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || !outcome.result.ok) throw new Error("expected success");
+		const body = outcome.result.body as Record<string, unknown>;
+		// The whole point of this branch: a failed check must not cost a vendor
+		// verification they already earned.
+		expect(body.verified).toBe(true);
+		expect(body.checked).toBe(false);
+		expect(body.record).toBe("letterprove-verify=tok");
+		expect(body.hosts).toEqual(["_letterprove.acme.com", "acme.com"]);
+	});
+
 });

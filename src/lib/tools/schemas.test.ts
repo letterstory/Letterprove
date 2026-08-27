@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { TOOLS } from "./registry";
 import { toInputSchema, toOutputSchema } from "./tool-schema";
+import { CUSTOMER_COLUMNS } from "@/lib/vendors/customers";
+import { listCustomersOutput } from "./schemas";
 
 /**
  * Coverage and quality of the advertised tool contracts.
@@ -61,6 +63,35 @@ describe("every tool advertises a real contract", () => {
 		for (const tool of TOOLS) {
 			expect(toInputSchema(tool.inputSchema).additionalProperties, `${tool.name} input`).toBe(false);
 			expect(toOutputSchema(tool.outputSchema).additionalProperties, `${tool.name} output`).toBeUndefined();
+		}
+	});
+
+	/*
+	 * The customer shape exists three times: CUSTOMER_COLUMNS (what is
+	 * selected), CustomerRow (what TypeScript believes), and the Zod schema
+	 * (what callers are promised). columns.test.ts pins the dashboard to the
+	 * first and knows nothing about the third.
+	 *
+	 * Only the ADD direction needs guarding. A removed column already fails,
+	 * because dispatchTool validates real payloads against this schema and a
+	 * required field would be missing. An added column fails nothing at all —
+	 * outputs are open, so it just silently never appears in the advertised
+	 * contract. That is precisely how consent_sent_to went missing from the
+	 * dashboard for weeks, and the API is a worse place for it to happen: a
+	 * vendor cannot notice a field they were never told about.
+	 */
+	it("advertises every column a customer row actually carries", () => {
+		const selected = CUSTOMER_COLUMNS.split(",").map((c) => c.trim());
+		const json = toOutputSchema(listCustomersOutput) as {
+			properties: { customers: { items: { properties: Record<string, unknown> } } };
+		};
+		const advertised = Object.keys(json.properties.customers.items.properties);
+
+		for (const column of selected) {
+			expect(
+				advertised,
+				`CUSTOMER_COLUMNS selects "${column}" but the advertised contract never mentions it`,
+			).toContain(column);
 		}
 	});
 

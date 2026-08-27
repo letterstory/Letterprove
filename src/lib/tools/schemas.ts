@@ -30,10 +30,20 @@ import { FEATURES } from "@/lib/fixtures/vendors";
 const consent = z.enum(["named", "anonymous"]);
 
 /**
- * A customer as every customer-shaped tool returns it. Mirrors CustomerRow in
- * lib/vendors/customers.ts, which is itself pinned to CUSTOMER_COLUMNS by
- * columns.test.ts — so this stays honest through that guard rather than by
- * anyone remembering to update two files.
+ * A customer as every customer-shaped tool returns it.
+ *
+ * This is a THIRD copy of the row shape, after `CUSTOMER_COLUMNS` (what is
+ * selected) and `CustomerRow` (what TypeScript believes). columns.test.ts pins
+ * the vendor dashboard to the first of those, and does not know this file
+ * exists — so nothing here is guarded by it. `schemas.test.ts` adds the missing
+ * edge: every column selected must appear in this schema.
+ *
+ * That guard is needed in one direction specifically. A REMOVED column is
+ * caught already, because dispatchTool validates real payloads and a required
+ * field would go missing. An ADDED column is not: outputs are open by design,
+ * so a new column simply never appears in the advertised contract and nothing
+ * fails. That is exactly how `consent_sent_to` once went missing from the
+ * dashboard for weeks.
  */
 const customer = z.object({
 	id: z.string(),
