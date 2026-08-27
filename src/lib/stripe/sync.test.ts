@@ -24,7 +24,17 @@ function mockDb(observed: string[] = ["acme.com"], vendorDomain = "acme-vendor.c
 			return {
 				select: () => ({
 					eq: () => ({
-						gte: () => Promise.resolve({ data: observed.map((domain) => ({ domain })), error: null }),
+						// Paged now: .gte().order().order().range(). One page is returned,
+						// which readAllRows treats as the last — read-all.test.ts covers
+						// the multi-page case where it can actually be exercised.
+						gte: () => {
+							const page = {
+								order: () => page,
+								range: () =>
+									Promise.resolve({ data: observed.map((domain) => ({ domain })), error: null }),
+							};
+							return page;
+						},
 						maybeSingle: () => Promise.resolve({ data: { domain: vendorDomain }, error: null }),
 					}),
 				}),

@@ -19,6 +19,7 @@
  *      rather than all of it.
  */
 
+import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { credentialFor } from "./credentials";
 import { fetchSubscriptions } from "./fetch";
@@ -138,16 +139,25 @@ async function observedDomains(vendorSlug: string): Promise<Set<string>> {
 	if (!db) return new Set();
 
 	const since = new Date(Date.now() - OBSERVED_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-	const { data, error } = await db
-		.from("hot_rollups")
-		.select("domain")
-		.eq("vendor_slug", vendorSlug)
-		.gte("window_start", since);
-
-	if (error) {
-		console.error("[letterprove:stripe-sync] observed-domain read failed", error.message);
+	// Paged. A truncated set here does not fail loudly — it silently drops
+	// domains, so a real customer's real payment gets rejected as
+	// `no_observed_traffic` and their tier-3 evidence quietly disappears.
+	try {
+		const rows = await readAllRows<{ domain: string }>(`observed domains for ${vendorSlug}`, (from, to) =>
+			db
+				.from("hot_rollups")
+				.select("domain")
+				.eq("vendor_slug", vendorSlug)
+				.gte("window_start", since)
+				.order("window_start", { ascending: true })
+				.order("domain", { ascending: true })
+				.range(from, to),
+		);
+		return new Set(rows.map((r) => r.domain));
+	} catch (e) {
+		console.error("[letterprove:stripe-sync] observed-domain read failed", e instanceof Error ? e.message : String(e));
+		// Empty set, which mapPayments treats as "nothing matches" — the safe
+		// direction, and the behaviour this had before paging.
 		return new Set();
 	}
-
-	return new Set((data ?? []).map((r) => (r as { domain: string }).domain));
 }

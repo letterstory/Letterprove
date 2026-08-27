@@ -125,6 +125,16 @@ function pgliteSupabase() {
 					filters.push([c, ">=", v]);
 					return builder;
 				},
+				// Accepted and ignored: this shim answers the whole set in one page,
+				// so ordering changes nothing about what comes back. Present because
+				// the paged readers now chain through them.
+				order() {
+					return builder;
+				},
+				range: async (from: number, to: number) => {
+					const r = await run();
+					return { data: r.rows.slice(from, to + 1), error: r.error };
+				},
 				async maybeSingle() {
 					const r = await run();
 					return { data: r.rows[0] ?? null, error: r.error };

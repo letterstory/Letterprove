@@ -22,13 +22,24 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 }));
 
 /**
- * Two different chains hit this mock: the aggregate awaits `.gte()` directly,
- * while fraud-features calls `.gte().order()`. So `gte` returns a promise that
- * also carries `.order`, satisfying both without branching on the caller.
+ * Two different chains hit this mock, and they now diverge further: the
+ * aggregate pages (`.gte().order().order().range()`) while fraud-features still
+ * awaits `.gte().order()` directly.
+ *
+ * So each link is a promise that ALSO carries the next link. Awaiting it
+ * satisfies fraud-features; chaining on satisfies the paged read; neither has
+ * to know which caller it is.
  */
 function mockDb(result: { data: unknown; error: unknown }) {
+	const range = vi.fn().mockResolvedValue(result);
+	const orderable: { order: ReturnType<typeof vi.fn>; range: typeof range } = {
+		order: vi.fn(() => settledOrder),
+		range,
+	};
+	const settledOrder = Object.assign(Promise.resolve(result), orderable);
 	const settled = Object.assign(Promise.resolve(result), {
-		order: vi.fn().mockResolvedValue(result),
+		order: vi.fn(() => settledOrder),
+		range,
 	});
 	const gte = vi.fn().mockReturnValue(settled);
 	const eq: ReturnType<typeof vi.fn> = vi.fn(() => ({ gte, eq }));
