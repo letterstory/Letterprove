@@ -12,6 +12,7 @@ const ORG = "11111111-1111-1111-1111-111111111111";
 const VENDOR_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
 let saved: string | undefined;
+let savedStaff: string | undefined;
 
 function post(body: unknown, auth?: string): Request {
 	return new Request("https://app.letterprove.com/api/v1/tools/get_status", {
@@ -27,12 +28,17 @@ function vendor(): VendorFixture {
 
 beforeEach(() => {
 	saved = process.env.LETTERSTORY_API_SECRET;
+	savedStaff = process.env.STAFF_USER_IDS;
+	// Nobody is staff unless a test says so — the fail-closed default.
+	delete process.env.STAFF_USER_IDS;
 	process.env.LETTERSTORY_API_SECRET = SECRET;
 	findVendorByOrg.mockReset();
 });
 afterEach(() => {
 	if (saved === undefined) delete process.env.LETTERSTORY_API_SECRET;
 	else process.env.LETTERSTORY_API_SECRET = saved;
+	if (savedStaff === undefined) delete process.env.STAFF_USER_IDS;
+	else process.env.STAFF_USER_IDS = savedStaff;
 	vi.clearAllMocks();
 });
 
@@ -88,4 +94,70 @@ describe("authenticateToolRequest — no OAuth fallback", () => {
 		expect(r.success).toBe(false);
 		if (!r.success) expect(r.response.status).toBe(401);
 	});
+
+	/*
+	 * Cross-vendor capability, and the reason it is safe to grant over a seam
+	 * that only proves "this is Letterstory's backend": the grant is not
+	 * attached to the seam. It is attached to the acting human, and Letterprove
+	 * — not Letterstory — decides who that may be.
+	 */
+	describe("staff capability", () => {
+		const STAFF = "22222222-2222-2222-2222-222222222222";
+
+		it("grants staff:* to an acting user this deployment named as staff", async () => {
+			process.env.STAFF_USER_IDS = STAFF;
+			findVendorByOrg.mockResolvedValue(vendor());
+
+			const body = { org_id: ORG, user_id: STAFF };
+			const r = await authenticateToolRequest(post(body, `Bearer ${SECRET}`), body);
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write", "staff:read", "staff:write"]);
+			expect(r.principal.userId).toBe(STAFF);
+		});
+
+		it("withholds staff:* from an acting user who is not on the allowlist", async () => {
+			process.env.STAFF_USER_IDS = STAFF;
+			findVendorByOrg.mockResolvedValue(vendor());
+
+			// A real customer, calling with the same valid service secret. The
+			// secret proves the CALLER, never the person behind it.
+			const body = { org_id: ORG, user_id: "99999999-9999-9999-9999-999999999999" };
+			const r = await authenticateToolRequest(post(body, `Bearer ${SECRET}`), body);
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write"]);
+		});
+
+		it("grants nothing when the deployment has named no staff at all", async () => {
+			delete process.env.STAFF_USER_IDS;
+			findVendorByOrg.mockResolvedValue(vendor());
+
+			const body = { org_id: ORG, user_id: STAFF };
+			const r = await authenticateToolRequest(post(body, `Bearer ${SECRET}`), body);
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			// Fails closed. An unconfigured deployment serves no staff surface,
+			// rather than serving it to everyone.
+			expect(r.principal.capabilities).not.toContain("staff:read");
+		});
+
+		it("never grants staff:* to a call that names no acting human", async () => {
+			process.env.STAFF_USER_IDS = `${STAFF},${LETTERSTORY_SERVICE_IDENTITY}`;
+			findVendorByOrg.mockResolvedValue(vendor());
+
+			// The sentinel identity must not be allowlistable into staff: it
+			// means "no human was named", and cross-vendor writes have to be
+			// attributable to a person.
+			const r = await authenticateToolRequest(post({ org_id: ORG }, `Bearer ${SECRET}`), { org_id: ORG });
+
+			expect(r.success).toBe(true);
+            if (!r.success) return;
+			expect(r.principal.capabilities).not.toContain("staff:write");
+		});
+	});
+
 });
