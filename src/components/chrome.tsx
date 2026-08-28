@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { isDemonstration } from "@/lib/attest/keys";
-import { getUser } from "@/lib/auth/server";
 
 /**
  * A banner that cannot be missed when proofs are signed with the development
@@ -26,11 +25,7 @@ export function DevKeyBanner() {
 	);
 }
 
-export async function SiteHeader() {
-	// Server component, so it can tell a signed-in visitor from a stranger and
-	// stop offering to sign in someone who already is.
-	const user = await getUser().catch(() => null);
-
+export function SiteHeader() {
 	return (
 		<header className="border-b border-edge">
 			<div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
@@ -64,12 +59,6 @@ export async function SiteHeader() {
 					>
 						cli
 					</a>
-					<Link
-						href={user ? "/vendor" : "/vendor/login"}
-						className="rounded border border-edge px-3 py-1.5 text-fog hover:border-mint hover:text-mint"
-					>
-						{user ? "vendor dashboard" : "vendor sign in"}
-					</Link>
 				</nav>
 			</div>
 		</header>

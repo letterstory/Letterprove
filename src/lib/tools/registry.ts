@@ -1,5 +1,4 @@
-import type { OAuthPrincipal } from "@/lib/oauth/core";
-import type { Capability } from "@/lib/oauth/scopes";
+import type { OAuthPrincipal, Capability } from "@/lib/oauth/scopes";
 import { dbClient } from "@/lib/db/client";
 import { findVendorByOrg } from "@/lib/fixtures/vendors";
 import { provisionVendorForOrg } from "@/lib/vendors/provision";

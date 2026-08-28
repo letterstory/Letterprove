@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatchTool } from "./registry";
-import type { OAuthPrincipal } from "@/lib/oauth/core";
+import type { OAuthPrincipal } from "@/lib/oauth/scopes";
 import type { VendorFixture } from "@/lib/fixtures/vendors";
 import type { ProvisionResult } from "@/lib/vendors/provision";
 

@@ -11,6 +11,8 @@ export const capabilityValues = ["vendor:read", "vendor:write", "staff:read", "s
 
 export type Capability = (typeof capabilityValues)[number];
 
+export type OAuthPrincipal = { tokenId: string; vendorId: string | null; userId: string; capabilities: Capability[]; orgId?: string | null };
+
 const CAPABILITY_DESCRIPTIONS: Record<Capability, string> = {
 	"vendor:read": "Read your vendor profile, customers, and proofs.",
 	"vendor:write": "Change your vendor profile, customers, and consent settings.",

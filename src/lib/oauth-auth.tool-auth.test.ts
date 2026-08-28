@@ -1,18 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateToolRequest, LETTERSTORY_SERVICE_IDENTITY } from "./oauth-auth";
 import type { VendorFixture } from "@/lib/fixtures/vendors";
-import type { OAuthPrincipal } from "@/lib/oauth/core";
 
 const findVendorByOrg = vi.fn<(orgId: string) => Promise<VendorFixture | undefined>>();
 vi.mock("@/lib/fixtures/vendors", () => ({
 	findVendorByOrg: (orgId: string) => findVendorByOrg(orgId),
 }));
-
-const resolveAccessToken = vi.fn<(token: string) => Promise<OAuthPrincipal | null>>();
-vi.mock("@/lib/oauth/core", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@/lib/oauth/core")>();
-	return { ...actual, resolveAccessToken: (t: string) => resolveAccessToken(t) };
-});
 
 const SECRET = "svc-secret";
 const ORG = "11111111-1111-1111-1111-111111111111";
@@ -36,7 +29,6 @@ beforeEach(() => {
 	saved = process.env.LETTERSTORY_API_SECRET;
 	process.env.LETTERSTORY_API_SECRET = SECRET;
 	findVendorByOrg.mockReset();
-	resolveAccessToken.mockReset();
 });
 afterEach(() => {
 	if (saved === undefined) delete process.env.LETTERSTORY_API_SECRET;
@@ -82,17 +74,16 @@ describe("authenticateToolRequest — Letterstory service door", () => {
 	});
 });
 
-describe("authenticateToolRequest — OAuth door (fallback)", () => {
-	it("uses the bearer token when the service secret is absent", async () => {
-		const principal: OAuthPrincipal = { tokenId: "t1", vendorId: VENDOR_ID, userId: "u1", capabilities: ["vendor:read"] };
-		resolveAccessToken.mockResolvedValue(principal);
+describe("authenticateToolRequest — no OAuth fallback", () => {
+	it("401s a bearer token that is not the service secret (the OAuth door is retired)", async () => {
 		const r = await authenticateToolRequest(post({}, "Bearer cli-token"), {});
-		expect(resolveAccessToken).toHaveBeenCalledWith("cli-token");
-		expect(r.success && r.principal.vendorId).toBe(VENDOR_ID);
+		expect(r.success).toBe(false);
+		if (!r.success) expect(r.response.status).toBe(401);
+		// It never tries to resolve the caller as a vendor — there is no org context.
 		expect(findVendorByOrg).not.toHaveBeenCalled();
 	});
 
-	it("401s when neither door authenticates", async () => {
+	it("401s when no credential is presented at all", async () => {
 		const r = await authenticateToolRequest(post({}), {});
 		expect(r.success).toBe(false);
 		if (!r.success) expect(r.response.status).toBe(401);

@@ -63,8 +63,14 @@ function runChecks() {
 	//
 	// That is the failure this file was written to prevent, in its own checks:
 	// a status line going stale while the code moved underneath it.
+	// Support moved from a vendor page (src/app/vendor/support, retired with the
+	// local dashboard) to the submit_support_request tool on the dispatcher —
+	// same lib/support/slack.ts behind it. Track the surviving mechanism, not
+	// the deleted route, exactly the "code moved underneath the status" case
+	// this script exists to catch.
 	const hasSupportRoutes =
-		existsSync(path.join(ROOT, "src/app/vendor/support")) && existsSync(path.join(ROOT, "src/lib/support/slack.ts"));
+		existsSync(path.join(ROOT, "src/lib/support/slack.ts")) &&
+		/submit_support_request/.test(read("src/lib/tools/registry.ts") ?? "");
 	const hasStripeSync =
 		existsSync(path.join(ROOT, "src/lib/stripe/sync.ts")) && /vendor_payment_evidence/.test(migrations);
 	const hasCustomerCountersignRoute =
@@ -128,8 +134,8 @@ function runChecks() {
 			label: "Support / help infrastructure",
 			state: hasSupportRoutes ? "done" : "planned",
 			detail: hasSupportRoutes
-				? "vendor/support posts through lib/support/slack.ts to a Slack incoming webhook"
-				: "no support or help routes in src/app",
+				? "the submit_support_request tool posts through lib/support/slack.ts to a Slack incoming webhook"
+				: "no support mechanism — lib/support/slack.ts or the submit_support_request tool is missing",
 		},
 	];
 }
