@@ -201,6 +201,42 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 }
 
 /**
+ * Resolve a Letterstory organization to the vendor it is.
+ *
+ * A Letterprove vendor IS a Letterstory org, 1:1 (Steve, 2026-08-25) — related
+ * records in two databases rather than one record in one. This is the only
+ * function that crosses that line, and it crosses it by id alone: no join, no
+ * knowledge of Letterstory's schema, nothing that would break when it changes.
+ *
+ * Returns undefined for an org that has no vendor yet. That is a real state
+ * rather than an error: linking is deliberate, there is no auto-provisioning,
+ * so a caller finding nothing should offer to create one rather than fail.
+ *
+ * The uniqueness that makes "the vendor" meaningful is a partial unique index,
+ * not something enforced here. Two rows sharing an org would make this return
+ * an arbitrary one of them, so the guarantee belongs in the schema where a
+ * concurrent write can't slip past it.
+ */
+export async function findVendorByOrg(orgId: string): Promise<VendorFixture | undefined> {
+	const db = dbClient();
+	if (!db) return undefined;
+
+	const { data: row } = await db
+		.from("vendors")
+		.select("id, slug, name, domain, category, key, domain_verified_at")
+		.eq("letterstory_org_id", orgId)
+		.maybeSingle();
+	if (!row) return undefined;
+
+	const { data: customerRows } = await db
+		.from("vendor_customers")
+		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
+		.eq("vendor_id", row.id);
+
+	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
+}
+
+/**
  * Keyed lookup for the live collector (`POST /v1/observe`, `GET /v1/config`)
  * — `key` is not a secret (it ships in every page's HTML) but it is unique,
  * so this stays a direct equality lookup rather than a table scan.
