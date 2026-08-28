@@ -60,3 +60,40 @@ describe("the staff tools are reachable again", () => {
 		expect(outcome).toEqual({ kind: "denied", capability: "staff:read" });
 	});
 });
+
+/**
+ * The two tools that had to exist before the staff views could be ported at
+ * all: their pages used to read Letterprove's database directly, which stopped
+ * being possible when the UI moved to a service that cannot reach this
+ * database.
+ *
+ * Both distinguish "the read failed" from "there is nothing to report". A
+ * fleet-health view that renders an empty list when telemetry is unreachable
+ * tells staff the fleet is fine at the exact moment it may not be.
+ */
+describe("the ported staff reads", () => {
+	it("collection_health reports 503 when telemetry can't be read, not an empty fleet", async () => {
+		vi.resetModules();
+		vi.doMock("@/lib/staff/health", () => ({ collectionHealth: vi.fn(async () => null) }));
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("collection_health", {}, principal(STAFF, ["staff:read"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 503, body: { error: "telemetry_unavailable" } },
+		});
+		vi.doUnmock("@/lib/staff/health");
+	});
+
+	it("vendor_roster is staff-only — a vendor principal must not enumerate other vendors' people", async () => {
+		vi.resetModules();
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("vendor_roster", {}, principal("not-staff", ["vendor:read"]));
+
+		// It returns member email addresses, which nothing else in the tool
+		// surface does. That is the whole reason it is staff-gated.
+		expect(outcome).toEqual({ kind: "denied", capability: "staff:read" });
+	});
+});

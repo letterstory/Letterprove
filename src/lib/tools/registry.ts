@@ -22,6 +22,8 @@ import {
 } from "@/lib/vendors/customers";
 import { getVendorStatus } from "@/lib/vendors/status";
 import { promoteDomain, type PromoteFailure } from "@/lib/staff/promote";
+import { collectionHealth } from "@/lib/staff/health";
+import { vendorRoster } from "@/lib/staff/vendors";
 import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
@@ -418,6 +420,50 @@ export const TOOLS: ToolDef[] = [
 				return { ok: false, status: PROMOTE_STATUS[result.reason], body: { error: result.reason, detail: result.detail } };
 			}
 			return { ok: true, status: 201, body: { customer: result } };
+		},
+	},
+	{
+		name: "collection_health",
+		description:
+			"Fleet-wide collection health: per vendor, whether the tracking script is reporting, silent, installed-but-quiet, or was never installed, with event counts over 24h/7d/30d. Args: none.",
+		capability: "staff:read",
+		/*
+		 * The staff index used to read collectionHealth() straight off
+		 * Letterprove's database, which was fine while the page lived in this
+		 * app. It doesn't anymore (#124), and Letterstory cannot reach this
+		 * database — so the view had no way to exist until this tool did.
+		 *
+		 * A null return means the telemetry read FAILED, which is not the same
+		 * as a healthy fleet with nothing to report. Surfaced as 503 rather
+		 * than an empty list, for the reason list_observed already gives: a
+		 * zero that actually means "we couldn't look" sends staff chasing an
+		 * outage that isn't there, or worse, ignoring one that is.
+		 */
+		handler: async () => {
+			const health = await collectionHealth();
+			if (!health) return { ok: false, status: 503, body: { error: "telemetry_unavailable" } };
+			return { ok: true, body: { vendors: health } };
+		},
+	},
+	{
+		name: "vendor_roster",
+		description:
+			"Every vendor with the humans behind it, their customer counts, and what their aggregate attestation currently claims. Args: none.",
+		capability: "staff:read",
+		/*
+		 * Same story as collection_health: the /staff/vendors page read
+		 * vendorRoster() directly and lost its home in #124.
+		 *
+		 * Note this returns member EMAIL ADDRESSES, which nothing else in the
+		 * tool surface does. That is deliberate and is exactly why it is
+		 * staff:read and not vendor:read — it is the support view for "who do
+		 * I talk to about this vendor", and a vendor must never be able to
+		 * enumerate the humans behind another one.
+		 */
+		handler: async () => {
+			const roster = await vendorRoster();
+			if (!roster) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: { vendors: roster } };
 		},
 	},
 	{
