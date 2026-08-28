@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateOAuthRequest } from "@/lib/oauth-auth";
+import { authenticateToolRequest } from "@/lib/oauth-auth";
 import { dispatchTool } from "@/lib/tools/registry";
 import { originFromHeaders } from "@/lib/vendors/install";
 
@@ -11,11 +11,15 @@ import { originFromHeaders } from "@/lib/vendors/install";
  * tool's own job (src/lib/tools/registry.ts), not this route's.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ name: string }> }) {
-	const auth = await authenticateOAuthRequest(request);
+	// Body is parsed before auth because the Letterstory-service door reads the
+	// org it acts for out of it (see authenticateToolRequest); the OAuth door
+	// ignores the arg and is unaffected.
+	const args = await request.json().catch(() => ({}));
+
+	const auth = await authenticateToolRequest(request, args);
 	if (!auth.success) return auth.response;
 
 	const { name } = await params;
-	const args = await request.json().catch(() => ({}));
 
 	const outcome = await dispatchTool(name, args, auth.principal, { origin: originFromHeaders(request.headers) });
 

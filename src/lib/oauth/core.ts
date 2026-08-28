@@ -501,6 +501,14 @@ export type OAuthPrincipal = {
 	vendorId: string | null;
 	userId: string;
 	capabilities: Capability[];
+	/**
+	 * The Letterstory org this principal is acting for, when it authenticated
+	 * via the Letterstory service secret rather than an OAuth bearer token (see
+	 * authenticateToolRequest). Undefined for CLI/OAuth callers. Present even
+	 * when `vendorId` is null — that is exactly the pre-vendor state the
+	 * provisioning tools (create_vendor, find_vendor_by_org) act on.
+	 */
+	orgId?: string | null;
 };
 
 export async function resolveAccessToken(token: string): Promise<OAuthPrincipal | null> {

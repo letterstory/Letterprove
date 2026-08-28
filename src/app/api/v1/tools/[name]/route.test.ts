@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-vi.mock("@/lib/oauth-auth", () => ({ authenticateOAuthRequest: vi.fn() }));
+vi.mock("@/lib/oauth-auth", () => ({ authenticateToolRequest: vi.fn() }));
 vi.mock("@/lib/tools/registry", () => ({ dispatchTool: vi.fn() }));
 
 const PRINCIPAL = { tokenId: "t1", vendorId: "v1", userId: "u1", capabilities: ["vendor:read", "vendor:write"] };
@@ -19,16 +19,16 @@ function params(name: string) {
 
 beforeEach(async () => {
 	vi.clearAllMocks();
-	const { authenticateOAuthRequest } = await import("@/lib/oauth-auth");
-	vi.mocked(authenticateOAuthRequest).mockResolvedValue({ success: true, principal: PRINCIPAL as never });
+	const { authenticateToolRequest } = await import("@/lib/oauth-auth");
+	vi.mocked(authenticateToolRequest).mockResolvedValue({ success: true, principal: PRINCIPAL as never });
 });
 
 describe("POST /api/v1/tools/{name}", () => {
 	it("passes through the 401 an invalid bearer token produces, without reaching the dispatcher", async () => {
-		const { authenticateOAuthRequest } = await import("@/lib/oauth-auth");
+		const { authenticateToolRequest } = await import("@/lib/oauth-auth");
 		const { dispatchTool } = await import("@/lib/tools/registry");
 		const unauthorized = new Response(null, { status: 401 });
-		vi.mocked(authenticateOAuthRequest).mockResolvedValue({ success: false, response: unauthorized as never });
+		vi.mocked(authenticateToolRequest).mockResolvedValue({ success: false, response: unauthorized as never });
 
 		const res = await POST(req({}), params("get_status"));
 
