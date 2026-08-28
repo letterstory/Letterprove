@@ -30,6 +30,12 @@ vi.mock("@/lib/db/client", () => {
 const promoteDomain = vi.fn();
 vi.mock("@/lib/staff/promote", () => ({ promoteDomain: (s: string, d: string) => promoteDomain(s, d) }));
 
+const vendorProof = vi.fn();
+vi.mock("@/lib/attest/proofs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/attest/proofs")>();
+	return { ...actual, vendorProof: (slug: string) => vendorProof(slug) };
+});
+
 const ORG = "11111111-1111-1111-1111-111111111111";
 
 function service(over: Partial<OAuthPrincipal> = {}): OAuthPrincipal {
@@ -44,6 +50,7 @@ beforeEach(() => {
 	findVendorByOrg.mockReset();
 	maybeSingle.mockReset().mockResolvedValue({ data: { slug: "acme" } });
 	promoteDomain.mockReset();
+	vendorProof.mockReset();
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -96,6 +103,28 @@ describe("create_vendor", () => {
 		const o = await dispatchTool("create_vendor", { name: "Acme", domain: "acme.com" }, service({ orgId: undefined }));
 		expect(o).toMatchObject({ kind: "result", result: { ok: false, status: 403 } });
 		expect(provisionVendorForOrg).not.toHaveBeenCalled();
+	});
+});
+
+describe("get_proof_summary", () => {
+	it("returns the vendor rollup with tier_name resolved and slug for URL building", async () => {
+		vendorProof.mockResolvedValue({
+			vendor: { slug: "acme", name: "Acme", domain: "acme.com", category: "c" },
+			customers: [],
+			summary: { attested_customers: 3, attested_unnamed: 1, unverified_customers: 0, features_proven: [], sessions_30d: 106, last_attested: "2026-08-24T18:05:45.953Z", tier: 2, companies_observed: 52 },
+		});
+		const o = await dispatchTool("get_proof_summary", {}, service({ vendorId: "v1" }));
+		expect(vendorProof).toHaveBeenCalledWith("acme");
+		expect(o).toMatchObject({
+			kind: "result",
+			result: { ok: true, body: { slug: "acme", tier: 2, tier_name: "infrastructure-bound", attested_customers: 3, companies_observed: 52, sessions_30d: 106 } },
+		});
+	});
+
+	it("404s a vendor with no proof", async () => {
+		vendorProof.mockResolvedValue(null);
+		const o = await dispatchTool("get_proof_summary", {}, service({ vendorId: "v1" }));
+		expect(o).toMatchObject({ kind: "result", result: { ok: false, status: 404 } });
 	});
 });
 

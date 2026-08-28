@@ -12,7 +12,7 @@ import { GENESIS_HASH, snapshotHash } from "./verify";
 import { allVendors, consentOf, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
 import { loadPersistedChain } from "@/rollup/history";
 import { tierReport } from "@/lib/tiers/report";
-import type { SignedAttestation } from "./types";
+import type { SignedAttestation, Tier } from "./types";
 
 // Re-exported for proofs.test.ts, which exercises the tier-gating rule
 // directly — `earned` itself now lives in body.ts since it's shared with
@@ -47,6 +47,17 @@ export interface VendorProof {
 		sessions_30d: number;
 		/** The most recent `published_at` across all customers. */
 		last_attested: string;
+		/**
+		 * Headline tier: the STRONGEST tier this vendor has earned for any
+		 * attested customer (0 when none are attested). "Max attested" is a
+		 * deliberate choice — it answers "how far has this vendor proven it can
+		 * go", which is what a proof badge claims; it is NOT an average or a
+		 * per-customer floor. If the product wants a different headline rule,
+		 * this is the one line to change.
+		 */
+		tier: Tier;
+		/** Domains observed serving in the window (tierReport's `observed`). */
+		companies_observed: number;
 	};
 }
 
@@ -183,6 +194,8 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 			features_proven: [...features].sort(),
 			sessions_30d: attested.reduce((n, c) => n + c.proof.current.sessions_30d, 0),
 			last_attested: all.map((c) => c.proof.current.published_at).sort().at(-1) ?? "",
+			tier: attested.length ? (Math.max(...attested.map((c) => c.proof.current.tier)) as Tier) : 0,
+			companies_observed: tiers?.observed ?? 0,
 		},
 	};
 }

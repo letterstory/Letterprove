@@ -23,7 +23,8 @@ import {
 import { getVendorStatus } from "@/lib/vendors/status";
 import { promoteDomain, type PromoteFailure } from "@/lib/staff/promote";
 import { tierReport } from "@/lib/tiers/report";
-import { vendorSlugs, vendorSnapshots } from "@/lib/attest/proofs";
+import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
+import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installSnippet } from "@/lib/vendors/install";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
@@ -149,6 +150,41 @@ export const TOOLS: ToolDef[] = [
 			const result = await provisionVendorForOrg(orgId, { name, domain });
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
 			return { ok: true, status: 201, body: { linked: true, slug: result.slug, domain: result.domain } };
+		},
+	},
+	{
+		// The vendor-level proof rollup for the summary tab: headline tier +
+		// counts. `list_snapshots` is per-customer and can't answer this. Returns
+		// the slug so the caller builds the public /proofs, /attest URLs against
+		// Letterprove's own origin (they must not point at the caller's host).
+		name: "get_proof_summary",
+		description: "Vendor-level proof rollup for the caller's vendor: headline tier, counts, and slug for public URLs.",
+		capability: "vendor:read",
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle<{ slug: string }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const proof = await vendorProof(vendor.slug);
+			if (!proof) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const { summary } = proof;
+			return {
+				ok: true,
+				body: {
+					slug: vendor.slug,
+					tier: summary.tier,
+					tier_name: TIER_LADDER[summary.tier].name,
+					attested_customers: summary.attested_customers,
+					companies_observed: summary.companies_observed,
+					sessions_30d: summary.sessions_30d,
+					last_attested: summary.last_attested || null,
+				},
+			};
 		},
 	},
 	{
