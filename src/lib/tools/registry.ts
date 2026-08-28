@@ -1,6 +1,7 @@
-import type { OAuthPrincipal } from "@/lib/oauth/core";
-import type { Capability } from "@/lib/oauth/scopes";
+import type { OAuthPrincipal, Capability } from "@/lib/oauth/scopes";
 import { dbClient } from "@/lib/db/client";
+import { findVendorByOrg } from "@/lib/fixtures/vendors";
+import { provisionVendorForOrg } from "@/lib/vendors/provision";
 import { domainRejectionReason, normalizeDomain } from "@/lib/vendors/domain";
 import {
 	checkDomainVerification,
@@ -22,7 +23,8 @@ import {
 import { getVendorStatus } from "@/lib/vendors/status";
 import { promoteDomain, type PromoteFailure } from "@/lib/staff/promote";
 import { tierReport } from "@/lib/tiers/report";
-import { vendorSlugs, vendorSnapshots } from "@/lib/attest/proofs";
+import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
+import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installSnippet } from "@/lib/vendors/install";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
@@ -81,6 +83,19 @@ function requireVendorId(principal: OAuthPrincipal): string | ToolResult {
 	return { ok: false, status: 500, body: { error: "vendor_scope_without_vendor" } };
 }
 
+// The org this principal acts for, present ONLY for a Letterstory-service call
+// (authenticateToolRequest). The two provisioning tools below run before a
+// vendor exists, so they key on the org, not principal.vendorId — and a
+// CLI/OAuth caller, which has no org context, is refused with 403 here.
+function requireOrgId(principal: OAuthPrincipal): string | ToolResult {
+	if (principal.orgId) return principal.orgId;
+	return {
+		ok: false,
+		status: 403,
+		body: { error: "org_context_required", detail: "This tool is only callable by Letterstory for a specific org." },
+	};
+}
+
 // Mirrors src/app/api/vendor/support/route.ts's own limit — same reasoning
 // as PROMOTE_STATUS below, a single shared constant isn't worth the coupling.
 const MAX_SUPPORT_MESSAGE_LENGTH = 4000;
@@ -99,6 +114,112 @@ const PROMOTE_STATUS: Record<PromoteFailure, number> = {
 };
 
 export const TOOLS: ToolDef[] = [
+	{
+		// Pre-vendor: asked first by Letterstory's Proofs tab to decide whether
+		// to show the surface or the setup flow. Keys on the org, not a vendor.
+		name: "find_vendor_by_org",
+		description: "Does a Letterstory org already have a Letterprove vendor? Returns { linked }.",
+		capability: "vendor:read",
+		handler: async (_args, principal) => {
+			const orgId = requireOrgId(principal);
+			if (typeof orgId !== "string") return orgId;
+
+			const vendor = await findVendorByOrg(orgId);
+			if (!vendor) return { ok: true, body: { linked: false } };
+			return { ok: true, body: { linked: true, slug: vendor.slug, domain: vendor.domain } };
+		},
+	},
+	{
+		// Pre-vendor: the setup flow's write. Creates the vendor and links it to
+		// the org 1:1. Authorized by the Letterstory service secret (the org
+		// context), NOT by a vendor:* grant — no vendor exists to grant against.
+		name: "create_vendor",
+		description: "Create the Letterprove vendor for a Letterstory org, linked 1:1. Args: name, domain. Returns { linked }.",
+		capability: "vendor:write",
+		handler: async (args, principal) => {
+			const orgId = requireOrgId(principal);
+			if (typeof orgId !== "string") return orgId;
+
+			const record = asRecord(args);
+			const name = typeof record.name === "string" ? record.name : "";
+			const domain = typeof record.domain === "string" ? record.domain : "";
+			if (!name.trim() || !domain.trim()) {
+				return { ok: false, status: 400, body: { error: "name and domain are required" } };
+			}
+
+			const result = await provisionVendorForOrg(orgId, { name, domain });
+			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
+			return { ok: true, status: 201, body: { linked: true, slug: result.slug, domain: result.domain } };
+		},
+	},
+	{
+		// The vendor-level proof rollup for the summary tab: headline tier +
+		// counts. `list_snapshots` is per-customer and can't answer this. Returns
+		// the slug so the caller builds the public /proofs, /attest URLs against
+		// Letterprove's own origin (they must not point at the caller's host).
+		name: "get_proof_summary",
+		description: "Vendor-level proof rollup for the caller's vendor: headline tier, counts, and slug for public URLs.",
+		capability: "vendor:read",
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle<{ slug: string }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const proof = await vendorProof(vendor.slug);
+			if (!proof) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const { summary } = proof;
+			return {
+				ok: true,
+				body: {
+					slug: vendor.slug,
+					tier: summary.tier,
+					tier_name: TIER_LADDER[summary.tier].name,
+					attested_customers: summary.attested_customers,
+					companies_observed: summary.companies_observed,
+					sessions_30d: summary.sessions_30d,
+					last_attested: summary.last_attested || null,
+				},
+			};
+		},
+	},
+	{
+		// The vendor-scoped twin of the staff-only `record_customer`: a vendor
+		// (via Letterstory) turns one of its OWN observed domains into a customer.
+		// Scoped to principal.vendorId, so it needs vendor:write, not the
+		// cross-vendor staff:write `record_customer` carries — the Letterstory
+		// service principal deliberately holds no staff capability.
+		name: "record_observed",
+		description:
+			"Record one of the caller's own observed companies as a customer (anonymous, tier-1 ceiling). Args: domain.",
+		capability: "vendor:write",
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const record = asRecord(args);
+			const domain = typeof record.domain === "string" ? record.domain.trim() : "";
+			if (!domain) return { ok: false, status: 400, body: { error: "domain is required" } };
+
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			// promoteDomain keys on slug (it predates this path as a staff tool);
+			// resolve the caller's own slug from their vendor id so they can never
+			// name another vendor's.
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle<{ slug: string }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "vendor_unreadable" } };
+
+			const result = await promoteDomain(vendor.slug, domain);
+			if (!result.ok) {
+				return { ok: false, status: PROMOTE_STATUS[result.reason], body: { error: result.reason, detail: result.detail } };
+			}
+			return { ok: true, status: 201, body: { customer: result } };
+		},
+	},
 	{
 		name: "list_customers",
 		description: "List every customer recorded for the caller's vendor.",
@@ -556,7 +677,13 @@ export async function dispatchTool(
 	 * fresh, on every call — membership can change after a token is minted
 	 * and tokens keep their scope until they expire.
 	 */
-	if (tool.capability.startsWith("vendor:")) {
+	//
+	// Skipped for a Letterstory-service principal (principal.orgId set): its
+	// membership was already verified in Letterstory (organization_users) before
+	// the call, and the acting user has no vendor_members row here by design —
+	// Letterprove holds no membership of its own in the unified model. Trusting
+	// the service secret + the org it named is the whole point of that model.
+	if (tool.capability.startsWith("vendor:") && principal.orgId == null) {
 		const db = dbClient();
 		// A null db means unconfigured, not unauthorized — let the handler's own
 		// dbClient() check produce its usual storage_unavailable rather than

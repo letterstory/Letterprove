@@ -1,35 +1,25 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isStaffUser } from "@/lib/staff/allowlist";
 
 /**
  * NOTE THE FILE NAME. Next 16 deprecated `middleware.ts` in favour of
  * `proxy.ts`, matching lettersprite. The export name follows the convention.
  *
- * Three unrelated concerns share this one entry point because Next only runs
- * a single proxy per project:
- *  1. Content negotiation for /proofs/{vendor} (unchanged, see below).
- *  2. The /staff login wall (own Supabase Auth, no SSO bridge — see the
- *     README's auth decision).
- *  3. The /vendor login wall — same Supabase Auth instance and session
- *     cookies as /staff (one user pool, not two), but a distinct gate: a
- *     vendor also needs a `vendor_members` row, since signing in alone only
- *     proves *a* user, not *which* vendor. A signed-in user with no
- *     membership yet is sent to /vendor/onboarding to create their org,
- *     which is itself inside the matcher but exempted from the membership
- *     check (see vendorAuthGate).
+ * Now that Letterprove holds no identity of its own — its dashboard, login, and
+ * OAuth server are retired and Letterstory is the sole identity authority — the
+ * only concern left at this entry point is content negotiation for the public
+ * proof surface:
+ *
+ *   /proofs/{vendor} serves a human page by default, but the same URL with a
+ *   `.json` suffix or an explicit JSON `Accept` (and no HTML alternative) is
+ *   rewritten to the machine endpoint at /api/proofs/{vendor}. Agents fetch
+ *   exactly what they always did.
+ *
  * Everything else — /v1/observe, /v1/config, /proofs/*, /attest/*,
  * /.well-known/*, /api/cron/* — is the product's public collection/proof API
- * and must stay reachable with no session, so unlike a typical login wall
- * this does NOT default to gating everything. With no auth env configured,
- * both walls 503 rather than falling open — an internal/account area has no
- * safe "unauthenticated but allowed" default.
+ * and stays reachable with no session; this does not gate anything.
  */
 export async function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
-
-	if (pathname.startsWith("/staff")) return staffAuthGate(request);
-	if (pathname.startsWith("/vendor")) return vendorAuthGate(request);
 
 	const match = pathname.match(/^\/proofs\/([^/]+)$/);
 	if (!match) return;
@@ -43,164 +33,6 @@ export async function proxy(request: NextRequest) {
 	}
 }
 
-async function staffAuthGate(request: NextRequest) {
-	const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-	const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-	if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-		return NextResponse.json(
-			{ error: "Staff auth is not configured on this deployment" },
-			{ status: 503 },
-		);
-	}
-
-	let response = NextResponse.next({ request });
-
-	const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-		cookies: {
-			getAll() {
-				return request.cookies.getAll();
-			},
-			setAll(cookiesToSet) {
-				cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-				response = NextResponse.next({ request });
-				cookiesToSet.forEach(({ name, value, options }) =>
-					response.cookies.set(name, value, options),
-				);
-			},
-		},
-	});
-
-	const {
-		data: { user },
-	} = await supabase.auth.getUser();
-
-	if (request.nextUrl.pathname.startsWith("/staff/login")) return response;
-
-	if (!user) {
-		const loginUrl = request.nextUrl.clone();
-		loginUrl.pathname = "/staff/login";
-		loginUrl.search = "";
-		loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
-		return NextResponse.redirect(loginUrl);
-	}
-
-	// Having a session is not being staff. Staff and vendors share one user
-	// pool, and signup is open, so without this any registered account could
-	// read every vendor's withheld customer domains. The vendor gate below has
-	// always demanded a membership row for the same reason.
-	//
-	// Sent to the login page rather than redirected onward or looped: it is
-	// exempted above, so it can state plainly that this account lacks access
-	// without bouncing a signed-in user back and forth.
-	if (!isStaffUser(user.id)) {
-		const deniedUrl = request.nextUrl.clone();
-		deniedUrl.pathname = "/staff/login";
-		deniedUrl.search = "";
-		deniedUrl.searchParams.set("denied", "1");
-		return NextResponse.redirect(deniedUrl);
-	}
-
-	return response;
-}
-
-async function vendorAuthGate(request: NextRequest) {
-	const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-	const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-	if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-		return NextResponse.json(
-			{ error: "Vendor auth is not configured on this deployment" },
-			{ status: 503 },
-		);
-	}
-
-	let response = NextResponse.next({ request });
-
-	const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-		cookies: {
-			getAll() {
-				return request.cookies.getAll();
-			},
-			setAll(cookiesToSet) {
-				cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-				response = NextResponse.next({ request });
-				cookiesToSet.forEach(({ name, value, options }) =>
-					response.cookies.set(name, value, options),
-				);
-			},
-		},
-	});
-
-	const {
-		data: { user },
-	} = await supabase.auth.getUser();
-
-	const { pathname } = request.nextUrl;
-	const onLogin = pathname.startsWith("/vendor/login");
-	const onOnboarding = pathname.startsWith("/vendor/onboarding");
-	const onReset = pathname.startsWith("/vendor/reset-password");
-
-	function redirectTo(destination: string) {
-		const url = request.nextUrl.clone();
-		url.pathname = destination;
-		url.search = "";
-		return NextResponse.redirect(url);
-	}
-
-	if (!user) {
-		// The sign-in page is the one thing a signed-out visitor may see here.
-		if (onLogin) return response;
-
-		const loginUrl = request.nextUrl.clone();
-		loginUrl.pathname = "/vendor/login";
-		loginUrl.search = "";
-		loginUrl.searchParams.set("redirect", pathname);
-		return NextResponse.redirect(loginUrl);
-	}
-
-	// Staff and vendors share one Supabase Auth pool with open self-signup, so
-	// a staff account landing here has no vendor_members row either — without
-	// this carve-out they'd fall into the same "no membership yet" branch
-	// below and get sent into vendor onboarding instead of their own dashboard.
-	if (isStaffUser(user.id)) return redirectTo("/staff");
-
-	// Showing a signed-in visitor a sign-in form is incoherent, and the layout
-	// wraps it in the full vendor shell — so they got working Dashboard /
-	// Customers / Proof tabs sitting above a form asking them to log in.
-	// Send them into the app; the rules below sort out where.
-	if (onLogin) return redirectTo("/vendor");
-
-	// A password-recovery link signs the user in (Supabase treats recovery as
-	// a real session) before they've necessarily completed onboarding, so this
-	// is exempt from the membership check either way.
-	if (onReset) return response;
-
-	// Signed in, but does this user belong to a vendor yet? A fresh signup has
-	// a session and no vendor_members row — RLS scopes this select to
-	// auth.uid() already (see the migration), so an empty result really does
-	// mean "no membership", not "blocked from seeing someone else's".
-	const { data: membership } = await supabase.from("vendor_members").select("vendor_id").limit(1).maybeSingle();
-
-	if (!membership) {
-		// Onboarding CREATES the first membership row, so it has to stay
-		// reachable by exactly the users who have none.
-		return onOnboarding ? response : redirectTo("/vendor/onboarding");
-	}
-
-	// Already has a vendor. Onboarding only ever creates a NEW one, so a member
-	// arriving here by accident used to end up with a vendor nothing could
-	// reach. The switcher fixes the reachability half; `?new=1` supplies the
-	// intent, and it is only ever set by the switcher's own "Add a vendor"
-	// link. A bare visit still bounces, so a stray click cannot silently
-	// create a second account.
-	if (onOnboarding && request.nextUrl.searchParams.get("new") !== "1") {
-		return redirectTo("/vendor");
-	}
-
-	return response;
-}
-
 /**
  * Browsers send `text/html,...,*\/*`, so a bare wildcard must NOT count as
  * asking for JSON — that would serve raw documents to people. Only an explicit
@@ -212,4 +44,4 @@ function prefersJson(accept: string | null): boolean {
 	return lower.includes("application/json") && !lower.includes("text/html");
 }
 
-export const config = { matcher: ["/proofs/:path*", "/staff/:path*", "/vendor/:path*"] };
+export const config = { matcher: ["/proofs/:path*"] };

@@ -33,7 +33,7 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing |
 | ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
 | ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
-| ✅ Support / help infrastructure | vendor/support posts through lib/support/slack.ts to a Slack incoming webhook |
+| ✅ Support / help infrastructure | the submit_support_request tool posts through lib/support/slack.ts to a Slack incoming webhook |
 <!-- STATUS:AUTO:END -->
 
 Every decision is tagged **Decided**, **Proposed**, or **Open**.

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OAuthPrincipal } from "@/lib/oauth/core";
+import type { OAuthPrincipal } from "@/lib/oauth/scopes";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/lib/vendors/customers", () => ({

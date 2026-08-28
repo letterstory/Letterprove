@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OAuthPrincipal } from "@/lib/oauth/core";
+import type { OAuthPrincipal } from "@/lib/oauth/scopes";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
