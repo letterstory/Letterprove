@@ -148,8 +148,15 @@ describe("record_observed", () => {
 		expect(promoteDomain).not.toHaveBeenCalled();
 	});
 
-	it("500s a vendor:write principal that carries no vendor (pre-vendor service call)", async () => {
+	// A service call naming an org that has no vendor is the ordinary pre-setup
+	// state, not a fault: 404 vendor_not_linked, which Letterstory reads as
+	// "offer to set Proofs up". It used to answer 500 here, and that is what
+	// made an unlinked workspace look like a broken Letterprove.
+	it("404s a vendor:write service principal whose org has no vendor yet", async () => {
 		const o = await dispatchTool("record_observed", { domain: "des-ai.com" }, service({ vendorId: null }));
-		expect(o).toMatchObject({ kind: "result", result: { ok: false, status: 500 } });
+		expect(o).toMatchObject({
+			kind: "result",
+			result: { ok: false, status: 404, body: { error: "vendor_not_linked" } },
+		});
 	});
 });

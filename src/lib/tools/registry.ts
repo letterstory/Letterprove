@@ -75,13 +75,32 @@ function asRecord(args: unknown): Record<string, unknown> {
 	return args && typeof args === "object" ? (args as Record<string, unknown>) : {};
 }
 
-// vendorId is only null for a staff-only grant (see OAuthPrincipal), which
-// never carries a vendor:* capability — dispatchTool's capability gate means a
-// vendor:* tool handler is unreachable with a null vendorId in practice. This
-// turns that invariant into a typed, checked value instead of a `!` assertion,
-// so a future bug in the gate fails as a clean 500 rather than a bad query.
+// A null vendorId has two very different meanings, and collapsing them cost a
+// demo: every vendor-scoped tool answered 500 for the ordinary state of an org
+// that has never linked a vendor.
+//
+//   - orgId set (a Letterstory-service call): the org simply has no vendor yet.
+//     That is the documented pre-vendor state find_vendor_by_org exists to
+//     report — `{ linked: false }` — and Letterstory reads it as "offer to set
+//     Proofs up". A 404 says the same thing to every OTHER tool, so a caller
+//     that skips the find and goes straight for the data gets a clean, actionable
+//     answer instead of an error that looks like Letterprove is broken.
+//   - orgId null (a staff-only grant, see OAuthPrincipal): genuinely
+//     unreachable — such a principal never carries a vendor:* capability, so
+//     dispatchTool's gate means no vendor:* handler runs. Keep the 500: it is
+//     the invariant check, and a bug in the gate should not read as "not linked".
 function requireVendorId(principal: OAuthPrincipal): string | ToolResult {
 	if (principal.vendorId) return principal.vendorId;
+	if (principal.orgId) {
+		return {
+			ok: false,
+			status: 404,
+			body: {
+				error: "vendor_not_linked",
+				detail: "This organization has no Letterprove vendor yet. Create one with create_vendor.",
+			},
+		};
+	}
 	return { ok: false, status: 500, body: { error: "vendor_scope_without_vendor" } };
 }
 

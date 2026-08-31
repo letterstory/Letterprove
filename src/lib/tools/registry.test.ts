@@ -320,6 +320,29 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	// The same null vendorId means something entirely ordinary when an org is
+	// named: this workspace has never linked a vendor. Answering 500 there made
+	// the Proofs tab read as "Letterprove is broken" for every unlinked org —
+	// which, until a backfill lands, is every org there is.
+	it("answers 404 vendor_not_linked, not 500, for a Letterstory org with no vendor", async () => {
+		const { dispatchTool } = await import("./registry");
+		const outcome = await dispatchTool("list_customers", {}, {
+			...principal(["vendor:read"], null),
+			orgId: "org-with-no-vendor",
+		});
+		expect(outcome).toEqual({
+			kind: "result",
+			result: {
+				ok: false,
+				status: 404,
+				body: {
+					error: "vendor_not_linked",
+					detail: "This organization has no Letterprove vendor yet. Create one with create_vendor.",
+				},
+			},
+		});
+	});
+
 	it("records a customer from an observed domain, ignoring principal.vendorId", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { promoteDomain } = await import("@/lib/staff/promote");
