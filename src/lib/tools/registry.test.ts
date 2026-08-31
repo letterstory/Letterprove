@@ -24,6 +24,35 @@ vi.mock("@/lib/vendors/verification", () => ({
 vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
 vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
 
+/**
+ * A complete customer row, as listCustomers/createCustomer really return one.
+ *
+ * These mocks used to resolve to `{ id: "c1" }`. Harmless while nothing
+ * inspected the payload — but dispatchTool now validates every non-production
+ * success against the tool's declared outputSchema, so a stub that no handler
+ * could ever produce fails, correctly. A test asserting on an impossible shape
+ * was testing the mock, not the code.
+ */
+function customerRow(overrides: Record<string, unknown> = {}) {
+	return {
+		id: "c1",
+		slug: "acme",
+		name: "Acme Inc",
+		domain: "acme.com",
+		since: "2024-01",
+		tier: 1,
+		verified: false,
+		features: [] as string[],
+		consent: "anonymous" as const,
+		countersigned_at: null,
+		consent_sent_to: null,
+		countersigned_by: null,
+		consent_declined_at: null,
+		consent_decline_count: 0,
+		...overrides,
+	};
+}
+
 function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: string | null = "v1"): OAuthPrincipal {
 	return { tokenId: "t1", vendorId, userId: "u1", capabilities };
 }
@@ -122,18 +151,18 @@ describe("dispatchTool", () => {
 	it("routes list_customers to the shared service, scoped by the token's vendor", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { listCustomers } = await import("@/lib/vendors/customers");
-		vi.mocked(listCustomers).mockResolvedValue({ ok: true, data: [{ id: "c1" }] as never });
+		vi.mocked(listCustomers).mockResolvedValue({ ok: true, data: [customerRow()] as never });
 
 		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
 
 		expect(listCustomers).toHaveBeenCalledWith(FAKE_DB, "v1");
-		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { customers: [{ id: "c1" }] } } });
+		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { customers: [customerRow()] } } });
 	});
 
 	it("creates with a 201 and passes the raw args through as the tool's input", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { createCustomer } = await import("@/lib/vendors/customers");
-		vi.mocked(createCustomer).mockResolvedValue({ ok: true, data: { id: "c1", slug: "acme" } as never });
+		vi.mocked(createCustomer).mockResolvedValue({ ok: true, data: customerRow() as never });
 
 		const args = { slug: "acme", name: "Acme", domain: "acme.com", since: "2024-01" };
 		const outcome = await dispatchTool("create_customer", args, principal(["vendor:write"]));
@@ -141,7 +170,7 @@ describe("dispatchTool", () => {
 		expect(createCustomer).toHaveBeenCalledWith(FAKE_DB, "v1", args);
 		expect(outcome).toEqual({
 			kind: "result",
-			result: { ok: true, status: 201, body: { customer: { id: "c1", slug: "acme" } } },
+			result: { ok: true, status: 201, body: { customer: customerRow() } },
 		});
 	});
 
