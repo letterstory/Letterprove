@@ -21,13 +21,25 @@
 -- ---------------------------------------------------------------------------
 -- 1. Retire the OAuth 2.1 server. CASCADE also removes their RLS policies
 --    (including the three that join through vendor_members) and any FKs.
+--
+--    NOT oauth_rate_limits. Despite the name and the module path it lives
+--    under, it is not part of the OAuth server: oauth_rate_touch() is a
+--    generic (bucket, window, limit) counter, and POST /v1/observe -- the
+--    live collector, a public unauthenticated endpoint -- calls it on every
+--    request, keyed by IP and by vendor key (src/lib/oauth/ratelimit.ts,
+--    which the retirement kept for exactly this reason).
+--
+--    Dropping it would not error the endpoint: oauthRateLimit fails OPEN on
+--    RPC error, so the collector would keep returning 200 while silently
+--    accepting unbounded traffic. A rate limiter that is gone and a rate
+--    limiter that is working look identical from outside, which is what
+--    makes this worth stating rather than leaving to the reader.
 -- ---------------------------------------------------------------------------
 drop table if exists oauth_access_tokens cascade;
 drop table if exists oauth_refresh_tokens cascade;
 drop table if exists oauth_authorization_codes cascade;
 drop table if exists oauth_pending_requests cascade;
 drop table if exists oauth_authorizations cascade;
-drop table if exists oauth_rate_limits cascade;
 drop table if exists oauth_clients cascade;
 
 -- ---------------------------------------------------------------------------

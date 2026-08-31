@@ -50,6 +50,14 @@ async function vendorSlugs(): Promise<string[]> {
 	return rows.map((r) => r.slug);
 }
 
+async function tableExists(name: string): Promise<boolean> {
+	const { rows } = await db.query<{ n: number }>(
+		"select count(*)::int as n from information_schema.tables where table_schema = 'public' and table_name = $1",
+		[name],
+	);
+	return rows[0].n === 1;
+}
+
 async function customerCount(vendorSlug: string): Promise<number> {
 	const { rows } = await db.query<{ n: number }>(
 		"select count(c.*)::int as n from vendor_customers c join vendors v on v.id = c.vendor_id where v.slug = $1",
@@ -126,5 +134,81 @@ describe("unify-auth step 2: dropping org-less vendors", () => {
 				 values ('newcomer', 'Newcomer', 'newcomer.com', 'test', 'lp_live_newcomer')`,
 			),
 		).rejects.toThrow();
+	});
+});
+
+/**
+ * `oauth_rate_limits` is the one table in the oauth_* family that must SURVIVE
+ * step 1, and the only reason to write a test for a table nobody is dropping is
+ * that it was in the drop list — origin/main's copy of this migration dropped it
+ * on the strength of the shared prefix.
+ *
+ * Nothing would have caught that. The collector's own tests mock
+ * `@/lib/oauth/ratelimit` wholesale, so they pass with the table gone; and
+ * `oauthRateLimit` fails OPEN on RPC error, so POST /v1/observe would have gone
+ * on answering 200 with its rate limiting silently removed. There is no failing
+ * signal anywhere between the migration and an unbounded-traffic incident —
+ * which is exactly the shape of thing that belongs in a test rather than a
+ * comment.
+ */
+describe("unify-auth step 2: what step 1 must not take with it", () => {
+	it("keeps oauth_rate_limits, which backs the live collector's limiter", async () => {
+		await link("vantage");
+		await link("lettertrace");
+
+		await applyProposed();
+
+		expect(await tableExists("oauth_rate_limits")).toBe(true);
+	});
+
+	/*
+	 * The table alone is not the contract — src/lib/oauth/ratelimit.ts calls the
+	 * RPC, not the table, and `drop table ... cascade` would leave a
+	 * security-definer function pointing at nothing. So exercise the actual call
+	 * the collector makes, through the same three arguments, and require it to
+	 * both answer and still count.
+	 */
+	it("leaves oauth_rate_touch callable, still counting against its window", async () => {
+		await link("vantage");
+		await link("lettertrace");
+
+		await applyProposed();
+
+		const first = await db.query<{ ok: boolean }>(
+			"select oauth_rate_touch($1, $2, $3) as ok",
+			["observe:ip:203.0.113.9", 60, 2],
+		);
+		expect(first.rows[0].ok).toBe(true);
+
+		await db.query("select oauth_rate_touch($1, $2, $3)", ["observe:ip:203.0.113.9", 60, 2]);
+		const third = await db.query<{ ok: boolean }>(
+			"select oauth_rate_touch($1, $2, $3) as ok",
+			["observe:ip:203.0.113.9", 60, 2],
+		);
+		expect(third.rows[0].ok).toBe(false);
+	});
+
+	/*
+	 * The counterpart assertion: the six tables that ARE the OAuth server do go.
+	 * Without this, deleting a line from the drop list would look identical to
+	 * deleting the right one.
+	 */
+	it("still retires the six tables that are the OAuth server", async () => {
+		await link("vantage");
+		await link("lettertrace");
+
+		await applyProposed();
+
+		for (const t of [
+			"oauth_access_tokens",
+			"oauth_refresh_tokens",
+			"oauth_authorization_codes",
+			"oauth_pending_requests",
+			"oauth_authorizations",
+			"oauth_clients",
+			"vendor_members",
+		]) {
+			expect(await tableExists(t), `${t} should be dropped`).toBe(false);
+		}
 	});
 });
