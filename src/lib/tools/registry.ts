@@ -525,7 +525,20 @@ export const TOOLS: ToolDef[] = [
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			const { data: vendor } = await db.from("vendors").select("key").eq("id", vendorId).maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
-			return { ok: true, body: { snippet: installSnippet(context.origin, vendor.key), origin: context.origin } };
+			// publishable_key is returned alongside the snippet rather than left
+			// for the caller to recover. Letterstory was regex-ing it back out of
+			// the data-key attribute of the very HTML we build here — parsing our
+			// own markup to retrieve a value we had in hand. Not a secret: it
+			// ships in the page (see install.ts), so returning it discloses
+			// nothing the snippet did not already.
+			return {
+				ok: true,
+				body: {
+					snippet: installSnippet(context.origin, vendor.key),
+					origin: context.origin,
+					publishable_key: vendor.key,
+				},
+			};
 		},
 	},
 	{
@@ -576,6 +589,11 @@ export const TOOLS: ToolDef[] = [
 				return {
 					ok: true,
 					body: {
+						// The domain this answer is ABOUT. Absent until now, which
+						// made the response un-renderable on its own: Letterstory's
+						// domain card had nothing to name, and showed a verified
+						// state with an empty subject next to it.
+						domain: vendor.domain,
 						verified: Boolean(vendor.domain_verified_at),
 						checked: false,
 						message,
@@ -588,7 +606,10 @@ export const TOOLS: ToolDef[] = [
 			const verifiedAt = new Date().toISOString();
 			const { error } = await db.from("vendors").update({ domain_verified_at: verifiedAt }).eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
-			return { ok: true, body: { verified: true, checked: true, message, verified_at: verifiedAt } };
+			return {
+				ok: true,
+				body: { domain: vendor.domain, verified: true, checked: true, message, verified_at: verifiedAt },
+			};
 		},
 	},
 	{

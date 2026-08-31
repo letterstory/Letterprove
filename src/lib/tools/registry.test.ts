@@ -15,6 +15,12 @@ vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
 vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
 vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn(), vendorSnapshots: vi.fn() }));
 vi.mock("@/lib/vendors/keys", () => ({ generateKey: vi.fn() }));
+vi.mock("@/lib/vendors/verification", () => ({
+	checkDomainVerification: vi.fn(),
+	expectedRecord: vi.fn(() => "letterprove-site-verification=tok"),
+	verificationHosts: vi.fn((d: string) => [`_letterprove.${d}`, d]),
+	verificationMessage: vi.fn(() => "checked"),
+}));
 vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
 vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
 
@@ -41,6 +47,7 @@ let vendorRow: {
 	domain?: string;
 	category?: string;
 	domain_verified_at?: string | null;
+	domain_verification_token?: string | null;
 } | null = {
 	key: "lp_live_acme_old",
 	slug: "acme",
@@ -575,7 +582,14 @@ describe("dispatchTool", () => {
 
 		expect(outcome).toEqual({
 			kind: "result",
-			result: { ok: true, body: { snippet: installSnippet(origin, "lp_live_acme_9f2c"), origin } },
+			result: {
+				ok: true,
+				body: {
+					snippet: installSnippet(origin, "lp_live_acme_9f2c"),
+					origin,
+					publishable_key: "lp_live_acme_9f2c",
+				},
+			},
 		});
 	});
 
@@ -932,5 +946,56 @@ describe("vendor tools require current membership, not just the scope", () => {
 		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
 
 		expect(outcome.kind).toBe("result");
+	});
+});
+
+/**
+ * Two responses that made the caller do work the handler could have done.
+ *
+ * Both were flagged in Letterstory's adapter rather than here, which is the
+ * tell: a comment on the consuming side apologising for a shape is a defect on
+ * the producing side. One forced the consumer to regex a value out of HTML we
+ * generate; the other returned a verdict about a domain without saying which
+ * domain, so the UI rendered a verified badge with an empty subject beside it.
+ */
+describe("responses carry what their caller needs", () => {
+	it("get_install_snippet returns the publishable key, not just the tag containing it", async () => {
+		const { dispatchTool } = await import("./registry");
+		vendorRow = { key: "lp_live_acme_new" };
+
+		const outcome = await dispatchTool("get_install_snippet", {}, principal(["vendor:read"]), {
+			origin: "https://app.letterprove.com",
+		});
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || !outcome.result.ok) throw new Error("expected success");
+		const body = outcome.result.body as Record<string, unknown>;
+
+		// Letterstory was doing /data-key="([^"]*)"/ against the snippet to get
+		// this back — parsing our own markup for a value we had in hand.
+		expect(body.publishable_key).toBe("lp_live_acme_new");
+		expect(body.snippet).toContain("lp_live_acme_new");
+	});
+
+	it("verify_domain says which domain it checked, on both branches", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { checkDomainVerification } = await import("@/lib/vendors/verification");
+
+		// Verified branch.
+		vendorRow = { domain: "acme.com", domain_verification_token: "tok", domain_verified_at: null };
+		vi.mocked(checkDomainVerification).mockResolvedValue({ verified: true } as never);
+		const pass = await dispatchTool("verify_domain", {}, principal(["vendor:write"]));
+		expect(pass.kind === "result" && pass.result.ok && (pass.result.body as { domain: string }).domain).toBe(
+			"acme.com",
+		);
+
+		// Unverified branch — the one the setup UI renders, where a missing
+		// domain left the card with nothing to name.
+		vendorRow = { domain: "acme.com", domain_verification_token: "tok", domain_verified_at: null };
+		vi.mocked(checkDomainVerification).mockResolvedValue({ verified: false } as never);
+		const fail = await dispatchTool("verify_domain", {}, principal(["vendor:write"]));
+		expect(fail.kind === "result" && fail.result.ok && (fail.result.body as { domain: string }).domain).toBe(
+			"acme.com",
+		);
 	});
 });
