@@ -58,10 +58,42 @@ drop table if exists vendor_members cascade;
 -- ---------------------------------------------------------------------------
 -- 4. Tighten the org link to 1:1-required. Per the 20260825060000 migration's
 --    own note: "the day standalone Letterprove signup is removed, make this NOT
---    NULL and DELETE the org-less rows rather than backfilling." That day is
---    now. Org-less vendors are the seed fixtures (vantage, lettertrace) and any
---    left by the retired /vendor/onboarding path — none are production data.
+--    NULL and DELETE the org-less rows rather than backfilling."
+--
+--    ⚠️ The earlier version of this step was an unqualified
+--    `delete from vendors where letterstory_org_id is null`, justified by
+--    "org-less vendors are the seed fixtures (vantage, lettertrace) … none are
+--    production data". That was false when it was written: NOTHING has ever
+--    backfilled letterstory_org_id, so on 2026-08-31 EVERY vendor row in
+--    production was org-less — including `lettertrace`, which carries nine real
+--    vendor_customers rows. The unqualified delete would have cascaded them away.
+--
+--    So the delete is now narrowed to rows that carry nothing, and an explicit
+--    guard aborts the migration if any org-less vendor still has dependent data.
+--    Linking is a deliberate act (create_vendor, or a reviewed backfill); a
+--    migration must not decide on its own that a vendor with customers is junk.
+--    If this raises: link the vendor to its org first, then re-run.
 -- ---------------------------------------------------------------------------
+do $$
+declare stranded text;
+begin
+	select string_agg(v.slug, ', ' order by v.slug) into stranded
+	from vendors v
+	where v.letterstory_org_id is null
+	  and (
+		exists (select 1 from vendor_customers c where c.vendor_id = v.id)
+		or exists (select 1 from vendor_stripe_credentials s where s.vendor_id = v.id)
+		or exists (select 1 from vendor_payment_evidence e where e.vendor_id = v.id)
+		or exists (select 1 from vendor_payment_unmatched u where u.vendor_id = v.id)
+	  );
+
+	if stranded is not null then
+		raise exception
+			'Refusing to drop org-less vendors that still carry data: %. Link them to their Letterstory org (vendors.letterstory_org_id) before running this migration.',
+			stranded;
+	end if;
+end $$;
+
 delete from vendors where letterstory_org_id is null;
 
 alter table vendors
