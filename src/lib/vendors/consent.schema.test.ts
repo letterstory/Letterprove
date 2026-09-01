@@ -133,7 +133,7 @@ async function seedVendorAndCustomer(overrides: {
 	const vendorSlug = `vendor-${vendorId.slice(0, 8)}`;
 	const customerSlug = `customer-${customerId.slice(0, 8)}`;
 
-	await db.query("insert into vendors (id, slug, name, domain, category, key) values ($1, $2, $3, $4, $5, $6)", [
+	await db.query("insert into vendors (id, slug, name, domain, category, key, letterstory_org_id) values ($1, $2, $3, $4, $5, $6, gen_random_uuid())", [
 		vendorId,
 		vendorSlug,
 		"Regression Vendor",

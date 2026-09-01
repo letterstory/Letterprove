@@ -190,7 +190,7 @@ beforeAll(async () => {
 	}
 
 	await pg.query(
-		"insert into vendors (id, slug, name, domain, category, key) values ($1, $2, 'Tier3 Probe', 'tier3-probe.com', 'test', $3)",
+		"insert into vendors (id, slug, name, domain, category, key, letterstory_org_id) values ($1, $2, 'Tier3 Probe', 'tier3-probe.com', 'test', $3, gen_random_uuid())",
 		[VENDOR_ID, VENDOR_SLUG, `lp_live_${VENDOR_SLUG}`],
 	);
 	// The join sync.ts insists on: payment is only evidence about a company we

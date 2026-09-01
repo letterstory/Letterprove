@@ -9,14 +9,21 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 /**
  * registry.test.ts exercises dispatchTool's membership/capability gate
  * against an in-memory fake `.from().eq().eq().maybeSingle()` chain — it
- * proves the code issues the right query, not that the query matches
- * `vendor_members`'s real schema (column names, uuid typing, the
- * (vendor_id, user_id) primary key it filters on). This file runs the same
- * `dispatchTool`, unmodified, against a real (embedded, WASM) Postgres with
- * the actual migrations applied — same technique as
+ * proves the code issues the right query, not what that query resolves to
+ * against real Postgres. This file runs the same `dispatchTool`, unmodified,
+ * against a real (embedded, WASM) Postgres with the actual migrations
+ * applied — same technique as
  * src/app/api/vendor/onboarding/route.schema.test.ts — so a schema drift
- * (a renamed column, a type mismatch) fails here instead of at the first
- * live bearer-token call.
+ * fails here instead of at the first live bearer-token call.
+ *
+ * 20260828130000_unify_auth_drop_local_identity.sql drops `vendor_members`
+ * entirely — membership now lives only in Letterstory. The gate in
+ * registry.ts that queries it (only reachable when `principal.orgId` is
+ * unset, i.e. a bearer token minted before the retirement, or any future
+ * non-service caller) is kept as a defensive fallback rather than deleted, so
+ * this now proves what it actually does against the real schema: the query
+ * against a table that doesn't exist errors, and the gate treats that as "no
+ * membership" and denies — not what it did before, but still fails safe.
  *
  * Two boundaries stay faked, both non-Postgres: the Supabase Auth Admin API
  * (`auth.admin.getUserById` is a GoTrue REST call, not a SQL query) and the
@@ -59,12 +66,12 @@ beforeAll(async () => {
 
 	await pg.query("insert into auth.users (id) values ($1), ($2)", [MEMBER_USER_ID, OUTSIDER_USER_ID]);
 	await pg.query(
-		"insert into vendors (id, slug, name, domain, category, key) values ($1, 'e2e-acme', 'E2E Acme', 'e2e-acme.example', 'test', 'lp_live_e2e_acme')",
+		"insert into vendors (id, slug, name, domain, category, key, letterstory_org_id) values ($1, 'e2e-acme', 'E2E Acme', 'e2e-acme.example', 'test', 'lp_live_e2e_acme', gen_random_uuid())",
 		[VENDOR_ID],
 	);
-	// Only MEMBER_USER_ID is actually a member — OUTSIDER_USER_ID exists as a
-	// real user but has no row here, which is what the negative case relies on.
-	await pg.query("insert into vendor_members (vendor_id, user_id) values ($1, $2)", [VENDOR_ID, MEMBER_USER_ID]);
+	// No vendor_members insert: the table doesn't exist post-unification.
+	// Both user ids below are just real, distinct auth.users rows now — neither
+	// can be "a member" of anything, which is exactly the point.
 });
 
 afterAll(async () => {
@@ -93,11 +100,20 @@ function pgliteSupabase() {
 				async maybeSingle() {
 					const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
 					const params = state.filters.map(([, v]) => v);
-					const { rows } = await pg.query(
-						`select ${state.columns} from ${table}${where ? ` where ${where}` : ""} limit 1`,
-						params,
-					);
-					return { data: rows[0] ?? null, error: null };
+					// A real Supabase client resolves a query error into { error }
+					// rather than throwing — most vividly here, where the table
+					// itself no longer exists. pg.query throws instead, so that
+					// gets converted here to keep the shim honest to what
+					// registry.ts's `if (!membership)` check actually sees.
+					try {
+						const { rows } = await pg.query(
+							`select ${state.columns} from ${table}${where ? ` where ${where}` : ""} limit 1`,
+							params,
+						);
+						return { data: rows[0] ?? null, error: null };
+					} catch (error) {
+						return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+					}
 				},
 			};
 			return builder;
@@ -125,29 +141,19 @@ function principal(userId: string): OAuthPrincipal {
 }
 
 describe("submit_support_request against a real Postgres schema", () => {
-	it("sends a real vendor's support message, over the real membership check and the real webhook call", async () => {
-		const { dispatchTool } = await import("./registry");
-
-		const outcome = await dispatchTool("submit_support_request", { message: "help please" }, principal(MEMBER_USER_ID));
-
-		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { ok: true } } });
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const [url, init] = fetchMock.mock.calls[0];
-		expect(url).toBe("https://hooks.example.com/support");
-		const body = JSON.parse((init as { body: string }).body);
-		expect(body.text).toContain("E2E Acme (e2e-acme)");
-		expect(body.text).toContain(`${MEMBER_USER_ID}@example.com`);
-		expect(body.text).toContain("help please");
-	});
-
 	// The generic vendor:* membership gate lives in dispatchTool and is shared
-	// by every vendor:write tool — this proves it actually rejects a real,
-	// existing user who just isn't in vendor_members for this vendor, not only
-	// the in-memory fake registry.test.ts uses for the same check.
-	it("denies a real user who isn't a vendor_members row for this vendor, before the handler runs", async () => {
+	// by every vendor:write tool. Before the unification, this proved it let a
+	// real vendor_members row through and rejected a real user who wasn't one.
+	// Now the table is gone, so both users are denied identically — the case
+	// worth pinning is that the gate errors safe against real Postgres rather
+	// than throwing an uncaught error up through dispatchTool.
+	it.each([
+		["a user who would have been a member before the unification", MEMBER_USER_ID],
+		["a user who was never a member", OUTSIDER_USER_ID],
+	])("denies %s, because vendor_members no longer exists to check", async (_label, userId) => {
 		const { dispatchTool } = await import("./registry");
 
-		const outcome = await dispatchTool("submit_support_request", { message: "help please" }, principal(OUTSIDER_USER_ID));
+		const outcome = await dispatchTool("submit_support_request", { message: "help please" }, principal(userId));
 
 		expect(outcome).toEqual({ kind: "denied", capability: "vendor:write" });
 		expect(fetchMock).not.toHaveBeenCalled();

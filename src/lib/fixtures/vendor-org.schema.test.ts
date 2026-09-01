@@ -14,10 +14,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * same org, and nothing in TypeScript would object.
  *
  * So this runs the real migrations against real Postgres and asserts the three
- * properties the design actually depends on: the relationship is 1:1, absence
- * is allowed and unconstrained, and the reference is deliberately NOT a foreign
- * key — organizations live in a different database, so a uuid pointing at
- * nothing has to be storable.
+ * properties the design actually depends on: the relationship is 1:1, it is
+ * now REQUIRED (20260828130000 made the column NOT NULL — Letterprove's own
+ * standalone signup is retired, so a vendor with no org is no longer a valid
+ * state, only a migration bug), and the reference is deliberately NOT a
+ * foreign key — organizations live in a different database, so a uuid
+ * pointing at nothing has to be storable.
  */
 
 let db: PGlite;
@@ -76,18 +78,13 @@ describe("vendors.letterstory_org_id", () => {
 	});
 
 	/*
-	 * Null is the ordinary case, not a gap to be backfilled: every vendor that
-	 * exists today has no org, and anyone signing up through Letterprove's own
-	 * onboarding never will. The index is partial precisely so this stays cheap
-	 * and unconstrained.
+	 * Null used to be the ordinary case, back when Letterprove had its own
+	 * standalone signup. 20260828130000 retired that path and made the column
+	 * NOT NULL along with it — a vendor with no org is no longer state the
+	 * schema can hold, only a bug in whatever inserted it.
 	 */
-	it("allows many vendors with no org at all", async () => {
-		await insertVendor(null);
-		await insertVendor(null);
-		await insertVendor(null);
-
-		const { rows } = await db.query("select count(*)::int as n from vendors where letterstory_org_id is null");
-		expect((rows[0] as { n: number }).n).toBeGreaterThanOrEqual(3);
+	it("refuses a vendor with no org", async () => {
+		await expect(insertVendor(null)).rejects.toThrow(/null value|not-null/i);
 	});
 
 	/*
@@ -109,6 +106,6 @@ describe("vendors.letterstory_org_id", () => {
 			 where table_name = 'vendors' and column_name = 'letterstory_org_id'`,
 		);
 		expect(rows).toHaveLength(1);
-		expect(rows[0]).toMatchObject({ data_type: "uuid", is_nullable: "YES" });
+		expect(rows[0]).toMatchObject({ data_type: "uuid", is_nullable: "NO" });
 	});
 });
