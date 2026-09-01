@@ -5,9 +5,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * The destructive half of the auth unification (supabase/proposed/
- * 20260828130000_unify_auth_drop_local_identity.sql), replayed against real
- * Postgres.
+ * The destructive half of the auth unification
+ * (supabase/migrations/20260828130000_unify_auth_drop_local_identity.sql),
+ * replayed against real Postgres, isolated from the rest of the migration
+ * sequence per-test.
  *
  * This exists because of a near-miss. Step 4 was written as a bare
  * `delete from vendors where letterstory_org_id is null`, on the stated belief
@@ -32,17 +33,28 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 let db: PGlite;
 
 const MIGRATIONS = join(process.cwd(), "supabase/migrations");
-const PROPOSED = join(
-	process.cwd(),
-	"supabase/proposed/20260828130000_unify_auth_drop_local_identity.sql",
-);
+const TARGET_MIGRATION = "20260828130000_unify_auth_drop_local_identity.sql";
 
 async function applyProposed(): Promise<void> {
-	await db.exec(readFileSync(PROPOSED, "utf8"));
+	await db.exec(readFileSync(join(MIGRATIONS, TARGET_MIGRATION), "utf8"));
 }
 
 async function link(slug: string): Promise<void> {
 	await db.query("update vendors set letterstory_org_id = $1 where slug = $2", [randomUUID(), slug]);
+}
+
+/**
+ * 20260828125000_retire_seed_vendor_customers.sql strips vantage's seeded demo
+ * customers before this suite's beforeEach ever gets here (see that migration's
+ * own comment for why). So any case that needs an org-less vendor to actually
+ * carry data has to put it there itself now, rather than relying on the seed.
+ */
+async function addCustomer(vendorSlug: string, customerSlug: string): Promise<void> {
+	await db.query(
+		`insert into vendor_customers (vendor_id, slug, name, domain, since)
+		 select id, $2, $2, $2 || '.example', '2025-11' from vendors where slug = $1`,
+		[vendorSlug, customerSlug],
+	);
 }
 
 async function vendorSlugs(): Promise<string[]> {
@@ -78,7 +90,13 @@ beforeEach(async () => {
 		create table if not exists auth.users (id uuid primary key);
 		create or replace function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
 	`);
-	for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
+	// Everything up to, but not including, the migration under test — it is
+	// applied per-test via applyProposed() instead, isolated from every other
+	// case, the same way this suite worked back when the file lived in
+	// proposed/ and was only ever exec'd by hand.
+	for (const f of readdirSync(MIGRATIONS)
+		.filter((f) => f.endsWith(".sql") && f !== TARGET_MIGRATION)
+		.sort()) {
 		await db.exec(readFileSync(join(MIGRATIONS, f), "utf8"));
 	}
 });
@@ -89,6 +107,7 @@ afterEach(async () => {
 
 describe("unify-auth step 2: dropping org-less vendors", () => {
 	it("aborts rather than cascade-deleting an org-less vendor that still has customers", async () => {
+		await addCustomer("vantage", "acme-corp");
 		const before = await customerCount("vantage");
 		expect(before).toBeGreaterThan(0);
 
@@ -101,16 +120,16 @@ describe("unify-auth step 2: dropping org-less vendors", () => {
 	});
 
 	it("names every stranded vendor, not just the first one it meets", async () => {
-		await db.query(
-			`insert into vendor_customers (vendor_id, slug, name, domain, since)
-			 select id, 'overmindlab', 'Overmindlab', 'overmindlab.ai', '2025-11' from vendors where slug = 'lettertrace'`,
-		);
+		await addCustomer("lettertrace", "overmindlab");
+		await addCustomer("vantage", "acme-corp");
 
 		await expect(applyProposed()).rejects.toThrow(/lettertrace, vantage/);
 	});
 
 	it("proceeds once they are linked, keeping the vendors and their customers", async () => {
+		await addCustomer("vantage", "acme-corp");
 		const before = await customerCount("vantage");
+		expect(before).toBeGreaterThan(0);
 		await link("vantage");
 		await link("lettertrace");
 

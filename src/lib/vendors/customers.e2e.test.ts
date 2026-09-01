@@ -59,11 +59,11 @@ beforeAll(async () => {
 	// ours (its own domain is in the INTERNAL set the same way
 	// lettertrace.com is) — real rows in the real `vendors` table.
 	await pg.query(
-		"insert into vendors (id, slug, name, domain, category, key) values ($1, 'e2e-external', 'E2E External Vendor', 'e2e-vendor.example', 'test', 'lp_live_e2e_external')",
+		"insert into vendors (id, slug, name, domain, category, key, letterstory_org_id) values ($1, 'e2e-external', 'E2E External Vendor', 'e2e-vendor.example', 'test', 'lp_live_e2e_external', gen_random_uuid())",
 		[EXTERNAL_VENDOR_ID],
 	);
 	await pg.query(
-		"insert into vendors (id, slug, name, domain, category, key) values ($1, 'e2e-lettertrace', 'Lettertrace (e2e)', 'lettertrace.com', 'internal', 'lp_live_e2e_internal')",
+		"insert into vendors (id, slug, name, domain, category, key, letterstory_org_id) values ($1, 'e2e-lettertrace', 'Lettertrace (e2e)', 'lettertrace.com', 'internal', 'lp_live_e2e_internal', gen_random_uuid())",
 		[INTERNAL_VENDOR_ID],
 	);
 });

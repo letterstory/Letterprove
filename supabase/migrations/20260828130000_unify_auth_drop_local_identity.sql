@@ -1,7 +1,7 @@
 -- Auth unification, step 2 (DESTRUCTIVE): remove Letterprove's local identity.
 --
--- ⚠️ NOT APPLIED YET — pending review. This is the migration that makes
--- "Letterprove holds no identity of its own" true in the schema. It is the
+-- ⚠️ IRREVERSIBLE. This is the migration that makes "Letterprove holds no
+-- identity of its own" true in the schema. It is the
 -- irreversible half of the consolidation (step 1 was the additive
 -- 20260825060000_vendor_letterstory_org.sql). After it:
 --   • membership lives ONLY in Letterstory (organization_users), derived per
