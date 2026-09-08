@@ -1,4 +1,6 @@
 import type { OAuthPrincipal, Capability } from "@/lib/oauth/scopes";
+import { z } from "zod";
+import * as S from "@/lib/tools/schemas";
 import { dbClient } from "@/lib/db/client";
 import { findVendorByOrg } from "@/lib/fixtures/vendors";
 import { provisionVendorForOrg } from "@/lib/vendors/provision";
@@ -68,8 +70,32 @@ export type ToolDef = {
 	name: string;
 	description: string;
 	capability: Capability;
+	/** What this tool accepts. Declared to be enforced, not to be published. */
+	inputSchema: z.ZodType;
+	/** The success payload. dispatchTool checks every non-production result against it. */
+	outputSchema: z.ZodType;
 	handler: ToolHandler;
 };
+
+/**
+ * A tool that went through `defineTool`.
+ *
+ * The brand is a module-private symbol, so it cannot be forged from outside
+ * this file: a plain object literal added to TOOLS is a compile error rather
+ * than a tool that quietly ships undeclared. That matters because the failure
+ * it prevents is invisible — a schema-less tool works perfectly, and only the
+ * contract is missing, which nothing at runtime would notice.
+ *
+ * Same construction as Letterstory's BoundTool, so the two registries stay
+ * legible to the same reader.
+ */
+declare const bound: unique symbol;
+export type BoundTool = ToolDef & { readonly [bound]: true };
+
+/** The only way to add a tool. "I'll declare it later" is not expressible. */
+export function defineTool(def: ToolDef): BoundTool {
+	return def as BoundTool;
+}
 
 function asRecord(args: unknown): Record<string, unknown> {
 	return args && typeof args === "object" ? (args as Record<string, unknown>) : {};
@@ -134,13 +160,15 @@ const PROMOTE_STATUS: Record<PromoteFailure, number> = {
 	write_failed: 500,
 };
 
-export const TOOLS: ToolDef[] = [
-	{
+export const TOOLS: BoundTool[] = [
+	defineTool({
 		// Pre-vendor: asked first by Letterstory's Proofs tab to decide whether
 		// to show the surface or the setup flow. Keys on the org, not a vendor.
 		name: "find_vendor_by_org",
 		description: "Does a Letterstory org already have a Letterprove vendor? Returns { linked }.",
 		capability: "vendor:read",
+		inputSchema: S.findVendorByOrgInput,
+		outputSchema: S.findVendorByOrgOutput,
 		handler: async (_args, principal) => {
 			const orgId = requireOrgId(principal);
 			if (typeof orgId !== "string") return orgId;
@@ -149,14 +177,16 @@ export const TOOLS: ToolDef[] = [
 			if (!vendor) return { ok: true, body: { linked: false } };
 			return { ok: true, body: { linked: true, slug: vendor.slug, domain: vendor.domain } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		// Pre-vendor: the setup flow's write. Creates the vendor and links it to
 		// the org 1:1. Authorized by the Letterstory service secret (the org
 		// context), NOT by a vendor:* grant — no vendor exists to grant against.
 		name: "create_vendor",
 		description: "Create the Letterprove vendor for a Letterstory org, linked 1:1. Args: name, domain. Returns { linked }.",
 		capability: "vendor:write",
+		inputSchema: S.createVendorInput,
+		outputSchema: S.createVendorOutput,
 		handler: async (args, principal) => {
 			const orgId = requireOrgId(principal);
 			if (typeof orgId !== "string") return orgId;
@@ -172,8 +202,8 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
 			return { ok: true, status: 201, body: { linked: true, slug: result.slug, domain: result.domain } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		// The vendor-level proof rollup for the summary tab: headline tier +
 		// counts. `list_snapshots` is per-customer and can't answer this. Returns
 		// the slug so the caller builds the public /proofs, /attest URLs against
@@ -181,6 +211,8 @@ export const TOOLS: ToolDef[] = [
 		name: "get_proof_summary",
 		description: "Vendor-level proof rollup for the caller's vendor: headline tier, counts, and slug for public URLs.",
 		capability: "vendor:read",
+		inputSchema: S.getProofSummaryInput,
+		outputSchema: S.getProofSummaryOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -207,8 +239,8 @@ export const TOOLS: ToolDef[] = [
 				},
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		// The vendor-scoped twin of the staff-only `record_customer`: a vendor
 		// (via Letterstory) turns one of its OWN observed domains into a customer.
 		// Scoped to principal.vendorId, so it needs vendor:write, not the
@@ -218,6 +250,8 @@ export const TOOLS: ToolDef[] = [
 		description:
 			"Record one of the caller's own observed companies as a customer (anonymous, tier-1 ceiling). Args: domain.",
 		capability: "vendor:write",
+		inputSchema: S.recordObservedInput,
+		outputSchema: S.recordObservedOutput,
 		handler: async (args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -240,11 +274,13 @@ export const TOOLS: ToolDef[] = [
 			}
 			return { ok: true, status: 201, body: { customer: result } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "list_customers",
 		description: "List every customer recorded for the caller's vendor.",
 		capability: "vendor:read",
+		inputSchema: S.listCustomersInput,
+		outputSchema: S.listCustomersOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -254,11 +290,13 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return result;
 			return { ok: true, body: { customers: result.data } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "create_customer",
 		description: "Create a customer for the caller's vendor. Args: slug, name, domain, since, consent?.",
 		capability: "vendor:write",
+		inputSchema: S.createCustomerInput,
+		outputSchema: S.createCustomerOutput,
 		handler: async (args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -268,11 +306,13 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return result;
 			return { ok: true, status: 201, body: { customer: result.data } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "update_customer",
 		description: "Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features.",
 		capability: "vendor:write",
+		inputSchema: S.updateCustomerInput,
+		outputSchema: S.updateCustomerOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
@@ -286,11 +326,13 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return result;
 			return { ok: true, body: { customer: result.data } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "delete_customer",
 		description: "Delete one of the caller's customers. Args: slug (required).",
 		capability: "vendor:write",
+		inputSchema: S.deleteCustomerInput,
+		outputSchema: S.deleteCustomerOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
@@ -307,12 +349,14 @@ export const TOOLS: ToolDef[] = [
 			// response), so an empty-body success is expressed as a flag instead.
 			return { ok: true, body: { deleted: true } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "request_consent",
 		description:
 			"Email a customer the link to approve their own attestation — the tier-4 counter-signature. Args: slug (required), contact_email (required, must be an address on that customer's own domain). Re-issuing invalidates any link already sent. The link is never returned to the caller: it goes to the customer, which is what makes their approval evidence rather than the vendor's assertion.",
 		capability: "vendor:write",
+		inputSchema: S.requestConsentInput,
+		outputSchema: S.requestConsentOutput,
 		handler: async (args, principal, context) => {
 			const record = asRecord(args);
 			const slug = typeof record.slug === "string" ? record.slug : "";
@@ -348,12 +392,14 @@ export const TOOLS: ToolDef[] = [
 
 			return { ok: true, body: { sentTo: result.data.sentTo, expiresAt: result.data.expiresAt } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "get_status",
 		description:
 			"Whether the caller's vendor has received any events in the last 24h and how many, plus whether the tracking script has ever successfully checked in at all.",
 		capability: "vendor:read",
+		inputSchema: S.getStatusInput,
+		outputSchema: S.getStatusOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -361,12 +407,14 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
 			return { ok: true, body: { receiving: result.receiving, installed: result.installed, count: result.count } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "list_observed",
 		description:
 			"Companies the caller's vendor has been observed serving in the publishing window, with what each one is blocked on. Args: none. Read-only — use record_customer to turn one into a customer record.",
 		capability: "vendor:read",
+		inputSchema: S.listObservedInput,
+		outputSchema: S.listObservedOutput,
 		/*
 		 * The vendor-facing half of the observed view.
 		 *
@@ -420,12 +468,14 @@ export const TOOLS: ToolDef[] = [
 				},
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "record_customer",
 		description:
 			"Turn a domain observed for a vendor into a customer record (anonymous, tier-1 ceiling). Args: vendor (slug), domain.",
 		capability: "staff:write",
+		inputSchema: S.recordCustomerInput,
+		outputSchema: S.recordCustomerOutput,
 		// Staff tools act across vendors by slug, not principal.vendorId — a
 		// staff-only grant has no vendor of its own (see requireVendorId).
 		handler: async (args) => {
@@ -440,12 +490,14 @@ export const TOOLS: ToolDef[] = [
 			}
 			return { ok: true, status: 201, body: { customer: result } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "collection_health",
 		description:
 			"Fleet-wide collection health: per vendor, whether the tracking script is reporting, silent, installed-but-quiet, or was never installed, with event counts over 24h/7d/30d. Args: none.",
 		capability: "staff:read",
+		inputSchema: S.collectionHealthInput,
+		outputSchema: S.collectionHealthOutput,
 		/*
 		 * The staff index used to read collectionHealth() straight off
 		 * Letterprove's database, which was fine while the page lived in this
@@ -463,12 +515,14 @@ export const TOOLS: ToolDef[] = [
 			if (!health) return { ok: false, status: 503, body: { error: "telemetry_unavailable" } };
 			return { ok: true, body: { vendors: health } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "vendor_roster",
 		description:
 			"Every vendor with the humans behind it, their customer counts, and what their aggregate attestation currently claims. Args: none.",
 		capability: "staff:read",
+		inputSchema: S.vendorRosterInput,
+		outputSchema: S.vendorRosterOutput,
 		/*
 		 * Same story as collection_health: the /staff/vendors page read
 		 * vendorRoster() directly and lost its home in #124.
@@ -484,12 +538,14 @@ export const TOOLS: ToolDef[] = [
 			if (!roster) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			return { ok: true, body: { vendors: roster } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "tier_report",
 		description:
 			"Per-domain tier status for a vendor: what's observed, what's a customer record, what's actually published. Args: vendor (slug, optional — every vendor if omitted).",
 		capability: "staff:read",
+		inputSchema: S.tierReportInput,
+		outputSchema: S.tierReportOutput,
 		handler: async (args) => {
 			const record = asRecord(args);
 			const requested = typeof record.vendor === "string" && record.vendor.trim() ? record.vendor.trim() : null;
@@ -508,11 +564,13 @@ export const TOOLS: ToolDef[] = [
 				},
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "get_install_snippet",
 		description: "The <script> tag to install on the caller's site, pointed at this server's own origin. Args: none.",
 		capability: "vendor:read",
+		inputSchema: S.getInstallSnippetInput,
+		outputSchema: S.getInstallSnippetOutput,
 		handler: async (_args, principal, context) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -540,12 +598,14 @@ export const TOOLS: ToolDef[] = [
 				},
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "rotate_key",
 		description:
 			"Replace the caller's vendor publishable/collector key with a freshly generated one. The old key stops working immediately — every existing install must be updated. Args: none.",
 		capability: "vendor:write",
+		inputSchema: S.rotateKeyInput,
+		outputSchema: S.rotateKeyOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -558,12 +618,14 @@ export const TOOLS: ToolDef[] = [
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { key } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "verify_domain",
 		description:
 			"Check DNS for this vendor's domain-verification TXT record and record the result. No args.",
 		capability: "vendor:write",
+		inputSchema: S.verifyDomainInput,
+		outputSchema: S.verifyDomainOutput,
 		handler: async (_args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -611,11 +673,13 @@ export const TOOLS: ToolDef[] = [
 				body: { domain: vendor.domain, verified: true, checked: true, message, verified_at: verifiedAt },
 			};
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "update_vendor",
 		description: "Update the caller's own vendor account. Args: any of name, domain, category.",
 		capability: "vendor:write",
+		inputSchema: S.updateVendorInput,
+		outputSchema: S.updateVendorOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const update: Record<string, unknown> = {};
@@ -659,12 +723,14 @@ export const TOOLS: ToolDef[] = [
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { vendor: { ...vendor, ...update } } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "list_snapshots",
 		description:
 			"Attestation chain summaries for the caller's customers — chain length and current snapshot. Args: customer (slug, optional — every customer if omitted).",
 		capability: "vendor:read",
+		inputSchema: S.listSnapshotsInput,
+		outputSchema: S.listSnapshotsOutput,
 		handler: async (args, principal) => {
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
@@ -679,11 +745,13 @@ export const TOOLS: ToolDef[] = [
 			if (snapshots === null) return { ok: false, status: 404, body: { error: "not_found" } };
 			return { ok: true, body: { snapshots } };
 		},
-	},
-	{
+	}),
+	defineTool({
 		name: "submit_support_request",
 		description: "Send a support message to the team, attributed to the caller's vendor and account. Args: message.",
 		capability: "vendor:write",
+		inputSchema: S.submitSupportRequestInput,
+		outputSchema: S.submitSupportRequestOutput,
 		handler: async (args, principal) => {
 			const record = asRecord(args);
 			const message = typeof record.message === "string" ? record.message.trim() : "";
@@ -714,7 +782,7 @@ export const TOOLS: ToolDef[] = [
 			if (!result.ok) return { ok: false, status: 502, body: { error: result.error ?? "Failed to send your message" } };
 			return { ok: true, body: { ok: true } };
 		},
-	},
+	}),
 ];
 
 export type DispatchOutcome =
@@ -786,5 +854,40 @@ export async function dispatchTool(
 	}
 
 	const result = await tool.handler(args, principal, context);
+	assertOutputMatchesSchema(tool, result);
 	return { kind: "result", result };
+}
+
+/**
+ * Checks that a tool returned what it declares, everywhere except production.
+ *
+ * An output schema is a claim about someone else's code, and the failure is
+ * silent: a handler that renames a field, adds one, or starts returning null
+ * keeps working perfectly, and only the contract becomes false. Nothing at
+ * runtime notices, because nothing at runtime reads it.
+ *
+ * Doing the check HERE is what makes it nearly free: registry.test.ts already
+ * drives every tool through real arguments, so each of those cases becomes a
+ * conformance test, as does any test added later without its author knowing
+ * this exists.
+ *
+ * PRODUCTION IS DELIBERATELY EXEMPT. A schema bug must never turn a working
+ * vendor call into a 500: a wrong contract is a documentation problem, and
+ * breaking the caller to announce it is strictly worse than serving the
+ * payload and fixing the schema. Failures surface in CI, where they cost
+ * nothing.
+ *
+ * Only successes are checked — errors all share ToolResult's uniform shape.
+ */
+function assertOutputMatchesSchema(tool: BoundTool, result: ToolResult): void {
+	if (process.env.NODE_ENV === "production") return;
+	if (!result.ok) return;
+
+	const parsed = tool.outputSchema.safeParse(result.body);
+	if (parsed.success) return;
+
+	throw new Error(
+		`${tool.name} returned a body its outputSchema rejects — the declared contract is wrong, or the handler is: ` +
+			JSON.stringify(parsed.error.issues),
+	);
 }
