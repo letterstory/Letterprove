@@ -71,7 +71,10 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 			.limit(1)
 			.maybeSingle();
 
-		if (lastError) return { ok: false, frozen, detail: lastError.message };
+		// Scoped to the vendor the run died on, for the same reason freeze.ts
+		// scopes its own: the alert built from this detail has to name whose
+		// aggregate stopped publishing.
+		if (lastError) return { ok: false, frozen, detail: `${vendor.slug}: ${lastError.message}` };
 
 		const prevHash = last ? snapshotHash(last.attestation as SignedAggregate) : GENESIS_HASH;
 		const signed = await signAggregate(vendor.slug, prevHash);
@@ -93,7 +96,7 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 			},
 			{ onConflict: "vendor_slug,hour_bucket" }
 		);
-		if (upsertError) return { ok: false, frozen, detail: upsertError.message };
+		if (upsertError) return { ok: false, frozen, detail: `${vendor.slug}: ${upsertError.message}` };
 		frozen++;
 	}
 
