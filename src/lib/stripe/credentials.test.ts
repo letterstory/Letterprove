@@ -5,6 +5,7 @@ import {
 	decryptStripeKey,
 	saveCredential,
 	stripeEncryptionConfigured,
+	disconnect,
 } from "./credentials";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
@@ -146,5 +147,67 @@ describe("stripeEncryptionConfigured", () => {
 		expect(stripeEncryptionConfigured()).toBe(true);
 		delete process.env[KEY];
 		expect(stripeEncryptionConfigured()).toBe(false);
+	});
+});
+
+describe("disconnect", () => {
+	/**
+	 * Removing the key has to remove what the key proved.
+	 *
+	 * The evidence table is read fresh on every publish, so a row that outlives
+	 * its credential goes on asserting in the present tense that a named
+	 * customer pays, with nothing able to contradict it: the sync that replaces
+	 * evidence wholesale cannot run without a key.
+	 */
+	function deletingDb() {
+		const deleted: string[] = [];
+		const db = {
+			from: (table: string) => ({
+				delete: () => ({
+					eq: async () => {
+						deleted.push(table);
+						return { error: null };
+					},
+				}),
+			}),
+		};
+		return { db, deleted };
+	}
+
+	it("removes the payment evidence the key produced, not only the key", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		const { db, deleted } = deletingDb();
+		vi.mocked(dbClient).mockReturnValue(db as never);
+
+		expect(await disconnect("v1")).toBe(true);
+		expect(deleted).toEqual(["vendor_payment_evidence", "vendor_payment_unmatched", "vendor_stripe_credentials"]);
+	});
+
+	it("clears evidence BEFORE the credential, so a half-failure is the safe half", async () => {
+		// Evidence gone with the key still connected is a vendor who can sync
+		// again. A key gone with the evidence still standing is a permanent,
+		// unfalsifiable tier-3 claim.
+		const { dbClient } = await import("@/lib/db/client");
+		const attempted: string[] = [];
+		vi.mocked(dbClient).mockReturnValue({
+			from: (table: string) => ({
+				delete: () => ({
+					eq: async () => {
+						attempted.push(table);
+						return { error: table === "vendor_payment_evidence" ? { message: "nope" } : null };
+					},
+				}),
+			}),
+		} as never);
+
+		expect(await disconnect("v1")).toBe(false);
+		expect(attempted).toEqual(["vendor_payment_evidence"]);
+	});
+
+	it("reports failure rather than success when there is no datastore", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(null as never);
+
+		expect(await disconnect("v1")).toBe(false);
 	});
 });

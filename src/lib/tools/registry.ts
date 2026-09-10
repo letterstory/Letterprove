@@ -33,6 +33,15 @@ import { installSnippet } from "@/lib/vendors/install";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
 import { sendConsentRequest } from "@/lib/email/consent";
+import {
+	saveCredential,
+	connectionFor,
+	disconnect as disconnectStripeCredential,
+	type KeyRejection,
+	type StripeConnection,
+} from "@/lib/stripe/credentials";
+import { syncVendorPayments } from "@/lib/stripe/sync";
+import { paymentEvidenceCount } from "@/lib/attest/payment-evidence";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -159,6 +168,54 @@ const PROMOTE_STATUS: Record<PromoteFailure, number> = {
 	storage_unavailable: 503,
 	write_failed: 500,
 };
+
+/**
+ * Why a submitted Stripe key was refused, and what to answer.
+ *
+ * None of these details contain the submitted value: not the key, not a
+ * prefix, not a masked form. A rejected key is still a live secret (the usual
+ * way to get here is pasting the wrong one off the same Stripe page), and an
+ * error body is the part of a tool response most likely to end up in a bug
+ * report, a screenshot, or someone's terminal scrollback.
+ */
+const KEY_REFUSAL: Record<KeyRejection | "not_configured" | "storage_unavailable", { status: number; detail: string }> = {
+	unrestricted: {
+		status: 400,
+		detail:
+			"That is an unrestricted secret key (sk_). It can refund your customers, and publishing proof never needs that. Create a restricted key (rk_) with read access to Subscriptions and Customers instead. Nothing was stored.",
+	},
+	publishable: {
+		status: 400,
+		detail: "That is a publishable key (pk_). It cannot read subscriptions at all. Create a restricted key (rk_) instead. Nothing was stored.",
+	},
+	malformed: {
+		status: 400,
+		detail: "That is not a Stripe restricted key. It should begin with rk_live_ or rk_test_. Nothing was stored.",
+	},
+	not_configured: {
+		status: 503,
+		detail: "This deployment has no Stripe encryption key, so it refuses to store a credential it could only store in the clear. Nothing was written.",
+	},
+	storage_unavailable: { status: 503, detail: "Storage is unavailable. Nothing was written." },
+};
+
+/**
+ * The connection as every Stripe tool reports it, so connect and read answer
+ * with the same object and one renderer serves both. Built from
+ * `StripeConnection`, which is itself the safe subset credentials.ts is
+ * willing to hand out.
+ */
+function stripeConnectionBody(connection: StripeConnection, evidenceDomains: number | null) {
+	return {
+		connected: true as const,
+		last4: connection.last4,
+		livemode: connection.livemode,
+		connected_at: connection.connectedAt,
+		last_synced_at: connection.lastSyncedAt,
+		last_sync_error: connection.lastSyncError,
+		evidence_domains: evidenceDomains,
+	};
+}
 
 export const TOOLS: BoundTool[] = [
 	defineTool({
@@ -781,6 +838,162 @@ export const TOOLS: BoundTool[] = [
 			});
 			if (!result.ok) return { ok: false, status: 502, body: { error: result.error ?? "Failed to send your message" } };
 			return { ok: true, body: { ok: true } };
+		},
+	}),
+	/*
+	 * ------------------------------------------------------------------ stripe
+	 *
+	 * Tier 3 is the first claim that escapes vendor origination: a vendor can
+	 * cancel a subscription, but they cannot invent one without defrauding
+	 * themselves. All of the machinery for it has existed since #119 in
+	 * src/lib/stripe, and none of it had a caller, because the dashboard that
+	 * used to drive it went away with the auth unification in #124. So every
+	 * customer was capped below the tier that matters most, for want of a way
+	 * to connect a key. These four are that way back.
+	 *
+	 * connect_stripe is the ONLY tool in this registry that takes a secret as
+	 * an argument, and the rules that follow from that are worth stating once,
+	 * here, where the next person adding one will read them:
+	 *
+	 *   - It travels in a POST body, never a query string, because query
+	 *     strings land in access logs on every hop between the vendor and here.
+	 *     The route is POST-only, so this holds structurally.
+	 *   - Nothing echoes it. Not the success body (see connectStripeOutput),
+	 *     not the error bodies (see KEY_REFUSAL), not a log line. dispatchTool
+	 *     validates non-production successes by throwing an error containing
+	 *     the offending BODY, which is exactly why the key must never be in one.
+	 *   - classifyKey refuses an unrestricted sk_ and a publishable pk_ before
+	 *     anything is written, and saveCredential refuses everything when no
+	 *     encryption key is configured rather than storing a live credential in
+	 *     the clear.
+	 */
+	defineTool({
+		name: "connect_stripe",
+		description:
+			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
+		capability: "vendor:write",
+		inputSchema: S.connectStripeInput,
+		outputSchema: S.connectStripeOutput,
+		handler: async (args, principal) => {
+			// From the caller's token, like every other vendor-scoped tool. A
+			// vendor argument here would let anyone holding any vendor grant
+			// point a Stripe credential at somebody else's account.
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const record = asRecord(args);
+			const submitted = record.restricted_key;
+			// Deliberately reports only that the field is missing. Saying what
+			// arrived would mean quoting a secret back.
+			if (typeof submitted !== "string" || !submitted.trim()) {
+				return { ok: false, status: 400, body: { error: "restricted_key is required" } };
+			}
+
+			const saved = await saveCredential(vendorId, submitted);
+			if (!saved.ok) {
+				const refusal = KEY_REFUSAL[saved.reason];
+				return { ok: false, status: refusal.status, body: { error: saved.reason, detail: refusal.detail } };
+			}
+
+			// Read back rather than assemble from what we just sent. It proves
+			// the row landed, and it means this tool and get_stripe_connection
+			// answer with the same object built from the same source.
+			const connection = await connectionFor(vendorId);
+			if (!connection) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: stripeConnectionBody(connection, await paymentEvidenceCount(vendorId)) };
+		},
+	}),
+	defineTool({
+		name: "get_stripe_connection",
+		description:
+			"The state of the caller's vendor's Stripe connection: which key suffix, live or test, when it last synced, what Stripe last said, and how many customer domains currently carry payment evidence. No args. Never returns key material.",
+		capability: "vendor:read",
+		inputSchema: S.getStripeConnectionInput,
+		outputSchema: S.getStripeConnectionOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const connection = await connectionFor(vendorId);
+			// Not connected is an ordinary answer, the state of every vendor
+			// that has never done this, so it is a body rather than a 404.
+			if (!connection) return { ok: true, body: { connected: false } };
+			return { ok: true, body: stripeConnectionBody(connection, await paymentEvidenceCount(vendorId)) };
+		},
+	}),
+	defineTool({
+		name: "sync_stripe_payments",
+		description:
+			"Read the caller's vendor's Stripe subscriptions and join them to observed usage, replacing their payment evidence. No args. A test-mode key reports real counts and stores nothing.",
+		capability: "vendor:write",
+		inputSchema: S.syncStripePaymentsInput,
+		outputSchema: S.syncStripePaymentsOutput,
+		/*
+		 * The one thing that puts evidence in front of the tier gate. `earned()`
+		 * in attest/body.ts already reads vendor_payment_evidence on every
+		 * publish; syncVendorPayments already fills it. Nothing called it.
+		 *
+		 * Writes, not reads, hence vendor:write: it replaces the vendor's
+		 * evidence wholesale, and a cancelled subscription DISAPPEARING is as
+		 * much of the point as a new one appearing.
+		 */
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			// Checked here rather than pattern-matching the sync's error string
+			// afterwards: "you have not connected Stripe" is a precondition the
+			// caller handles differently from "Stripe would not answer".
+			const connection = await connectionFor(vendorId);
+			if (!connection) {
+				return {
+					ok: false,
+					status: 409,
+					body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first with connect_stripe." },
+				};
+			}
+
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const result = await syncVendorPayments(vendorId, vendor.slug);
+			if (!result.ok) {
+				// Stripe's own message, relayed. It names an expired key or a
+				// missing permission directly, where anything invented here would
+				// say "sync failed". Stripe redacts the middle of a key in its own
+				// error text, which is why relaying it is safe.
+				return { ok: false, status: 502, body: { error: "stripe_sync_failed", detail: result.error } };
+			}
+			return {
+				ok: true,
+				body: {
+					matched: result.matched,
+					unmatched: result.unmatched,
+					test_mode: result.testMode,
+					truncated: result.truncated,
+				},
+			};
+		},
+	}),
+	defineTool({
+		name: "disconnect_stripe",
+		description:
+			"Remove the caller's vendor's Stripe key and every payment evidence row it produced. No args. Customers corroborated only by Stripe fall back to what observed usage alone earns.",
+		capability: "vendor:write",
+		inputSchema: S.disconnectStripeInput,
+		outputSchema: S.disconnectStripeOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const removed = await disconnectStripeCredential(vendorId);
+			if (!removed) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			// Idempotent by construction: a delete that matched nothing is a
+			// success, so a caller retrying after a network blip is not told the
+			// disconnect failed.
+			return { ok: true, body: { disconnected: true } };
 		},
 	}),
 ];

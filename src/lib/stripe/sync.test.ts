@@ -128,6 +128,29 @@ describe("syncVendorPayments", () => {
 		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
 	});
 
+	it("CLEARS evidence a previous live key left behind when a test key is connected", async () => {
+		// The swap that would otherwise publish forever: connect live, sync,
+		// then replace the key with a test one. The live path replaces evidence
+		// wholesale on every sync and this branch never reaches it, so without
+		// the clear the old account's evidence stands with nothing connected
+		// that could ever contradict it.
+		const { db, deletes, inserts } = mockDb(["acme.com"]);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			truncated: false,
+			subscriptions: [sub("sub_1", "billing@acme.com")],
+		});
+
+		await syncVendorPayments("v1", "lettertrace");
+
+		expect(deletes).toContain("vendor_payment_evidence");
+		expect(deletes).toContain("vendor_payment_unmatched");
+		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
+	});
+
 	it("does NOT publish payment for a company that was never observed", async () => {
 		// Payment alone is evidence about billing. Tier 3 is the join.
 		const { db, inserts } = mockDb(["acme.com"]);

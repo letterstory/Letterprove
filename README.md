@@ -862,6 +862,7 @@ and carries the function signature the Letterstory RPC will have.
 | 15 | **Nothing signed in `development` mode is ever persisted** — the freeze refuses it, so immutable history only ever holds keys we intend to publish forever | ✅ **Decided (08-13)** — see [Signing](#signing--proposed) |
 | 16 | `signingMode()`, not `isDev`, decides whether proofs are labelled a demonstration | ✅ **Decided (08-13)** — see [What is actually signing](#what-is-actually-signing--decided-08-13) |
 | 17 | **Self-inflation** — `asn_distribution`/`distinct_hash_counts` are hardcoded `null` until upstream capture lands, so fraud scoring only catches gross volume/burst anomalies, not a slow, well-distributed spoofing rig | ✅ **Decided (accepted gap, 08-20)** — see [Processing — Letterprove side, step 3](#processing--letterprove-side) |
+| 18 | **A secret may be a tool argument**: `connect_stripe` takes a Stripe restricted key in a POST body; nothing echoes it, no error body quotes it, `classifyKey` refuses `sk_` and `pk_` before anything is written, and a missing `LETTERPROVE_STRIPE_ENCRYPTION_KEY` refuses the write outright rather than storing a live credential in the clear | ✅ **Decided (09-09)**, see `src/lib/tools/registry.ts` and the [Open list](#open) |
 
 ### Open
 
@@ -884,6 +885,17 @@ and carries the function signature the Letterstory RPC will have.
   `livemode` has only ever been `false` in production, because a test-mode key
   deliberately stores nothing. Everything except Stripe setting that boolean is
   covered; closing the remainder needs a real paying vendor.
+
+  The *connect* half was worse until now, and quietly: `src/lib/stripe` had no
+  caller at all outside its own tests, because the vendor dashboard that drove
+  it went away with the auth unification in #124 and no tool replaced it. A
+  vendor could not connect a key, so every customer was capped below tier 3 for
+  a reason nothing in the product reported. `connect_stripe`,
+  `get_stripe_connection`, `sync_stripe_payments` and `disconnect_stripe` are
+  that path. **Nothing calls `sync_stripe_payments` on a schedule** (no cron
+  entry in `vercel.json`), so payment evidence is exactly as fresh as the last
+  time someone asked for a sync. A vendor whose customer cancels keeps
+  publishing that payment until the next one.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The
