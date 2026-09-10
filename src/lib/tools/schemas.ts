@@ -248,6 +248,83 @@ export const listSnapshotsOutput = z.object({
 	),
 });
 
+/* ----------------------------------------------------------------- stripe */
+
+/**
+ * A live Stripe connection, as a caller may see it.
+ *
+ * `last4` is the one thing here derived from the key, and it is deliberate:
+ * it is four characters of a value Stripe itself prints in its own dashboard,
+ * and without it a vendor with two Stripe accounts cannot tell which key is
+ * connected. Nothing else about the credential leaves the server: not the
+ * key, not a masked form of it, not its length (see
+ * src/lib/stripe/credentials.ts, which decrypts only to make an outbound call).
+ */
+const stripeConnection = z.object({
+	connected: z.literal(true),
+	last4: z.string().describe("The key's last four characters, the same suffix Stripe shows. Never more than that."),
+	livemode: z
+		.boolean()
+		.describe("False for an rk_test key. Test payments corroborate nothing, so a test key syncs but stores no evidence."),
+	connected_at: z.string(),
+	last_synced_at: z.string().nullable().describe("Null until sync_stripe_payments has run once against this key."),
+	last_sync_error: z
+		.string()
+		.nullable()
+		.describe("Stripe's own message, so a vendor is told 'your key expired' rather than 'sync failed'."),
+	evidence_domains: z
+		.number()
+		.int()
+		.nullable()
+		.describe("Customer domains currently carrying tier-3 payment evidence. Null when the count could not be read, because a failed read is not a zero."),
+});
+
+export const connectStripeInput = z.object({
+	restricted_key: z
+		.string()
+		.min(1)
+		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…), read scope on Subscriptions and Customers. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
+});
+/**
+ * The connection, never an echo of the argument.
+ *
+ * This is the only tool that takes a secret, and the output contract is where
+ * that gets enforced: there is no field here a key could be returned in, so
+ * neither a handler change nor dispatchTool's own output validation (which
+ * puts the offending body into a thrown error) can leak one by accident.
+ */
+export const connectStripeOutput = stripeConnection;
+
+export const getStripeConnectionInput = empty;
+export const getStripeConnectionOutput = z.union([
+	z
+		.object({ connected: z.literal(false) })
+		.describe("The ordinary state of every vendor that has not connected Stripe, not an error."),
+	stripeConnection,
+]);
+
+export const disconnectStripeInput = empty;
+export const disconnectStripeOutput = z.object({
+	disconnected: z
+		.literal(true)
+		.describe("The key and every payment evidence row it produced are gone. Customers corroborated only by Stripe drop back to what observed usage alone earns."),
+});
+
+export const syncStripePaymentsInput = empty;
+export const syncStripePaymentsOutput = z.object({
+	matched: z.number().int().describe("Customer domains that got payment evidence, the tier-3 population after this sync."),
+	unmatched: z
+		.number()
+		.int()
+		.describe("Subscriptions that could not be joined to an observed domain. Not a failure: a vendor's Stripe holds customers this product has never seen."),
+	test_mode: z
+		.boolean()
+		.describe("True when a test key meant the counts above are real and NOTHING was stored. Wiring works; evidence is refused."),
+	truncated: z
+		.boolean()
+		.describe("Stripe held more subscriptions than one sync reads, so the counts understate. Reported rather than silent."),
+});
+
 /* ------------------------------------------------------------------ staff */
 
 export const recordCustomerInput = z.object({
