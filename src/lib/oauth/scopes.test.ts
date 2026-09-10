@@ -1,9 +1,16 @@
-// The wildcard is the one piece of this OAuth port that is deliberately NOT a
-// straight copy of the sister product, so it gets its own test. The bug being
-// prevented: a client row whose allowed_scopes were enumerated at seed time
-// silently withholds every capability added afterwards, and because the list is
-// read at /authorize, a CLI that logged in before the addition stays frozen at
-// the old vocabulary until it re-logs in — which nobody knows to do.
+// Two halves, and they are no longer the same kind of test.
+//
+// `capabilityValues` is live: it is the vocabulary `dispatchTool` gates on, so
+// the registry-coverage test at the bottom guards a real invariant.
+//
+// Everything above it covers the scope-STRING helpers, which lost their caller
+// when the OAuth server was retired (#124, #130). They are kept as a record of
+// what the wildcard was for: a client row whose allowed_scopes were enumerated
+// at seed time silently withholds every capability added afterwards, and
+// because the list was read at /authorize, a CLI that logged in before the
+// addition stayed frozen at the old vocabulary until it re-logged in — which
+// nobody knows to do. If those helpers are ever deleted, delete these with
+// them; they are not evidence that anything ships.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -90,7 +97,7 @@ describe("capabilitiesFromScope", () => {
 });
 
 describe("scopeDescription", () => {
-	it("describes every known scope in words a consent screen can show", () => {
+	it("describes every known scope in words a grant prompt could show", () => {
 		for (const scope of KNOWN_SCOPES) {
 			expect(scopeDescription(scope)).not.toBe(scope);
 		}
@@ -98,5 +105,23 @@ describe("scopeDescription", () => {
 
 	it("falls back to the raw scope rather than rendering undefined", () => {
 		expect(scopeDescription("vendor:teleport")).toBe("vendor:teleport");
+	});
+});
+
+describe("capabilityValues against the tool registry", () => {
+	// The vocabulary and the registry are edited in different files, and a
+	// mismatch is silent in both directions. A tool declaring a capability
+	// outside this list can never be dispatched, because `dispatchTool` only
+	// ever sees capabilities minted from it. A capability no tool declares is
+	// the opposite failure, and the one this repo has actually had: after the
+	// OAuth server was retired, `staff:read`/`staff:write` were still in the
+	// vocabulary with no caller in the world able to reach the two tools that
+	// wanted them (#126 gave them one back).
+
+	it("holds exactly the capabilities the tools declare", async () => {
+		const { TOOLS } = await import("@/lib/tools/registry");
+		const declared = new Set(TOOLS.map((tool) => tool.capability));
+
+		expect([...declared].sort()).toEqual([...capabilityValues].sort());
 	});
 });
