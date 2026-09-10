@@ -95,12 +95,13 @@ describe("freezeAggregates", () => {
 
 	it("surfaces a read error rather than throwing", async () => {
 		await setup(mockDb({ lastError: "select boom" }));
-		await expect(freezeAggregates()).resolves.toMatchObject({ ok: false, detail: "select boom" });
+		// Scoped to the vendor, so the alert built from it names the blast radius.
+		await expect(freezeAggregates()).resolves.toMatchObject({ ok: false, detail: "lettertrace: select boom" });
 	});
 
 	it("surfaces an upsert error rather than throwing", async () => {
 		await setup(mockDb({ upsertError: "upsert boom" }));
-		await expect(freezeAggregates()).resolves.toMatchObject({ ok: false, detail: "upsert boom" });
+		await expect(freezeAggregates()).resolves.toMatchObject({ ok: false, detail: "lettertrace: upsert boom" });
 	});
 
 	it("freezes the signed document whole, not just its numbers", async () => {
