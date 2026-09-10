@@ -170,9 +170,31 @@ export async function credentialFor(
 	}
 }
 
+/**
+ * Drops the credential AND the evidence it produced.
+ *
+ * Evidence must not outlive its source. `vendor_payment_evidence` is read
+ * fresh on every publish (see attest/body.ts), so a row left behind after a
+ * disconnect goes on asserting, in the present tense, that a named customer
+ * pays this vendor. Nothing in the system could ever contradict it again,
+ * because the sync that replaces evidence wholesale can no longer run without
+ * a key. That is the same staleness sync.ts deletes to prevent, at the one
+ * moment sync is never coming back.
+ *
+ * Evidence first, credential second, on purpose. Either half failing leaves a
+ * state a retry fixes: evidence gone with the key still connected is a vendor
+ * who can sync again, where a key gone with the evidence still standing is the
+ * unfalsifiable claim above.
+ */
 export async function disconnect(vendorId: string): Promise<boolean> {
 	const db = dbClient();
 	if (!db) return false;
+
+	const cleared = await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
+	if (cleared.error) return false;
+	const clearedUnmatched = await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
+	if (clearedUnmatched.error) return false;
+
 	const { error } = await db.from("vendor_stripe_credentials").delete().eq("vendor_id", vendorId);
 	return !error;
 }

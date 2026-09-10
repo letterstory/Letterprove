@@ -13,7 +13,7 @@ vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn() }));
 import { syncVendorPayments } from "./sync";
 import { fetchSubscriptions } from "./fetch";
 import { encryptStripeKey } from "./credentials";
-import { paymentEvidenceFor } from "@/lib/attest/payment-evidence";
+import { paymentEvidenceFor, paymentEvidenceCount } from "@/lib/attest/payment-evidence";
 import { earned } from "@/lib/attest/body";
 
 /**
@@ -55,6 +55,11 @@ function pgliteSupabase() {
 			let columns = "*";
 			let rows: Record<string, unknown>[] = [];
 			let patch: Record<string, unknown> = {};
+			// `select("*", { count: "exact", head: true })` asks for a row COUNT
+			// and no rows. Modelled separately because paymentEvidenceCount reads
+			// `count`, and a shim that answered with rows and no count would make
+			// every vendor look unreadable rather than counted.
+			let counting = false;
 			const filters: [string, string, unknown][] = [];
 
 			const where = (offset = 0) =>
@@ -75,11 +80,11 @@ function pgliteSupabase() {
 							`insert into ${table} (${cols.join(", ")}) values ${values} returning *`,
 							flat,
 						);
-						return { rows: out, error: null };
+						return { rows: out, count: null, error: null };
 					}
 					if (mode === "delete") {
 						const { rows: out } = await pg.query(`delete from ${table}${where()} returning *`, params());
-						return { rows: out, error: null };
+						return { rows: out, count: null, error: null };
 					}
 					if (mode === "update") {
 						const cols = Object.keys(patch);
@@ -88,19 +93,29 @@ function pgliteSupabase() {
 							`update ${table} set ${set}${where(cols.length)} returning *`,
 							[...cols.map((c) => patch[c]), ...params()],
 						);
-						return { rows: out, error: null };
+						return { rows: out, count: null, error: null };
+					}
+					if (counting) {
+						const { rows: out } = await pg.query(
+							`select count(*)::int as count from ${table}${where()}`,
+							params(),
+						);
+						return { rows: [], count: (out[0] as { count: number }).count, error: null };
 					}
 					const { rows: out } = await pg.query(`select ${columns} from ${table}${where()}`, params());
-					return { rows: out, error: null };
+					return { rows: out, count: null, error: null };
 				} catch (e) {
 					const err = e as { code?: string; message: string };
-					return { rows: [], error: { code: err.code, message: err.message } };
+					return { rows: [], count: null, error: { code: err.code, message: err.message } };
 				}
 			}
 
 			const builder = {
-				select(c: string) {
-					if (mode === "select") columns = c;
+				select(c: string, opts?: { count?: string; head?: boolean }) {
+					if (mode === "select") {
+						columns = c;
+						if (opts?.count) counting = true;
+					}
 					return builder;
 				},
 				insert(r: Record<string, unknown> | Record<string, unknown>[]) {
@@ -140,7 +155,7 @@ function pgliteSupabase() {
 					return { data: r.rows[0] ?? null, error: r.error };
 				},
 				then(resolve: (v: unknown) => void, reject: (e: unknown) => void) {
-					run().then((r) => resolve({ data: r.rows, error: r.error }), reject);
+					run().then((r) => resolve({ data: r.rows, count: r.count, error: r.error }), reject);
 				},
 			};
 			return builder;
@@ -234,6 +249,26 @@ describe("tier 3 publish path, against a real Postgres schema", () => {
 		expect(Number(row.monthly_amount)).toBe(250000);
 		expect(row.currency).toBe("usd");
 		expect(Number(row.subscription_count)).toBe(1);
+	});
+
+	it("counts the domains carrying evidence, which is what tells a vendor the connection works", async () => {
+		// get_stripe_connection renders this number. Worth exercising against
+		// real Postgres rather than a mock, because the count comes back on a
+		// different field than rows do and a shape mistake there would report
+		// every working connection as producing nothing.
+		expect(await paymentEvidenceCount(VENDOR_ID)).toBe(0);
+
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			subscriptions: [subscription()],
+			truncated: false,
+		});
+		await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+
+		expect(await paymentEvidenceCount(VENDOR_ID)).toBe(1);
+		// Scoped to the caller's vendor, not the table.
+		expect(await paymentEvidenceCount(randomUUID())).toBe(0);
 	});
 
 	it("normalises an annual subscription to a monthly figure through the bigint column", async () => {

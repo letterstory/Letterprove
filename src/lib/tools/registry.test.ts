@@ -23,6 +23,13 @@ vi.mock("@/lib/vendors/verification", () => ({
 }));
 vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
 vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
+vi.mock("@/lib/stripe/credentials", () => ({
+	saveCredential: vi.fn(),
+	connectionFor: vi.fn(),
+	disconnect: vi.fn(),
+}));
+vi.mock("@/lib/stripe/sync", () => ({ syncVendorPayments: vi.fn() }));
+vi.mock("@/lib/attest/payment-evidence", () => ({ paymentEvidenceCount: vi.fn() }));
 
 /**
  * A complete customer row, as listCustomers/createCustomer really return one.
@@ -1026,5 +1033,228 @@ describe("responses carry what their caller needs", () => {
 		expect(fail.kind === "result" && fail.result.ok && (fail.result.body as { domain: string }).domain).toBe(
 			"acme.com",
 		);
+	});
+});
+
+/**
+ * The Stripe tools: tier 3's way back in.
+ *
+ * Two properties matter more than the happy path here. The first is that the
+ * vendor comes from the token, never from an argument, because the thing being
+ * stored is a credential and pointing one at somebody else's vendor is the
+ * worst outcome available. The second is that the submitted key does not come
+ * back out, anywhere, in any shape.
+ */
+describe("the Stripe tools", () => {
+	// A syntactically valid restricted key, distinctive enough that a substring
+	// search for it cannot match by accident.
+	const LIVE_KEY = "rk_live_ZZQQXXsecretmaterialWXYZ";
+
+	const CONNECTION = {
+		last4: "WXYZ",
+		livemode: true,
+		connectedAt: "2026-09-01T00:00:00.000Z",
+		lastSyncedAt: null,
+		lastSyncError: null,
+	};
+
+	beforeEach(async () => {
+		const { saveCredential, connectionFor, disconnect } = await import("@/lib/stripe/credentials");
+		const { paymentEvidenceCount } = await import("@/lib/attest/payment-evidence");
+		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		vi.mocked(saveCredential).mockResolvedValue({ ok: true, livemode: true, last4: "WXYZ" });
+		vi.mocked(connectionFor).mockResolvedValue(CONNECTION);
+		vi.mocked(disconnect).mockResolvedValue(true);
+		vi.mocked(paymentEvidenceCount).mockResolvedValue(0);
+		vi.mocked(syncVendorPayments).mockResolvedValue({
+			ok: true,
+			matched: 2,
+			unmatched: 1,
+			testMode: false,
+			truncated: false,
+		});
+	});
+
+	it("connect_stripe never returns the submitted key, in any form", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY }, principal(["vendor:write"]));
+
+		// The whole response, serialised, including the error branch's detail
+		// strings. A masked or truncated echo would still show up here as its
+		// own prefix, which is why both halves are checked.
+		const serialised = JSON.stringify(outcome);
+		expect(serialised).not.toContain(LIVE_KEY);
+		expect(serialised).not.toContain("secretmaterial");
+		// The suffix Stripe itself shows is the one thing that is allowed
+		// through, and only because a vendor with two accounts cannot otherwise
+		// tell which key is connected.
+		expect(outcome.kind === "result" && outcome.result.ok && (outcome.result.body as { last4: string }).last4).toBe(
+			"WXYZ",
+		);
+	});
+
+	it("connect_stripe resolves the vendor from the caller, never from an argument", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { saveCredential } = await import("@/lib/stripe/credentials");
+
+		await dispatchTool(
+			"connect_stripe",
+			// A caller trying to aim someone else's vendor at their key.
+			{ restricted_key: LIVE_KEY, vendor_id: "somebody-else", vendor: "victim" },
+			principal(["vendor:write"], "v1"),
+		);
+
+		expect(saveCredential).toHaveBeenCalledWith("v1", LIVE_KEY);
+	});
+
+	it("connect_stripe refuses an unrestricted key without echoing it", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { saveCredential } = await import("@/lib/stripe/credentials");
+		vi.mocked(saveCredential).mockResolvedValue({ ok: false, reason: "unrestricted" });
+
+		const outcome = await dispatchTool(
+			"connect_stripe",
+			{ restricted_key: "sk_live_ZZQQXXsecretmaterial" },
+			principal(["vendor:write"]),
+		);
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected refusal");
+		expect(outcome.result.status).toBe(400);
+		expect(outcome.result.body.error).toBe("unrestricted");
+		// The detail explains what to do instead. It must not quote what arrived.
+		expect(JSON.stringify(outcome.result.body)).not.toContain("secretmaterial");
+	});
+
+	it("connect_stripe refuses, rather than stores, when encryption is not configured", async () => {
+		// The failure this prevents is a live Stripe credential sitting in a
+		// column in the clear because an env var was missing.
+		const { dispatchTool } = await import("./registry");
+		const { saveCredential, connectionFor } = await import("@/lib/stripe/credentials");
+		vi.mocked(saveCredential).mockResolvedValue({ ok: false, reason: "not_configured" });
+
+		const outcome = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY }, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected refusal");
+		expect(outcome.result.status).toBe(503);
+		expect(outcome.result.body.error).toBe("not_configured");
+		// Nothing was read back, because nothing was written.
+		expect(connectionFor).not.toHaveBeenCalled();
+	});
+
+	it("connect_stripe rejects a missing key without describing what arrived", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { saveCredential } = await import("@/lib/stripe/credentials");
+
+		const outcome = await dispatchTool("connect_stripe", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind === "result" && !outcome.result.ok && outcome.result.status).toBe(400);
+		expect(saveCredential).not.toHaveBeenCalled();
+	});
+
+	it("connect_stripe is a write, so a read-only grant cannot store a credential", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY }, principal(["vendor:read"]));
+
+		expect(outcome).toEqual({ kind: "denied", capability: "vendor:write" });
+	});
+
+	it("get_stripe_connection reports not-connected as an ordinary answer, not a 404", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { connectionFor } = await import("@/lib/stripe/credentials");
+		vi.mocked(connectionFor).mockResolvedValue(null);
+
+		const outcome = await dispatchTool("get_stripe_connection", {}, principal(["vendor:read"]));
+
+		// It is the state of every vendor that has never done this. An error
+		// here would have the Proofs tab rendering a fault for a normal state.
+		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { connected: false } } });
+	});
+
+	it("get_stripe_connection distinguishes an unreadable evidence count from zero", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { paymentEvidenceCount } = await import("@/lib/attest/payment-evidence");
+		vi.mocked(paymentEvidenceCount).mockResolvedValue(null);
+
+		const outcome = await dispatchTool("get_stripe_connection", {}, principal(["vendor:read"]));
+
+		// Null, not 0. Rendering a failed read as "0 domains corroborated"
+		// tells a vendor their connection is broken while it is fine.
+		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toMatchObject({
+			connected: true,
+			evidence_domains: null,
+		});
+	});
+
+	it("sync_stripe_payments reports a test-mode key as counts with nothing stored", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		vi.mocked(syncVendorPayments).mockResolvedValue({
+			ok: true,
+			matched: 3,
+			unmatched: 0,
+			testMode: true,
+			truncated: false,
+		});
+
+		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toEqual({
+			matched: 3,
+			unmatched: 0,
+			test_mode: true,
+			truncated: false,
+		});
+	});
+
+	it("sync_stripe_payments tells a caller it has no key rather than failing at Stripe", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { connectionFor } = await import("@/lib/stripe/credentials");
+		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		vi.mocked(connectionFor).mockResolvedValue(null);
+
+		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected refusal");
+		expect(outcome.result.status).toBe(409);
+		expect(outcome.result.body.error).toBe("stripe_not_connected");
+		expect(syncVendorPayments).not.toHaveBeenCalled();
+	});
+
+	it("sync_stripe_payments relays Stripe's own message when the sync fails", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		vi.mocked(syncVendorPayments).mockResolvedValue({ ok: false, error: "Expired API Key provided." });
+
+		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected failure");
+		expect(outcome.result.status).toBe(502);
+		// "Expired API Key" is actionable. "Sync failed" is not.
+		expect(outcome.result.body.detail).toBe("Expired API Key provided.");
+	});
+
+	it("disconnect_stripe succeeds for a vendor that had nothing connected", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("disconnect_stripe", {}, principal(["vendor:write"]));
+
+		// Idempotent: a retry after a network blip must not report a failure
+		// that would make a caller think a key is still there.
+		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { disconnected: true } } });
+	});
+
+	it("disconnect_stripe resolves the vendor from the caller", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { disconnect } = await import("@/lib/stripe/credentials");
+
+		await dispatchTool("disconnect_stripe", { vendor_id: "somebody-else" }, principal(["vendor:write"], "v1"));
+
+		expect(disconnect).toHaveBeenCalledWith("v1");
 	});
 });

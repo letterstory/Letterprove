@@ -12,6 +12,9 @@
  *      exactly the false corroboration this tier exists to rule out. The sync
  *      still runs and still reports, so a vendor wiring things up sees their
  *      data flow — it just refuses to store any of it as evidence.
+ *      It also CLEARS any evidence already standing, because a vendor whose
+ *      connected key is a test key has nothing corroborating them right now,
+ *      whatever a previous key once proved.
  *
  *   2. Observed domains are read fresh and the map is NOT allowed to skip that
  *      check. mapPayments defaults to fail-closed, and nothing here passes
@@ -64,6 +67,13 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	// are real and a vendor can see their wiring works — but nothing is written
 	// as evidence, because evidence from test mode is not evidence.
 	if (!credential.livemode) {
+		// Clears rather than merely skipping. A vendor who swaps a live key for
+		// a test one would otherwise keep publishing the live key's evidence
+		// forever: the live path replaces evidence wholesale on every sync, and
+		// this branch is the only one that never reaches it. Test payments
+		// corroborate nothing, and neither does a key nobody has connected.
+		await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
+		await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
 		await db
 			.from("vendor_stripe_credentials")
 			.update({ last_synced_at: syncedAt, last_sync_error: null })

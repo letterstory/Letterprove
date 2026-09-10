@@ -30,7 +30,7 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Collection refuses unverified vendors | observe/route.ts checks vendor.domainVerified before recording anything |
 | ✅ Every vendor row is created with a domain-verification token | domain_verification_token has a DB default, so create_vendor gets one without asking — the self-serve signup form this once described was retired with the local dashboard |
 | ⬜ Fraud features (ASN distribution, hash counts) | fraud-features.ts still hardcodes these null — accepted gap, not wired to real ASN data yet |
-| 🟡 Tier 3 — Stripe corroboration | lib/stripe/sync.ts and vendor_payment_evidence are intact, but nothing outside src/lib/stripe imports them — the vendor dashboard that called them went with the auth unification and no tool replaced it |
+| ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing |
 | ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
 | ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
 | ✅ Support / help infrastructure | the submit_support_request tool posts through lib/support/slack.ts to a Slack incoming webhook |
@@ -998,8 +998,9 @@ signing](#what-is-actually-signing--decided-08-13).
 | 15 | **Nothing signed in `development` mode is ever persisted** — the freeze refuses it, so immutable history only ever holds keys we intend to publish forever | ✅ **Decided (08-13)** — see [Signing](#signing--proposed) |
 | 16 | `signingMode()`, not `isDev`, decides whether proofs are labelled a demonstration | ✅ **Decided (08-13)** — see [What is actually signing](#what-is-actually-signing--decided-08-13) |
 | 17 | **Self-inflation** — `asn_distribution`/`distinct_hash_counts` are hardcoded `null` until upstream capture lands, so fraud scoring only catches gross volume/burst anomalies, not a slow, well-distributed spoofing rig | ✅ **Decided (accepted gap, 08-20)** — see [Processing — Letterprove side, step 3](#processing--letterprove-side) |
-| 18 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#a-decline-is-remembered--built-08-27) |
-| 19 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
+| 18 | **A secret may be a tool argument**: `connect_stripe` takes a Stripe restricted key in a POST body; nothing echoes it, no error body quotes it, `classifyKey` refuses `sk_` and `pk_` before anything is written, and a missing `LETTERPROVE_STRIPE_ENCRYPTION_KEY` refuses the write outright rather than storing a live credential in the clear | ✅ **Decided (09-09)**, see `src/lib/tools/registry.ts` and the [Open list](#open) |
+| 19 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#a-decline-is-remembered--built-08-27) |
+| 20 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
 
 ### Open
 
@@ -1008,16 +1009,22 @@ signing](#what-is-actually-signing--decided-08-13).
   narrow legal question worth asking. Not *"is GDPR ok with this"* — that's a
   month; this is twenty minutes.
 
-- **Tier 3 has no caller, and has never run against a live-mode Stripe key.**
-  Two gaps that now compound. The publish half is proven against the real
-  schema (`src/lib/stripe/publish.schema.test.ts`, which runs the real sync
-  with `livemode: true` through real migrations), but `livemode` has only ever
-  been `false` in production, because a test-mode key deliberately stores
-  nothing — closing that needs a real paying vendor. The newer half is that
-  nothing outside `src/lib/stripe` imports any of it: the vendor dashboard was
-  the only entry point and the auth unification deleted it, so the libraries
-  and the tables are intact and unreachable. Re-adding tier 3 means a tool on
-  the dispatcher, and that should be a decision rather than a rediscovery.
+- **Tier 3 has never run against a live-mode Stripe key.** The publish half is
+  proven against the real schema (`src/lib/stripe/publish.schema.test.ts`, which
+  runs the real sync with `livemode: true` through real migrations), but
+  `livemode` has only ever been `false` in production, because a test-mode key
+  deliberately stores nothing. Closing that needs a real paying vendor.
+
+  The *connect* half was worse until 09-09, and quietly: `src/lib/stripe` had no
+  caller at all outside its own tests, because the vendor dashboard that drove it
+  went away with the auth unification in #124 and no tool replaced it. A vendor
+  could not connect a key, so every customer was capped below tier 3 for a reason
+  nothing in the product reported. `connect_stripe`, `get_stripe_connection`,
+  `sync_stripe_payments` and `disconnect_stripe` are that path, restored on the
+  dispatcher. **Nothing calls `sync_stripe_payments` on a schedule** (no cron
+  entry in `vercel.json`), so payment evidence is exactly as fresh as the last
+  time someone asked for a sync: a vendor whose customer cancels keeps publishing
+  that payment until the next one.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The

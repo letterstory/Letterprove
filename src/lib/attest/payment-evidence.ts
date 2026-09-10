@@ -67,3 +67,25 @@ export async function paymentEvidenceFor(
 		subscriptionCount: data.subscription_count,
 	};
 }
+
+/**
+ * How many customer domains currently carry payment evidence.
+ *
+ * Null, never 0, when there is no datastore or the count could not be read.
+ * This number is what tells a vendor their Stripe connection is doing
+ * something, and a failed read rendered as "0 domains corroborated" would
+ * report their connection as broken at the moment it is fine. It is the same
+ * "a failed read is not a zero" rule the tier report follows.
+ */
+export async function paymentEvidenceCount(vendorId: string): Promise<number | null> {
+	const db = dbClient();
+	if (!db) return null;
+
+	const { count, error } = await db
+		.from("vendor_payment_evidence")
+		.select("*", { count: "exact", head: true })
+		.eq("vendor_id", vendorId);
+
+	if (error || typeof count !== "number") return null;
+	return count;
+}
