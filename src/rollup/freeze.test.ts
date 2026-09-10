@@ -161,7 +161,9 @@ describe("freezeSnapshots", () => {
 		const db = mockDb({ selectResult: { data: null, error: { message: "select boom" } }, upsertResult: { error: null } });
 		vi.mocked(dbClient).mockReturnValue(db as never);
 
-		await expect(freezeSnapshots()).resolves.toEqual({ ok: false, frozen: 0, detail: "select boom" });
+		// The detail names the customer the run died on, so the cron route's alert
+		// can tell a human whose proofs stopped updating.
+		await expect(freezeSnapshots()).resolves.toEqual({ ok: false, frozen: 0, detail: "vantage/acme-corp: select boom" });
 	});
 
 	it("surfaces an upsert error rather than throwing", async () => {
@@ -178,7 +180,7 @@ describe("freezeSnapshots", () => {
 		const db = mockDb({ selectResult: { data: null, error: null }, upsertResult: { error: { message: "upsert boom" } } });
 		vi.mocked(dbClient).mockReturnValue(db as never);
 
-		await expect(freezeSnapshots()).resolves.toEqual({ ok: false, frozen: 0, detail: "upsert boom" });
+		await expect(freezeSnapshots()).resolves.toEqual({ ok: false, frozen: 0, detail: "vantage/acme-corp: upsert boom" });
 	});
 
 	// A failed telemetry read yields a body identical to a genuine tier-0.

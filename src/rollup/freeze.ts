@@ -73,7 +73,11 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 				.limit(1)
 				.maybeSingle();
 
-			if (lastError) return { ok: false, frozen, detail: lastError.message };
+			// Scoped to the vendor/customer the run died on, not a bare database
+			// message. That name is the blast radius the cron route puts in the
+			// alert, and without it a human reading Slack knows only that some
+			// proof somewhere stopped updating.
+			if (lastError) return { ok: false, frozen, detail: `${vendor.slug}/${customer.slug}: ${lastError.message}` };
 
 			const { body, snapshot } = await attestationBody(vendor, customer);
 
@@ -129,7 +133,7 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 				},
 				{ onConflict: "vendor_slug,customer_slug,hour_bucket" }
 			);
-			if (upsertError) return { ok: false, frozen, detail: upsertError.message };
+			if (upsertError) return { ok: false, frozen, detail: `${vendor.slug}/${customer.slug}: ${upsertError.message}` };
 			frozen++;
 		}
 	}

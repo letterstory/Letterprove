@@ -7,11 +7,9 @@
  *
  * `ALERT_WEBHOOK_URL` is expected to be a Slack incoming-webhook URL (or
  * anything else that accepts `{ text: string }` — Slack's is the common
- * shape and the cheapest thing to point this at). No webhook is configured
- * in this deploy yet: provisioning one is a manual step for whoever owns the
- * destination Slack workspace/inbox, not something this code can do for
- * itself. Until it's set, the console.error line is the whole alert — which
- * is strictly more visible than the collector's current silence.
+ * shape and the cheapest thing to point this at). It is set in production;
+ * where it is not (previews, local), the console.error line is the whole
+ * alert, which is still strictly more visible than silence.
  *
  * Never throws: an alert that crashes its caller turns "tell a human" into a
  * second outage.
