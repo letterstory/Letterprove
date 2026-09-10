@@ -28,7 +28,7 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Signing, chaining, proof endpoints, verifier | scripts/verify.mjs independently re-verifies signatures against fixture and live data |
 | ✅ Collection (script → collector → rollups) | src/app/api/v1/observe/route.ts records real events into hot_rollups |
 | ✅ Collection refuses unverified vendors | observe/route.ts checks vendor.domainVerified before recording anything |
-| ✅ Self-serve vendor signup issues a domain-verification token | domain_verification_token has a DB default — every insert gets one, not just onboarding's |
+| ✅ Every vendor row is created with a domain-verification token | domain_verification_token has a DB default, so create_vendor gets one without asking — the self-serve signup form this once described was retired with the local dashboard |
 | ⬜ Fraud features (ASN distribution, hash counts) | fraud-features.ts still hardcodes these null — accepted gap, not wired to real ASN data yet |
 | ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing |
 | ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
@@ -121,11 +121,10 @@ flowchart LR
 
 | Trunk — **Letterstory** | Leaf — **Letterprove** |
 |---|---|
-| Anti-fraud scoring **+ the signing key** | Auth — Letterprove ships its own, no SSO bridge |
-| Cross-product customer record | Vendors, their customers, consent state |
-| | Billing and entitlements — isolated in LP for now, explicitly punted |
-| | Signal registry, per-vendor collection config |
-| | The script, collector, storage, rollups |
+| Anti-fraud scoring **+ the signing key** | Vendors, their customers, consent state |
+| Cross-product customer record | Billing and entitlements — isolated in LP for now, explicitly punted |
+| Human identity — who a user is, and which org they act for | Signal registry, per-vendor collection config |
+| The vendor-facing UI (the Proofs tab) | The script, collector, storage, rollups |
 | | Publishing, endpoints, proof surfaces |
 
 **Narrowed 08-11** — two things left in the trunk, both genuinely cross-service.
@@ -134,23 +133,94 @@ against how `time.letterbrace.com` and `kernels` actually run (fully independent
 auth, no federation — the only existing cross-service trust anywhere in the
 fleet is a machine-to-machine shared secret, never a human-identity bridge).
 
-### Identity
+**Reversed 08-28 ([#124](https://github.com/letterstory/Letterprove/pull/124)),
+completed 09-01 ([#130](https://github.com/letterstory/Letterprove/pull/130))** — the auth half of that
+narrowing did not survive contact with a second product. Letterprove's own
+login existed so a vendor could reach a Letterprove dashboard, and once the
+vendor surface moved into Letterstory's Proofs tab there was nobody left to
+log in: the leaf was maintaining a user pool, a signup flow, an OAuth server
+and a membership table to serve zero browsers. Identity moved to the trunk.
+Billing stayed in the leaf, untouched, and the `kernels` precedent still holds
+for everything it was cited for — the countersign RPC is still a
+machine-to-machine shared secret, and no human identity crosses it.
 
-Letterprove stands up its **own** vendor, customer, org, *and staff auth*
-model rather than borrowing Letterstory's — and this is more necessary than it
-looks. Consent has no Letterstory analogue: when Acme approves their own
-attestation, that is the vendor's customer, someone who will never hold a
-Letterstory account. Modelling them in the trunk would be genuinely wrong.
+The row above therefore reads the other way now, and [the test that keeps this
+honest](#the-test-that-keeps-this-honest) is the thing to watch: Letterprove
+can still ship a signal, a rollup or an endpoint without Letterstory moving,
+but a **new tool** is a coordinated change, because the caller lives over
+there.
 
-- **Letterprove owns outright** — vendors, their customers, consent state,
-  publishable keys, and its own Supabase Auth (staff included — no SSO hop).
-- **Letterstory holds nothing about Letterprove's users.** The only identity
-  that crosses the boundary is machine identity, for the signing RPC — see
-  [the countersign call](#processing--the-one-trunk-crossing) below.
+### Identity — **Decided (revised 08-28)**
 
-End-customer orgs are never synced between the two. Two identity systems trying
-to mirror each other is the worst of both. A unified auth service is plausible
-eventually; explicitly not now.
+**Letterprove has no login.** Letterstory is the identity authority, and the
+line that decides everything else here is the one between *a person* and *a
+subject of a claim*:
+
+- **Letterstory owns every human.** Users, orgs, membership and role live in
+  `organization_users` and are never mirrored here. Letterprove holds one
+  pointer — `vendors.letterstory_org_id`, 1:1 and `NOT NULL` — and nothing
+  else about a person.
+- **Letterprove owns every subject.** Vendors, their customers, consent state,
+  countersignatures, publishable keys. Acme is the vendor's customer, not
+  ours; they will never hold a Letterstory account, and modelling them in the
+  trunk would be genuinely wrong. That is the half of the original argument
+  that was right, and it is untouched.
+
+The earlier reading — that staff auth belonged here too — did not survive the
+vendor surface moving to Letterstory. Staff is now a **named allowlist**, not
+a user pool: `STAFF_USER_IDS` holds Letterstory user ids, and
+`src/lib/staff/allowlist.ts` fails closed, so a deployment that has not named
+its staff serves no cross-vendor surface at all. That the check lives here and
+not there is deliberate — Letterprove's most sensitive surface stays revocable
+from Letterprove, without someone else shipping.
+
+#### How a vendor reaches it
+
+There is no browser session to reach, so every vendor operation arrives as one
+call from Letterstory's backend:
+
+```
+POST /api/v1/tools/{name}     authenticated by the LETTERSTORY_API_SECRET seam
+{ "org_id": "…", "user_id": "…", …args }
+```
+
+`src/lib/tools/registry.ts` holds **21 tools**, each a `defineTool` with a zod
+input and output contract the dispatcher checks (see [Tool
+contracts](#tool-contracts--decided-09-08)). The seam resolves `org_id` to a
+vendor and scopes every handler to it, so a caller cannot name another
+vendor's data. It grants `vendor:read`/`vendor:write` for any org; it grants
+`staff:read`/`staff:write` only when the acting `user_id` is on Letterprove's
+own allowlist.
+
+Two things this deliberately does **not** do. It does not believe a
+`staff: true` flag from the other side — that would make every cross-vendor read
+contingent on Letterstory never having a bug in its own internal-user check.
+And it is not a defence against a compromised Letterstory: whoever holds the
+shared secret can name any user id they like. It defends against the realistic
+failure, which is a mistake on the far side of the seam.
+
+The public collection and proof surfaces — `/v1/observe`, `/v1/config`,
+`/attest/*`, `/proofs/*`, `/.well-known/*` — are unauthenticated by design and
+were never touched by any of this.
+
+#### Tool contracts — **Decided (09-08)**
+
+Every tool declares a zod `input` and `output` schema in
+`src/lib/tools/schemas.ts`, and `dispatchTool` validates each success against
+the tool's own `outputSchema` everywhere except production.
+
+The reason that is enforcement rather than documentation: nothing serves these
+schemas. `GET /api/v1/tools` was retired with the CLI, so there is no
+discovery surface to publish to. A published schema that drifts is a lie told
+confidently; a schema the dispatcher checks cannot drift without a test going
+red. `defineTool` makes a missing schema a compile error, and
+`schemas.test.ts` rejects a contract that says nothing — a bare `z.unknown()`
+satisfies the compiler and describes nothing.
+
+**Production is deliberately exempt from the output check.** A wrong contract
+is a documentation problem, and turning a working vendor call into a 500 to
+announce it is strictly worse than serving the payload and fixing the schema.
+Failures surface in CI, where they cost nothing.
 
 ### Open code, closed data — **Decided**
 
@@ -183,10 +253,13 @@ that gap, and only one is still outstanding:
   first one. Anti-fraud lives in Letterstory, so the closed half was never
   here to leak. `scripts/set-cron-secret.sh` generates its secret at runtime
   and hardcodes none.
-- ⬜ **Flip the repo to public** — target Aug 25, 2026, ahead of the
+- ⬜ **Flip the repo to public** — targeted for Aug 25, 2026, ahead of the
   company-wide open-source date (Oct 23, 2026), because Letterprove is the one
   product of the five making a verify-the-code claim to customers on day one.
-  This is an owner action, not a code change; everything else is ready.
+  **That date passed and the repo is still private**, so every `method` link
+  in every attestation published since then still points somewhere an outside
+  agent cannot follow. This is an owner action, not a code change; everything
+  else has been ready since 08-11.
 
 And one rule that starts the moment it flips:
 
@@ -497,9 +570,17 @@ visible.
 | Path | Serves |
 |---|---|
 | `/proofs/{vendor}` | Human-readable report and machine-readable JSON, content-negotiated |
+| `/attest/{vendor}` | The vendor's **aggregate** attestation — counts, no names |
 | `/attest/{vendor}/{customer}.json` | One customer's attestation |
+| `/attest/{vendor}/chain`, `/attest/{vendor}/{customer}/chain` | The full signed history behind either |
 | `/.well-known/letterprove.json` | Discovery |
 | `/.well-known/letterprove-jwks.json` | Public signing keys |
+
+The aggregate sits one segment above the per-customer route on purpose: it is a
+claim about the vendor rather than about any customer of theirs, it names
+nobody, and it is therefore the only signed claim most vendors can publish
+today — naming a customer needs that customer's consent, counting them does
+not.
 
 Agents evaluating a vendor mostly crawl **the vendor's own domain**, so the
 script also injects JSON-LD into the vendor's page, and vendors may proxy
@@ -601,9 +682,10 @@ precisely because `key_id` is there from day one.
 ### The evidence gate — **Decided (08-13)**
 
 The trust model says *never print the word verified where the tier doesn't earn
-it*. Until now nothing enforced that: `bodiesFor` copied `verified` and `tier`
-straight out of the customer record into a signed body, and no code path
-checked them against an observation.
+it*. Until now nothing enforced that: `bodiesFor` (since folded into
+`src/lib/attest/body.ts`) copied `verified` and `tier` straight out of the
+customer record into a signed body, and no code path checked them against an
+observation.
 
 That was survivable while every number in the document came from the same
 fixture. It stopped being survivable when `sessions_30d` went live, because a
@@ -611,7 +693,7 @@ document can now carry a **measured** zero next to an **asserted** tier 2 — an
 nothing in it tells an agent which field is which.
 
 So publication applies one rule, in
-[`earned()`](src/lib/attest/proofs.ts):
+[`earned()`](src/lib/attest/body.ts) (re-exported from `proofs.ts`):
 
 > **The asserted tier is a ceiling, never a floor.** With no observation in the
 > window, every fact we hold about that customer came from the vendor — which
@@ -698,12 +780,15 @@ The consent step above is no longer just a vendor-side flag — there's now a
 real path for the customer themselves to sign off. A vendor requests consent
 (`request_consent`, 7-day TTL, same unguessable-token-in-a-column shape as
 `vendors.domain_verification_token`) and **Letterprove emails the link to the
-customer**. That link resolves to `/attest/{vendor}/{customer}/consent` —
-deliberately **outside** the vendor/staff auth gate in `src/proxy.ts`, since
-the person opening it has no Letterprove account at all, may be reading it
-from an email client, and can't be asked to sign in. The page is a plain HTML
-form (no client JS required); approving or declining POSTs to
-`.../consent/respond`, which redirects back with the result.
+customer**. That link resolves to `/attest/{vendor}/{customer}/consent`, which asks for no
+session at all, since the person opening it has no account anywhere in the
+fleet, may be reading it from an email client, and can't be asked to sign in.
+That was originally a deliberate hole in the auth gate `src/proxy.ts` used to
+run; after the auth unification there is no gate to be outside of — `proxy.ts`
+does proof content negotiation and nothing else — so the property now holds by
+construction rather than by exception. The page is a plain HTML form (no
+client JS required); approving or declining POSTs to `.../consent/respond`,
+which redirects back with the result.
 
 Approval sets `countersigned_at` on `vendor_customers` — once, never
 cleared — and `earned()` in `src/lib/attest/body.ts` treats its presence as
@@ -712,6 +797,30 @@ pipeline entirely. That's the point: tier 4 is supposed to not run through
 the vendor at all. Declining, expiry, an already-used token, and an
 already-countersigned customer are all distinct terminal states on the same
 page, not a generic error.
+
+#### A decline is remembered — **Built (08-27)**
+
+Declining used to clear the token and leave nothing behind. The vendor's
+customer list then read "request consent" again, *identical to a customer who
+was never asked*, so a refusal was indistinguishable from an email that never
+arrived, and could be re-sent immediately and indefinitely. On a product whose
+subject is consent, the customer's only available signal was the one thing
+being dropped.
+
+Declining now stamps `consent_declined_at` and increments
+`consent_decline_count`, and `generateConsentLink` refuses a re-ask for **30
+days** (`src/lib/vendors/consent-cooldown.ts`), answering `429` with
+`declinedAt` and `canAskAgainAt`. The split is the decision: *declined* is
+permanent history and stays visible forever, *can't ask yet* expires. Thirty
+days is a judgement call rather than a derived one — long enough that a re-ask
+is a considered act instead of a reflex, short enough that "not this quarter"
+does not become never.
+
+Two details that are load-bearing rather than incidental. The cooldown is
+checked **before** the recipient binding, so a vendor probing addresses during
+a cooldown learns nothing about which ones would have been accepted. And the
+count travels with the timestamp, because one "not now" reads differently from
+four.
 
 #### Why delivery is the binding — **Fixed (08-23)**
 
@@ -807,10 +916,19 @@ discovery document. Mint a real one with `npm run keygen`.
 |---|---|
 | `/` | Index of published proofs |
 | `/proofs/vantage` | The report — HTML for a person, JSON for `Accept: application/json` or a `.json` suffix |
+| `/attest/vantage` | The vendor's aggregate attestation |
 | `/attest/vantage/acme-corp.json` | One signed attestation |
 | `/attest/vantage/acme-corp/chain` | Its full signed history |
+| `/verify` | The human reading of the discovery document — how to check any of this yourself |
+| `/keys` | The human reading of the JWKS, including why retired keys stay |
 | `/.well-known/letterprove.json` | Discovery |
 | `/.well-known/letterprove-jwks.json` | Public keys |
+
+There is **no dashboard and no login here**, by design — see
+[Identity](#identity--decided-revised-08-28). Every vendor operation is a
+`POST /api/v1/tools/{name}` from Letterstory's backend, so exercising one
+locally means sending that request with `LETTERSTORY_API_SECRET`, not opening
+a page.
 
 ### Verify it yourself
 
@@ -827,19 +945,37 @@ run without trusting us, so it stays dependency-free and short enough to read.
 
 ### What is fixture and what is real
 
-`src/lib/fixtures/vendors.ts` is a fictional vendor. **Vantage does not exist
-and nothing it publishes is evidence.** Everything downstream of it — the
-rollup, signing, chaining, the endpoints, the JSON-LD, the verifier — is the
-production path. When telemetry lands, only the input to `bodiesFor` changes.
+**Nothing here is static fixture data any more.** `src/lib/fixtures/vendors.ts`
+keeps the path and the function names it had as a fixture module — that was the
+point, so every call site gained an `await` rather than a rewrite — but it
+reads `vendors` and `vendor_customers` through the service-role client. The two
+identities that used to be literals were seeded into those tables at the same
+slug, domain and key.
 
-Identity, tier and `verified` are still fixture-asserted while `sessions_30d`
-is measured, so the two halves of a published document now come from different
-places. The [evidence gate](#the-evidence-gate--decided-08-13) is what keeps that
-from becoming a false claim: an assertion with no observation behind it
-publishes at tier 0.
+- **`vantage` is demo data.** **Vantage does not exist and nothing it publishes
+  is evidence.** Its customers' domains are not registered and will never emit
+  a real event, so every proof it publishes honestly shows `sessions_30d: 0`.
+- **`lettertrace` is a real, live integration.** `lettertrace.com` is the
+  domain `POST /v1/observe` pins the browser's `Origin` header against, and its
+  customer rows are real companies. It is also the entire denominator behind
+  every fraud threshold — see [Open](#open).
 
-The `countersign` seam in `src/lib/attest/countersign.ts` signs locally for now
-and carries the function signature the Letterstory RPC will have.
+Everything downstream of either — the rollup, signing, chaining, the endpoints,
+the JSON-LD, the verifier — is the production path, and has been since
+telemetry landed.
+
+Identity, `tier` and `verified` are **vendor-asserted** while `sessions_30d` is
+measured, so the two halves of a published document come from different places.
+The [evidence gate](#the-evidence-gate--decided-08-13) is what keeps that from
+becoming a false claim: an assertion with no observation behind it publishes at
+tier 0.
+
+The `countersign` seam in `src/lib/attest/countersign.ts` is **live**. With
+`LETTERSTORY_COUNTERSIGN_URL` and `LETTERSTORY_COUNTERSIGN_SECRET` set it calls
+Letterstory's real RPC; without them it signs locally with the development key,
+so the publishing half stays buildable and testable standalone. `signingMode()`
+is the one predicate that says which of those happened — see [What is actually
+signing](#what-is-actually-signing--decided-08-13).
 
 ## Decision log
 
@@ -850,7 +986,7 @@ and carries the function signature the Letterstory RPC will have.
 | 3 | **Microservice split** — Letterprove owns storage, rollups, config and publishing; Letterstory is a minimal coordination trunk | ✅ **Decided** |
 | 4 | Domain only — the email local part never leaves the browser | ✅ **Decided** |
 | 5 | Provenance tier on every claim; identity hashed and retained, not published | ✅ **Decided** |
-| 6 | Letterprove owns its own vendor/customer/consent model **and staff auth** — no SSO federation from Letterstory | ✅ **Decided (revised 08-11, was: staff federates via SSO)** |
+| 6 | Letterprove owns its own vendor/customer/consent model; **Letterstory is the identity authority for every human** — one service secret, org resolved to vendor, staff named by an allowlist here | ✅ **Decided (revised 08-28, was: LP owns staff auth too and there is no SSO federation — itself a revision of 08-11's "staff federates via SSO")** — landed by [#124](https://github.com/letterstory/Letterprove/pull/124) and completed by [#130](https://github.com/letterstory/Letterprove/pull/130); see [Identity](#identity--decided-revised-08-28) |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
 | 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), [Customer counter-signing](#customer-counter-signing--built-08-21), and [Why delivery is the binding](#why-delivery-is-the-binding--fixed-08-23) |
@@ -863,6 +999,8 @@ and carries the function signature the Letterstory RPC will have.
 | 16 | `signingMode()`, not `isDev`, decides whether proofs are labelled a demonstration | ✅ **Decided (08-13)** — see [What is actually signing](#what-is-actually-signing--decided-08-13) |
 | 17 | **Self-inflation** — `asn_distribution`/`distinct_hash_counts` are hardcoded `null` until upstream capture lands, so fraud scoring only catches gross volume/burst anomalies, not a slow, well-distributed spoofing rig | ✅ **Decided (accepted gap, 08-20)** — see [Processing — Letterprove side, step 3](#processing--letterprove-side) |
 | 18 | **A secret may be a tool argument**: `connect_stripe` takes a Stripe restricted key in a POST body; nothing echoes it, no error body quotes it, `classifyKey` refuses `sk_` and `pk_` before anything is written, and a missing `LETTERPROVE_STRIPE_ENCRYPTION_KEY` refuses the write outright rather than storing a live credential in the clear | ✅ **Decided (09-09)**, see `src/lib/tools/registry.ts` and the [Open list](#open) |
+| 19 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#a-decline-is-remembered--built-08-27) |
+| 20 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
 
 ### Open
 
@@ -871,31 +1009,22 @@ and carries the function signature the Letterstory RPC will have.
   narrow legal question worth asking. Not *"is GDPR ok with this"* — that's a
   month; this is twenty minutes.
 
-- **A customer's "no" has no memory.** Declining clears the consent token and
-  nothing else — no record that they declined. The vendor's customers page
-  then reads "Request consent" again, *identical to a customer who was never
-  asked*, so a vendor cannot tell a refusal from an email that never arrived,
-  and can re-send immediately and indefinitely. On a product whose subject is
-  consent, that should be a decision rather than an accident: is a decline
-  permanent, a cooldown, or just a visible state?
-
 - **Tier 3 has never run against a live-mode Stripe key.** The publish half is
-  proven against the real schema (`src/lib/stripe/publish.schema.test.ts`,
-  which runs the real sync with `livemode: true` through real migrations), but
+  proven against the real schema (`src/lib/stripe/publish.schema.test.ts`, which
+  runs the real sync with `livemode: true` through real migrations), but
   `livemode` has only ever been `false` in production, because a test-mode key
-  deliberately stores nothing. Everything except Stripe setting that boolean is
-  covered; closing the remainder needs a real paying vendor.
+  deliberately stores nothing. Closing that needs a real paying vendor.
 
-  The *connect* half was worse until now, and quietly: `src/lib/stripe` had no
-  caller at all outside its own tests, because the vendor dashboard that drove
-  it went away with the auth unification in #124 and no tool replaced it. A
-  vendor could not connect a key, so every customer was capped below tier 3 for
-  a reason nothing in the product reported. `connect_stripe`,
-  `get_stripe_connection`, `sync_stripe_payments` and `disconnect_stripe` are
-  that path. **Nothing calls `sync_stripe_payments` on a schedule** (no cron
+  The *connect* half was worse until 09-09, and quietly: `src/lib/stripe` had no
+  caller at all outside its own tests, because the vendor dashboard that drove it
+  went away with the auth unification in #124 and no tool replaced it. A vendor
+  could not connect a key, so every customer was capped below tier 3 for a reason
+  nothing in the product reported. `connect_stripe`, `get_stripe_connection`,
+  `sync_stripe_payments` and `disconnect_stripe` are that path, restored on the
+  dispatcher. **Nothing calls `sync_stripe_payments` on a schedule** (no cron
   entry in `vercel.json`), so payment evidence is exactly as fresh as the last
-  time someone asked for a sync. A vendor whose customer cancels keeps
-  publishing that payment until the next one.
+  time someone asked for a sync: a vendor whose customer cancels keeps publishing
+  that payment until the next one.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The
@@ -904,20 +1033,26 @@ and carries the function signature the Letterstory RPC will have.
   vendor is the only thing that turns those thresholds into something with a
   denominator.
 
-- **A vendor row with no `vendor_members` row can never be claimed.**
-  `/vendor/onboarding` only ever CREATES a vendor; there is no join or invite
-  flow, so a seeded or orphaned vendor is unreachable by anyone and can only be
-  fixed by a service-role insert.
+- **Nothing can re-point a vendor at a different Letterstory org.** This
+  replaces the orphan problem it used to describe: `vendor_members` is gone,
+  and `vendors.letterstory_org_id` is `NOT NULL` and uniquely indexed, so every
+  vendor is bound to exactly one org at creation and none can be member-less.
+  What survived is the mirror image. `create_vendor` writes the link and
+  `update_vendor` cannot touch it, so a vendor created under the wrong org — or
+  under an org that later goes away — is unreachable by anyone, its org can
+  never create a replacement (the unique index refuses a second link), and only
+  a service-role `update` fixes it. The 08-31 migration already had to be
+  narrowed once for exactly this class of mistake: its first draft deleted every
+  org-less vendor, which on that date was all of them, `lettertrace` and its
+  nine real customer rows included.
 
-- **The CLI grant includes staff scopes for everyone.** `letterprove_cli` is
-  registered with `allowed_scopes: ['*']` and consent narrows only vendor
-  scopes, so any signed-in user's token carries `staff:read`/`staff:write` and
-  the consent screen tells them so. Nothing is reachable — `dispatchTool`
-  re-checks `isStaffUser` on every call and returns `insufficient_scope` — so
-  this is defence-in-depth working, not a hole. But the consent screen
-  describes powers the holder will never have, at the exact moment it is asking
-  for trust. Related: `isStaffScoped()` in `lib/oauth/scopes.ts` is now dead
-  code whose docblock still claims staff scopes are narrowed at consent.
+- **`dispatchTool` still queries a table that no longer exists.** Its `vendor:*`
+  branch re-reads `vendor_members` when `principal.orgId` is null, which cannot
+  happen in production — `authenticateToolRequest` rejects a call carrying no
+  `org_id` before a principal is built. So the branch is unreachable outside
+  tests, and where it *is* reachable it fails closed against a dropped table
+  rather than throwing. Harmless today, and misleading to read: it is the last
+  piece of the retired membership model still sitting in live code.
 
 ---
 

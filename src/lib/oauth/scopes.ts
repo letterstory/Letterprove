@@ -1,11 +1,24 @@
 /**
- * What a CLI token is allowed to do.
+ * What a caller of the tool dispatcher is allowed to do.
  *
- * There is no tool dispatcher yet — the surface a token will eventually reach
- * (vendor config, customers, proofs) is a later step of the CLI build. So this
- * starts deliberately coarse: read vs write against the caller's own vendor.
- * The point of landing it now is that the *mechanism* below is what stays
- * fixed while this list grows.
+ * This began as the grant vocabulary of Letterprove's own OAuth 2.1 server,
+ * built for the `letterprove` CLI. That server is retired: #124 deleted the
+ * authorize/token/consent routes and #130 dropped the `oauth_*` tables, since
+ * Letterstory is now the sole identity authority and the only caller of the
+ * dispatcher is its backend, proven by a shared service secret.
+ *
+ * What survives is the part that was never about OAuth: `Capability` and
+ * `OAuthPrincipal` are how `dispatchTool` decides whether a call may run, and
+ * `src/lib/oauth-auth.ts` is what hands a principal its capabilities — vendor
+ * scopes for any Letterstory-service call, staff scopes only for an acting
+ * human this deployment has independently named in `STAFF_USER_IDS`.
+ *
+ * The scope-STRING helpers below (`parseScope`, `formatScope`,
+ * `expandScopeWildcard`, `resolveGrantableScope`, `scopeDescription`) have no
+ * caller left outside their own test. They are kept rather than deleted
+ * because a vendor CLI is plausible post-launch, but note what the retirement
+ * migration says about that: a new CLI would be built on Letterstory identity,
+ * not on this foundation. Treat them as history until something imports them.
  */
 export const capabilityValues = ["vendor:read", "vendor:write", "staff:read", "staff:write"] as const;
 
@@ -20,23 +33,15 @@ const CAPABILITY_DESCRIPTIONS: Record<Capability, string> = {
 	"staff:write": "Record customers and promote domains on any vendor's behalf.",
 };
 
-// True for a capability that acts on the caller's own vendor rather than
-// staff-wide — used by the consent page to decide whether a vendor selection
-// step is even relevant to what's being granted.
-export function isVendorScoped(capability: string): boolean {
-	return capability.startsWith("vendor:");
-}
-
-/**
- * Staff scopes reach across every vendor — reading withheld customer domains
- * and writing customer records on any vendor's behalf — so, like vendor scopes,
- * they must be narrowed at consent against who the user actually is. The CLI
- * client is registered with the `*` wildcard, which expands to every capability
- * here, so "requested" never means "entitled".
- */
-export function isStaffScoped(capability: string): boolean {
-	return capability.startsWith("staff:");
-}
+// Both `isVendorScoped` and `isStaffScoped` lived here, and both were read by
+// the OAuth consent page: it narrowed a requested scope against who the user
+// actually was before minting a grant. That page is gone with the rest of the
+// server, and nothing else ever called either function. They are deleted
+// rather than kept, because their docblocks asserted that staff scopes are
+// narrowed at consent — a claim about a screen that no longer exists, in a
+// file a reader would reasonably trust. `dispatchTool` re-checks
+// `isStaffUser` on every call, which is where that narrowing really happens
+// and always did.
 
 // offline_access is an OAuth convention, not a capability anyone checks — it
 // only controls whether the token exchange also mints a refresh token. Every

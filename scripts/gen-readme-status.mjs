@@ -34,6 +34,37 @@ function migrationsText() {
 }
 
 /**
+ * Every non-test source file under src/, as [relative path, contents].
+ *
+ * Needed because "does this file exist" stopped being enough to call a feature
+ * shipped: the Stripe libraries survived the auth unification intact while the
+ * only surface that called them (the vendor dashboard) was deleted. A row that
+ * greps for the library alone would report ✅ for code nothing can run.
+ */
+function sourceFiles(dir = "src", acc = []) {
+	const abs = path.join(ROOT, dir);
+	if (!existsSync(abs)) return acc;
+	for (const entry of readdirSync(abs, { withFileTypes: true })) {
+		const rel = path.posix.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			sourceFiles(rel, acc);
+			continue;
+		}
+		if (!/\.(ts|tsx|mjs)$/.test(entry.name)) continue;
+		if (/\.(test|spec)\.[a-z]+$/.test(entry.name)) continue;
+		acc.push([rel, readFileSync(path.join(ROOT, rel), "utf8")]);
+	}
+	return acc;
+}
+
+/** Does anything outside `dir` import from it, in shipping (non-test) code? */
+function hasCallerOutside(dir) {
+	const suffix = dir.replace(/^src\//, "");
+	const importRe = new RegExp(`from\\s+["'][^"']*${suffix.replace(/\//g, "\\/")}\\/`);
+	return sourceFiles().some(([rel, text]) => !rel.startsWith(dir) && importRe.test(text));
+}
+
+/**
  * Each check inspects checked-in source for a specific, falsifiable signal.
  * `state` is "done" | "partial" | "planned" — never inferred from a PR title
  * or a comment, only from code that would break if the feature regressed.
@@ -73,6 +104,11 @@ function runChecks() {
 		/submit_support_request/.test(read("src/lib/tools/registry.ts") ?? "");
 	const hasStripeSync =
 		existsSync(path.join(ROOT, "src/lib/stripe/sync.ts")) && /vendor_payment_evidence/.test(migrations);
+	// Built is not the same as reachable. The tier-3 pathway was only ever
+	// entered from the vendor dashboard, which the auth unification deleted
+	// (#124), and no tool replaced it — so the libraries and the tables are
+	// intact and nothing in the app can invoke them.
+	const stripeIsReachable = hasStripeSync && hasCallerOutside("src/lib/stripe");
 	const hasCustomerCountersignRoute =
 		existsSync(path.join(ROOT, "src/app/attest/[vendor]/[customer]/consent/page.tsx")) &&
 		/countersigned_at/.test(migrations);
@@ -98,9 +134,9 @@ function runChecks() {
 			detail: "observe/route.ts checks vendor.domainVerified before recording anything",
 		},
 		{
-			label: "Self-serve vendor signup issues a domain-verification token",
+			label: "Every vendor row is created with a domain-verification token",
 			state: /set default/i.test(migrations) && /domain_verification_token/.test(migrations) ? "done" : "planned",
-			detail: "domain_verification_token has a DB default — every insert gets one, not just onboarding's",
+			detail: "domain_verification_token has a DB default, so create_vendor gets one without asking — the self-serve signup form this once described was retired with the local dashboard",
 		},
 		{
 			label: "Fraud features (ASN distribution, hash counts)",
@@ -111,10 +147,12 @@ function runChecks() {
 		},
 		{
 			label: "Tier 3 — Stripe corroboration",
-			state: hasStripeSync ? "done" : "planned",
-			detail: hasStripeSync
+			state: stripeIsReachable ? "done" : hasStripeSync ? "partial" : "planned",
+			detail: stripeIsReachable
 				? "lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing"
-				: "no lib/stripe/sync.ts or vendor_payment_evidence table — schema designed for it, not built",
+				: hasStripeSync
+					? "lib/stripe/sync.ts and vendor_payment_evidence are intact, but nothing outside src/lib/stripe imports them — the vendor dashboard that called them went with the auth unification and no tool replaced it"
+					: "no lib/stripe/sync.ts or vendor_payment_evidence table — schema designed for it, not built",
 		},
 		{
 			label: "Tier 4 — customer counter-signing",
