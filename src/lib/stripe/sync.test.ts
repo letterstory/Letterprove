@@ -353,6 +353,38 @@ describe("syncVendorPayments — corroboration by what settled, not by what was 
 		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
 		expect(updates[0]).toMatchObject({ consecutive_sync_failures: 1 });
 	});
+
+	it("does NOT fail, and does not page, when the same key is TEST mode", async () => {
+		// The regression this pins, found in production the day after the tier-3
+		// change shipped. That change put a required invoice read in front of the
+		// test-mode branch, whose whole purpose is letting a vendor confirm their
+		// wiring before they have anything to prove. The first test key connected
+		// paged the alert channel every hour for thirteen hours about a permission
+		// that could not have changed one stored row, because a test key writes no
+		// evidence whatever it is able to read.
+		//
+		// It is still a real thing the vendor must fix before a live key works, so
+		// it travels back as a warning they can see rather than an alert nobody
+		// can act on.
+		const { db, inserts, updates } = mockDb(["acme.com"]);
+		await wire(db);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false });
+		vi.mocked(fetchPaidInvoices).mockResolvedValue({
+			ok: false,
+			status: 403,
+			error: "The provided key does not have the required permissions.",
+			scope: true,
+		});
+
+		const result = await syncVendorPayments("v1", "lettertrace");
+
+		expect(result.ok).toBe(true);
+		expect(result.ok === true && result.testMode).toBe(true);
+		expect(result.ok === true && result.scopeWarning).toMatch(/read Invoices/i);
+		// Still stores nothing, and still does not count as a failure.
+		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
+		expect(updates.some((u) => "consecutive_sync_failures" in (u as object) && (u as { consecutive_sync_failures?: number }).consecutive_sync_failures)).toBe(false);
+	});
 });
 
 describe("syncVendorPayments — a failed sync cannot freeze a favourable claim", () => {
