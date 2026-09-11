@@ -602,7 +602,9 @@ future, not a shipped one.
 
 ```json
 {
-  "customer": "Acme Corp",
+  "customer": "acme-corp",
+  "customer_name": "Acme Corp",
+  "customer_domain": "acme.com",
   "verified": true,
   "tier": 2,
   "since": "2023-03",
@@ -622,6 +624,23 @@ future, not a shipped one.
 `method` is a commit-pinned link to the open-source logic that produced these
 numbers. An agent — or a competitor, or a customer — can read exactly how the
 count was reached. Nothing else in the file asks to be trusted.
+
+`customer_domain` is published for a narrower reason. The vendor picks the
+display name and the domain independently, and nothing ties one to the other,
+so a name alone identifies nobody: "Acme Corp" on `acme-hq.com` reads exactly
+like "Acme Corp" on `acme.com`. The domain is the field the evidence is
+actually joined on, and it is what a tier-4 counter-signature was mailed to, so
+it is the one field that lets a reader judge whose claim this is rather than
+take the name on faith. It costs nothing in privacy that `customer_name` does
+not already cost, and only named customers are published at all.
+
+Adding it was additive, not a version bump. A signature covers whatever fields
+its own document carried, and `prev_hash` is taken over the predecessor's
+published bytes, which the freeze reads back from storage rather than
+recomputing, so snapshots frozen before 2026-09-10 still verify and still link.
+`scripts/verify.mjs` canonicalises whatever keys it is handed and needed no
+change to keep working; it now prints the name and domain together as the
+document's subject, and says out loud that tier 4 binds to the domain.
 
 ### Freshness
 
@@ -862,10 +881,50 @@ agreed to expose. It exists so a disputed claim can be traced.
 
 **What this does not claim to stop.** A vendor who registers a domain and
 invents a company on it controls both ends and can still self-approve. Email
-delivery cannot fix that, and documenting it beats pretending otherwise —
-fraud scoring in Letterstory remains the backstop for a fabricated-company
-rig. What this closes is the easy case: self-approving for a customer whose
-domain you do not control.
+delivery cannot fix that, and documenting it beats pretending otherwise. What
+this closes is the easy case: self-approving for a customer whose domain you do
+not control.
+
+#### Making the accepted case visible — **Built (09-10)**
+
+The paragraph above named fraud scoring as the backstop for a fabricated-company
+rig. It is not one, and the reason is worth stating plainly: a rig like that
+generates no telemetry, `fraudFeatures` therefore reports an all-zero window,
+and every threshold on the countersigner has a floor a zero passes. The check
+that was supposed to catch the case is the case it cannot see.
+
+So the accepted trade is kept, and the concealment it allowed is not. Two
+changes, neither of which tries to stop a vendor counter-signing a domain they
+control:
+
+- **The document names the domain.** `customer_domain` is signed into every
+  attestation (see [Shape](#shape)). Registering `acme-hq.com`, calling the row
+  "Acme Corp" and approving your own link still publishes tier 4, but it now
+  publishes `"customer_domain": "acme-hq.com"` next to the name, and a reader
+  who knows Acme is at `acme.com` can see it. Before this, no field in the
+  document could have told them.
+- **A counter-signature does not survive its subject.** `countersigned_at` was
+  never vendor-writable, but `name` and `domain` were, and they are what the
+  customer approved. So the cheap variant was to have one friendly party
+  countersign honestly and then rename the row. `updateCustomer` now clears
+  `countersigned_at` and `countersigned_by` when either changes, the same
+  reasoning `update_vendor` applies when a domain change clears
+  `domain_verified_at`, and reports it as `countersignature_cleared` rather than
+  leaving the caller to diff the row. A live consent link goes with it
+  (`pending_consent_cleared`): the recipient binding was checked against the old
+  domain and the consent page showed the old name, so a token that outlived
+  either would let an approval land on a claim its approver was never shown.
+
+What deliberately does **not** get cleared is `consent_declined_at` and
+`consent_decline_count`. A decline is permanent history, and clearing it on a
+rename would turn the 30-day cooldown into something a vendor resets with a
+one-character edit.
+
+What remains open is the other direction: a customer who counter-signed has no
+way to withdraw it. `lookupConsentRequest` answers `already_countersigned`
+before it looks at a token, so the approval is terminal for them while the
+vendor can now discard it by renaming. That asymmetry is a product decision,
+not an oversight to patch quietly.
 
 ### How it is enforced — **Built (08-13)**
 
@@ -1013,6 +1072,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 18 | **A secret may be a tool argument**: `connect_stripe` takes a Stripe restricted key in a POST body; nothing echoes it, no error body quotes it, `classifyKey` refuses `sk_` and `pk_` before anything is written, and a missing `LETTERPROVE_STRIPE_ENCRYPTION_KEY` refuses the write outright rather than storing a live credential in the clear | ✅ **Decided (09-09)**, see `src/lib/tools/registry.ts` and the [Open list](#open) |
 | 19 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#a-decline-is-remembered--built-08-27) |
 | 20 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
+| 21 | **A vendor may counter-sign a domain they control; they may not do it invisibly.** The attestation publishes `customer_domain`, and changing a customer's name or domain discards the counter-signature and any live consent link | ✅ **Decided (09-10)** — see [Making the accepted case visible](#making-the-accepted-case-visible--built-09-10) |
 
 ### Open
 
@@ -1037,6 +1097,23 @@ signing](#what-is-actually-signing--decided-08-13).
   entry in `vercel.json`), so payment evidence is exactly as fresh as the last
   time someone asked for a sync: a vendor whose customer cancels keeps publishing
   that payment until the next one.
+
+- **A zero-volume window passes every fraud threshold.** Decision 17 records
+  that scoring catches gross volume and burst anomalies and not a slow,
+  well-distributed rig. The sharper version: it also does not catch *no* rig at
+  all. `fraudFeatures` fails toward an all-zero window and a fabricated company
+  produces one honestly, so every threshold with a floor waves it through. That
+  is defensible for tiers 1-3, which are gated on observation anyway and drop to
+  tier 0 with nothing observed, and it is precisely why tier 4 could not lean on
+  scoring as a backstop (decision 21). A threshold that fires on an *empty*
+  window is the change, and it belongs on the countersigner, not here.
+
+- **A counter-signature cannot be withdrawn by the customer who gave it.**
+  `lookupConsentRequest` returns `already_countersigned` ahead of the token
+  check, so there is no path back. Since 09-10 the vendor can discard one by
+  renaming the customer; the customer still cannot. Whether withdrawal is a
+  link, a reply-to address, or a support request is a product question nobody
+  has answered.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The

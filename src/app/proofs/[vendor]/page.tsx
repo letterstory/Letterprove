@@ -178,7 +178,12 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						<tbody className="divide-y divide-edge">
 							{proof.customers.map((c) => (
 								<tr key={c.current.customer}>
-									<td className="px-4 py-3 font-medium">{c.current.customer_name}</td>
+									<td className="px-4 py-3 font-medium">
+										{c.current.customer_name}
+										<span className="block font-mono text-xs font-normal text-fog">
+											{c.current.customer_domain}
+										</span>
+									</td>
 									{FEATURES.map((f) => (
 										<td key={f} className="px-4 py-3">
 											{c.current.features.includes(f) ? (
@@ -311,6 +316,13 @@ function CustomerCard({ proof, vendor }: { proof: CustomerProof; vendor: string 
 					</span>
 				)}
 			</div>
+
+			{/* The domain, not only the name. Both are vendor-chosen and unrelated
+			    to each other, and the domain is what the evidence is joined on and
+			    what a tier-4 counter-signature was mailed to. A card showing only
+			    the name gives a reader no way to tell a real customer from a
+			    lookalike registered on a domain the vendor owns. */}
+			<p className="mt-1 font-mono text-sm text-fog">{a.customer_domain}</p>
 
 			<p className="mt-1 text-sm text-fog">Active since {a.since}</p>
 

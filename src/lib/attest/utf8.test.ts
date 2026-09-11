@@ -7,7 +7,7 @@ import { GENESIS_HASH } from "./verify";
 import type { AttestationBody, SignedAttestation } from "./types";
 
 const BODY = (name: string): AttestationBody => ({
-	vendor: "v", customer: "c", customer_name: name, verified: true, tier: 2,
+	vendor: "v", customer: "c", customer_name: name, customer_domain: "c.example", verified: true, tier: 2,
 	since: "2024-01", features: [], sessions_30d: 1, seats_active: 0,
 	observed_through: "2026-01-01T00:00:00Z", published_at: "2026-01-01T00:00:00Z",
 	ttl: 3600, prev_hash: GENESIS_HASH, method: "https://x/y",
