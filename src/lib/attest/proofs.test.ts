@@ -86,6 +86,36 @@ describe("customerProof", () => {
 		expect(currentSnapshot).toHaveBeenCalledWith("vantage", "acme-corp.example");
 	});
 
+	/*
+	 * The lookalike check, published at the only place a reader can perform it.
+	 *
+	 * `name` and `domain` are both vendor-chosen and nothing ties one to the
+	 * other, so "Acme Corp" in a document is worth exactly what it is worth on a
+	 * logo wall. The domain is what telemetry joined on and what a tier-4
+	 * counter-signature had to be mailed to, which makes it the field that says
+	 * whose claim this actually is.
+	 */
+	it("publishes the domain the claim was joined on, not only the display name", async () => {
+		vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
+		const { currentSnapshot } = await import("@/rollup/snapshots");
+		vi.mocked(currentSnapshot).mockResolvedValue({
+			observed_through: "2026-08-03T00:00:00.000Z",
+			published_at: "2026-08-03T00:00:00.000Z",
+			sessions_30d: 7,
+			seats_active: 0,
+			observed: true,
+			readOk: true,
+		});
+
+		const proof = await customerProof("vantage", "acme-corp");
+
+		expect(proof!.current.customer_name).toBe("Acme Corp");
+		expect(proof!.current.customer_domain).toBe("acme-corp.example");
+		// Signed, not decorative: swapping it after the fact breaks verification,
+		// so a reader can trust the domain as much as the numbers beside it.
+		expect(verifyAttestation({ ...proof!.current, customer_domain: "acme-hq.example" }, jwks()).ok).toBe(false);
+	});
+
 	it("returns null for an unknown customer without querying telemetry or persistence", async () => {
 		vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
 		const { currentSnapshot } = await import("@/rollup/snapshots");

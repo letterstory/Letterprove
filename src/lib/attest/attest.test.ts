@@ -4,13 +4,14 @@ import { buildChain } from "./chain";
 import { jwks } from "./keys";
 import { signAttestation } from "./sign";
 import { earned } from "./body";
-import { GENESIS_HASH, verifyAttestation, verifyChain } from "./verify";
+import { GENESIS_HASH, snapshotHash, verifyAttestation, verifyChain } from "./verify";
 import type { AttestationBody, SignedAttestation } from "./types";
 
 const BODY: AttestationBody = {
 	vendor: "vantage",
 	customer: "acme-corp",
 	customer_name: "Acme Corp",
+	customer_domain: "acme.com",
 	verified: true,
 	tier: 2,
 	since: "2023-03",
@@ -120,6 +121,36 @@ describe("chain", () => {
 	it("catches a dropped snapshot", async () => {
 		const chain = await buildChain(bodies);
 		expect(verifyChain([chain[1]], jwks()).ok).toBe(false);
+	});
+});
+
+/*
+ * Adding a field to the published body changes the signed bytes, so the
+ * question that matters is whether it changes them BACKWARDS. It does not, and
+ * these two tests are what says so: a signature covers whatever fields its own
+ * document carried, and prev_hash is taken over the predecessor's published
+ * bytes, which freeze.ts reads back from storage rather than recomputing. The
+ * chain therefore changes from here forward and nowhere behind.
+ *
+ * That is what makes the addition additive rather than a schema version: no
+ * history to migrate, and no verifier to update, since scripts/verify.mjs
+ * canonicalises whatever keys it is handed.
+ */
+describe("customer_domain, added to the published body on 2026-09-10", () => {
+	const { customer_domain: _domain, ...LEGACY } = BODY;
+
+	it("leaves a snapshot frozen before the field existed verifiable", async () => {
+		const legacy = await signAttestation(LEGACY as AttestationBody);
+		expect(verifyAttestation(legacy, jwks())).toEqual({ ok: true });
+	});
+
+	it("chains a new-shape snapshot onto an old-shape one", async () => {
+		const legacy = await signAttestation(LEGACY as AttestationBody);
+		const { prev_hash: _prev, ...next } = { ...BODY, sessions_30d: 9001 };
+
+		const [fresh] = await buildChain([next], snapshotHash(legacy));
+
+		expect(verifyChain([legacy, fresh], jwks())).toEqual({ ok: true });
 	});
 });
 

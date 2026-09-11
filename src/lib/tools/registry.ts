@@ -366,7 +366,8 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "update_customer",
-		description: "Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features.",
+		description:
+			"Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features. Changing name or domain discards any counter-signature and any live consent link, since both were about the old subject.",
 		capability: "vendor:write",
 		inputSchema: S.updateCustomerInput,
 		outputSchema: S.updateCustomerOutput,
@@ -381,7 +382,18 @@ export const TOOLS: BoundTool[] = [
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			const result = await updateCustomer(db, vendorId, slug, record as UpdateCustomerInput);
 			if (!result.ok) return result;
-			return { ok: true, body: { customer: result.data } };
+			// Reported, not left to a diff. Renaming a customer or repointing
+			// their domain throws away any counter-signature they gave, because
+			// it was given about the old subject, and a caller that did not
+			// expect to lose tier 4 needs to hear it from the response.
+			return {
+				ok: true,
+				body: {
+					customer: result.data.customer,
+					countersignature_cleared: result.data.countersignatureCleared,
+					pending_consent_cleared: result.data.pendingConsentCleared,
+				},
+			};
 		},
 	}),
 	defineTool({
