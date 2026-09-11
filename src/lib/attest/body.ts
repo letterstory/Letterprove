@@ -63,17 +63,30 @@ export function earned(
 	 * Deliberately NOT capped by `customer.tier`, for the same reason tier 4
 	 * isn't. The asserted tier is a ceiling on VENDOR-ORIGINATED evidence,
 	 * because a vendor claiming more than they can show is the failure that
-	 * ceiling exists to stop. Payment read from the vendor's own Stripe account
-	 * did not pass through their hands: they can cancel a subscription, but
-	 * they cannot fabricate one without defrauding themselves. Capping it would
-	 * mean a vendor's own understatement suppressing third-party corroboration,
-	 * which is backwards.
+	 * ceiling exists to stop. Capping this would mean a vendor's own
+	 * understatement suppressing third-party corroboration, which is backwards.
+	 *
+	 * WHAT THIS TIER IS AND IS NOT. It used to be described here as impossible
+	 * to fabricate without defrauding someone. That was wrong, and cheaply so:
+	 * every condition behind it was the vendor's to set, and a $0 recurring
+	 * price on a customer record they typed reached `active` in Stripe for
+	 * nothing. The bar now is an invoice that settled through a processor for a
+	 * non-zero amount, recently, in a live-mode account — see
+	 * src/lib/stripe/map.ts. That is money genuinely leaving somebody's account
+	 * and a record in the vendor's own books, which is a real cost, but a vendor
+	 * determined to pay themselves through their own Stripe account can still
+	 * reach it. What tier 3 honestly claims is corroboration by a third party's
+	 * ledger, not immunity from a vendor willing to spend money on a lie.
+	 *
+	 * The positive-amount check is not belt-and-braces. `payment` is an object,
+	 * so a bare truthiness test published `contract_monthly: 0` as a signed
+	 * fact — a number an agent reads as "pays nothing", asserted as verified.
 	 *
 	 * It still sits BELOW the observed/domainVerified gates above. Money proves
 	 * a commercial relationship; it does not prove the product was used, and
 	 * this system only ever claims what it observed.
 	 */
-	if (payment) return { tier: 3, verified: true };
+	if (payment && payment.monthlyAmount > 0) return { tier: 3, verified: true };
 
 	return { tier: customer.tier, verified: customer.verified };
 }
@@ -92,7 +105,10 @@ export async function attestationBody(
 	customer: CustomerFixture
 ): Promise<{ body: Omit<AttestationBody, "prev_hash">; snapshot: CustomerSnapshot }> {
 	const snapshot = await currentSnapshot(vendor.slug, customer.domain);
-	const payment = vendor.id ? await paymentEvidenceFor(vendor.id, customer.domain) : null;
+	const stored = vendor.id ? await paymentEvidenceFor(vendor.id, customer.domain) : null;
+	// One condition, shared by the tier decision and the fields, so the document
+	// can never carry a contract figure the tier did not earn or vice versa.
+	const payment = stored && stored.monthlyAmount > 0 ? stored : null;
 	const { tier, verified } = earned(customer, snapshot.observed, vendor.domainVerified, payment);
 	const body = {
 		vendor: vendor.slug,

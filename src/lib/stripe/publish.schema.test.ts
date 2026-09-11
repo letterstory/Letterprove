@@ -8,10 +8,10 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 // The ONE faked boundary, and it is not Postgres: fetch.ts is an HTTP call to
 // Stripe, already covered by its own tests. Everything downstream — mapping,
 // the evidence write, reading it back, and the tier decision — runs for real.
-vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn() }));
+vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn(), fetchPaidInvoices: vi.fn() }));
 
 import { syncVendorPayments } from "./sync";
-import { fetchSubscriptions } from "./fetch";
+import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
 import { encryptStripeKey } from "./credentials";
 import { paymentEvidenceFor, paymentEvidenceCount } from "@/lib/attest/payment-evidence";
 import { earned } from "@/lib/attest/body";
@@ -163,6 +163,32 @@ function pgliteSupabase() {
 	};
 }
 
+/**
+ * Money that actually settled, which is what tier 3 now requires. Recent and
+ * relative to the clock rather than fixed, because the lapsed-payment rule in
+ * map.ts measures against now and a hard-coded date would start failing on
+ * whatever day it aged past the window.
+ */
+function settled(ids: string[], over: Record<string, unknown> = {}) {
+	const recent = Math.floor(Date.now() / 1000) - 2 * 24 * 60 * 60;
+	return {
+		ok: true as const,
+		truncated: false,
+		payments: new Map(
+			ids.map((id) => [
+				id,
+				{
+					firstSettledAt: Math.floor(Date.parse("2025-03-05T00:00:00Z") / 1000),
+					lastSettledAt: recent,
+					settledCount: 6,
+					markedPaidCount: 0,
+					...over,
+				},
+			])
+		),
+	};
+}
+
 function subscription(over: Record<string, unknown> = {}) {
 	return {
 		id: "sub_probe_1",
@@ -224,6 +250,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
 	vi.clearAllMocks();
+	vi.mocked(fetchPaidInvoices).mockResolvedValue(settled(["sub_probe_1"]) as never);
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(pgliteSupabase() as never);
 	await pg.query("delete from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
@@ -364,6 +391,136 @@ describe("tier 3 publish path, against a real Postgres schema", () => {
 			{ subscription_id: "sub_free", reason: "not_a_company", domain: "gmail.com" },
 			{ subscription_id: "sub_unseen", reason: "no_observed_traffic", domain: "never-observed-probe.com" },
 		]);
+	});
+
+	it("a $0 recurring price writes nothing and earns no tier", async () => {
+		// The ten-minute forgery, end to end against the real schema: a free
+		// recurring price reaches `active` in Stripe with no payment method and
+		// no money, and used to publish as a signed, verified tier-3 claim.
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			subscriptions: [subscription({ amount: 0 })],
+			truncated: false,
+		});
+
+		const result = await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+		expect(result).toMatchObject({ ok: true, matched: 0, unmatched: 1 });
+
+		const { rows } = await pg.query("select * from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
+		expect(rows).toHaveLength(0);
+
+		const customer = { tier: 1, verified: false, countersignedAt: null } as never;
+		const payment = await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN);
+		expect(earned(customer, true, true, payment)).toEqual({ tier: 1, verified: false });
+	});
+
+	it("an active subscription nothing settled against writes nothing", async () => {
+		// A 100%-off coupon leaves a real price on a real subscription with no
+		// invoice that ever collected anything. Only the invoice read can tell.
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			subscriptions: [subscription()],
+			truncated: false,
+		});
+		vi.mocked(fetchPaidInvoices).mockResolvedValue(settled([]) as never);
+
+		const result = await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+
+		expect(result).toMatchObject({ ok: true, matched: 0, unmatched: 1 });
+		const { rows } = await pg.query(
+			"select reason from vendor_payment_unmatched where vendor_id = $1",
+			[VENDOR_ID],
+		);
+		expect(rows).toEqual([{ reason: "no_settled_invoice" }]);
+	});
+
+	it("dates tenure from the settled invoice, through the real timestamptz column", async () => {
+		// `start_date` is a field the account owner sets, and Stripe accepts a
+		// backdated one, so tenure read from it was settable to any year the
+		// vendor liked. The settled invoice is dated by Stripe when money moved.
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			// Claims to have started in 2019.
+			subscriptions: [subscription({ start_date: Math.floor(Date.parse("2019-01-01T00:00:00Z") / 1000) })],
+			truncated: false,
+		});
+
+		await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+
+		const evidence = await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN);
+		// PGlite hands a timestamptz back as a Date where supabase-js hands back
+		// a string, so normalise rather than asserting the transport's shape.
+		expect(new Date(evidence!.since).toISOString()).toBe("2025-03-05T00:00:00.000Z");
+	});
+
+	it("evidence too old to have been refreshed reads as absent", async () => {
+		// A vendor who revokes their own Stripe key stops every sync that could
+		// ever contradict the last favourable row. Without a ceiling on age that
+		// row publishes for ever, and the vendor chose when to stop the clock.
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			subscriptions: [subscription()],
+			truncated: false,
+		});
+		await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+		expect(await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN)).not.toBeNull();
+
+		await pg.query(
+			"update vendor_payment_evidence set synced_at = now() - interval '3 days' where vendor_id = $1",
+			[VENDOR_ID],
+		);
+
+		expect(await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN)).toBeNull();
+		// And the number the Proofs panel renders says so too, rather than
+		// reporting a working connection that has quietly stopped producing.
+		expect(await paymentEvidenceCount(VENDOR_ID)).toBe(0);
+		// The row is still there. Absence is a read-time judgement about age,
+		// not a deletion that would lose the record of what was last seen.
+		const { rows } = await pg.query("select 1 from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
+		expect(rows).toHaveLength(1);
+	});
+
+	it("a run of failed syncs clears the evidence and never fakes a fresh sync", async () => {
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			subscriptions: [subscription()],
+			truncated: false,
+		});
+		await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+
+		const { rows: after } = await pg.query(
+			"select last_synced_at, consecutive_sync_failures from vendor_stripe_credentials where vendor_id = $1",
+			[VENDOR_ID],
+		);
+		const syncedAt = (after[0] as { last_synced_at: Date }).last_synced_at;
+		expect((after[0] as { consecutive_sync_failures: number }).consecutive_sync_failures).toBe(0);
+
+		// Now the key is revoked in Stripe.
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: false,
+			status: 401,
+			error: "Expired API Key provided",
+		});
+		for (let i = 0; i < 3; i++) await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+
+		const { rows: creds } = await pg.query(
+			"select last_synced_at, consecutive_sync_failures, last_sync_error from vendor_stripe_credentials where vendor_id = $1",
+			[VENDOR_ID],
+		);
+		const row = creds[0] as { last_synced_at: Date; consecutive_sync_failures: number; last_sync_error: string };
+		// Unmoved. A failure stamping this column is what made every freshness
+		// measure built on it a lie.
+		expect(row.last_synced_at).toEqual(syncedAt);
+		expect(row.consecutive_sync_failures).toBe(3);
+		expect(row.last_sync_error).toBe("Expired API Key provided");
+
+		const { rows: evidence } = await pg.query("select 1 from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
+		expect(evidence).toHaveLength(0);
 	});
 
 	it("a TEST-mode key stores nothing, however well its payments match", async () => {

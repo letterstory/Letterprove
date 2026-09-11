@@ -1,11 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { syncVendorPayments } from "./sync";
 import { credentialFor } from "./credentials";
-import { fetchSubscriptions } from "./fetch";
+import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("./credentials", () => ({ credentialFor: vi.fn() }));
-vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn() }));
+vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn(), fetchPaidInvoices: vi.fn() }));
 
 /**
  * Records every table touched and what was written to it. `vendorDomain`
@@ -13,8 +13,12 @@ vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn() }));
  * `syncVendorPayments` does before mapping payments — defaults to a domain
  * outside the Letter Company's own set, since these tests exercise ordinary
  * vendor payment mapping, not the self-dealing check.
+ *
+ * `failures` is the credential row's consecutive-failure count, which the
+ * failure path reads back before deciding whether the evidence has stood
+ * uncorroborated long enough to delete.
  */
-function mockDb(observed: string[] = ["acme.com"], vendorDomain = "acme-vendor.com") {
+function mockDb(observed: string[] = ["acme.com"], vendorDomain = "acme-vendor.com", failures = 0) {
 	const inserts: Record<string, unknown[]> = {};
 	const deletes: string[] = [];
 	const updates: Record<string, unknown>[] = [];
@@ -35,7 +39,11 @@ function mockDb(observed: string[] = ["acme.com"], vendorDomain = "acme-vendor.c
 							};
 							return page;
 						},
-						maybeSingle: () => Promise.resolve({ data: { domain: vendorDomain }, error: null }),
+						maybeSingle: () =>
+							Promise.resolve({
+								data: { domain: vendorDomain, consecutive_sync_failures: failures },
+								error: null,
+							}),
 					}),
 				}),
 				insert: (rows: unknown[]) => {
@@ -72,7 +80,29 @@ function sub(id: string, email: string | null, amount = 400000) {
 	};
 }
 
-beforeEach(() => vi.clearAllMocks());
+/**
+ * Money that really settled for each subscription, recent enough to count.
+ * Every success case needs it now: a subscription on its own is an intention
+ * to bill, and map.ts scores what was collected.
+ */
+function paid(ids: string[]) {
+	const recent = Math.floor(Date.now() / 1000) - 3 * 24 * 60 * 60;
+	return {
+		ok: true as const,
+		truncated: false,
+		payments: new Map(
+			ids.map((id) => [
+				id,
+				{ firstSettledAt: recent - 90 * 24 * 60 * 60, lastSettledAt: recent, settledCount: 4, markedPaidCount: 0 },
+			])
+		),
+	};
+}
+
+beforeEach(() => {
+	vi.clearAllMocks();
+	vi.mocked(fetchPaidInvoices).mockResolvedValue(paid(["sub_1"]));
+});
 
 describe("syncVendorPayments", () => {
 	it("refuses without a connected credential", async () => {
@@ -245,5 +275,143 @@ describe("syncVendorPayments", () => {
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, truncated: true, subscriptions: [] });
 
 		expect(await syncVendorPayments("v1", "lettertrace")).toMatchObject({ truncated: true });
+	});
+
+	it("reports truncation from the INVOICE read too, which shortens tenure", async () => {
+		// A truncated invoice list understates `since` rather than inventing it,
+		// but a signed document that quietly says "paying since 2026" about a
+		// customer of five years is still wrong, and nothing downstream can tell
+		// a prefix from the whole thing.
+		const { db } = mockDb(["acme.com"]);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, truncated: false, subscriptions: [] });
+		vi.mocked(fetchPaidInvoices).mockResolvedValue({ ...paid([]), truncated: true });
+
+		expect(await syncVendorPayments("v1", "lettertrace")).toMatchObject({ truncated: true });
+	});
+});
+
+describe("syncVendorPayments — corroboration by what settled, not by what was configured", () => {
+	async function wire(db: unknown) {
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			truncated: false,
+			subscriptions: [sub("sub_1", "billing@acme.com")],
+		});
+	}
+
+	it("stores nothing for an active subscription nothing ever settled against", async () => {
+		// The forgery this closes. A $0 price, or a 100%-off coupon, reaches
+		// `active` in Stripe for nothing at all, and used to publish as a
+		// signed, verified tier-3 claim naming any company the vendor liked.
+		const { db, inserts } = mockDb(["acme.com"]);
+		await wire(db);
+		vi.mocked(fetchPaidInvoices).mockResolvedValue(paid([]));
+
+		const result = await syncVendorPayments("v1", "lettertrace");
+
+		expect(result).toMatchObject({ ok: true, matched: 0, unmatched: 1 });
+		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
+		expect(inserts["vendor_payment_unmatched"][0]).toMatchObject({ reason: "no_settled_invoice" });
+	});
+
+	it("dates evidence from the settled invoice, not from a backdatable start_date", async () => {
+		const { db, inserts } = mockDb(["acme.com"]);
+		await wire(db);
+
+		await syncVendorPayments("v1", "lettertrace");
+
+		const row = inserts["vendor_payment_evidence"][0] as { since: string };
+		// sub() carries a fixed start_date in 2026; the settled invoice is 93
+		// days old. A `since` older than that would mean start_date won, and
+		// start_date is a field the account owner sets to whatever they like.
+		expect(Date.now() - Date.parse(row.since)).toBeLessThan(200 * 24 * 60 * 60 * 1000);
+	});
+
+	it("fails the sync when the key cannot read invoices, naming the permission", async () => {
+		// The alternative — falling back to subscriptions alone — would hand a
+		// vendor the old forgeable behaviour back by removing one permission
+		// from their own key.
+		const { db, inserts, updates } = mockDb(["acme.com"]);
+		await wire(db);
+		vi.mocked(fetchPaidInvoices).mockResolvedValue({
+			ok: false,
+			status: 403,
+			error: "The provided key does not have the required permissions.",
+			scope: true,
+		});
+
+		const result = await syncVendorPayments("v1", "lettertrace");
+
+		expect(result.ok).toBe(false);
+		expect(result.ok === false && result.error).toMatch(/read Invoices/i);
+		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
+		expect(updates[0]).toMatchObject({ consecutive_sync_failures: 1 });
+	});
+});
+
+describe("syncVendorPayments — a failed sync cannot freeze a favourable claim", () => {
+	it("does NOT stamp last_synced_at on a failure", async () => {
+		// It used to. The one column that could answer "how old is this
+		// evidence?" reported "just now" every hour a revoked key failed.
+		const { db, updates } = mockDb();
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: false, status: 401, error: "Expired API Key provided" });
+
+		await syncVendorPayments("v1", "lettertrace");
+
+		expect(updates[0]).not.toHaveProperty("last_synced_at");
+		expect(updates[0]).toMatchObject({ consecutive_sync_failures: 1 });
+	});
+
+	it("leaves evidence standing for the first failures, so one blip is not a wipe", async () => {
+		const { db, deletes } = mockDb(["acme.com"], "acme-vendor.com", 0);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: false, status: 500, error: "Stripe returned 500" });
+
+		await syncVendorPayments("v1", "lettertrace");
+
+		expect(deletes).not.toContain("vendor_payment_evidence");
+	});
+
+	it("DELETES evidence once failures pass the threshold", async () => {
+		// A vendor who revokes their own key otherwise freezes the last
+		// favourable answer in place: nothing can refresh it, and the only
+		// consequence is an alert addressed to the person who revoked it.
+		const { db, deletes } = mockDb(["acme.com"], "acme-vendor.com", 2);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: false, status: 401, error: "Expired API Key provided" });
+
+		await syncVendorPayments("v1", "lettertrace");
+
+		expect(deletes).toContain("vendor_payment_evidence");
+		expect(deletes).toContain("vendor_payment_unmatched");
+	});
+
+	it("resets the failure run on a success", async () => {
+		const { db, updates } = mockDb(["acme.com"], "acme-vendor.com", 2);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({
+			ok: true,
+			truncated: false,
+			subscriptions: [sub("sub_1", "billing@acme.com")],
+		});
+
+		await syncVendorPayments("v1", "lettertrace");
+
+		expect(updates.at(-1)).toMatchObject({ consecutive_sync_failures: 0, last_sync_failed_at: null });
 	});
 });
