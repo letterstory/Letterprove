@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import { jwks } from "./keys";
-import { customerChain, customerProof, earned, vendorProof } from "./proofs";
+import { customerChain, customerProof, earned, publishedCustomerChain, vendorProof } from "./proofs";
 import { verifyAttestation } from "./verify";
 import type { SignedAttestation } from "./types";
 
@@ -258,6 +258,35 @@ describe("consent-gated publication", () => {
 		// publication is gated, which is what makes flipping consent a no-op.
 		await expect(customerProof("vantage", "northwind")).resolves.toBeNull();
 		await expect(customerChain("vantage", "northwind")).resolves.toHaveLength(1);
+	});
+
+	it("withholds the CHAIN too, not just the point document", async () => {
+		vi.setSystemTime(new Date("2026-08-20T01:30:00.000Z"));
+
+		// The regression this pins: `/attest/{v}/{c}` was gated and
+		// `/attest/{v}/{c}/chain` was not, because the rule lived inside
+		// customerProof rather than in a function publication had to go through.
+		// The chain route served an anonymous customer's entire signed history
+		// to anyone, and served MORE than the gated route would have. Slugs are
+		// company names, so there was nothing to guess.
+		await expect(publishedCustomerChain("vantage", "northwind")).resolves.toBeNull();
+		// Still computed, exactly as before — only publication is gated, so
+		// flipping consent stays a no-op rather than a rebuild.
+		await expect(customerChain("vantage", "northwind")).resolves.toHaveLength(1);
+	});
+
+	it("withholds the chain for an unknown customer the same way", async () => {
+		vi.setSystemTime(new Date("2026-08-20T01:45:00.000Z"));
+
+		// Identical null to the withheld case above, so the route's 404s are
+		// indistinguishable and never confirm that a private customer exists.
+		await expect(publishedCustomerChain("vantage", "does-not-exist")).resolves.toBeNull();
+	});
+
+	it("publishes the chain for a customer who consented", async () => {
+		vi.setSystemTime(new Date("2026-08-20T01:50:00.000Z"));
+
+		await expect(publishedCustomerChain("vantage", "acme-corp")).resolves.not.toBeNull();
 	});
 
 	it("treats a customer with no consent field as anonymous", async () => {

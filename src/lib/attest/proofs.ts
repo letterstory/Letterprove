@@ -140,6 +140,32 @@ export async function customerChain(vendorSlug: string, customerSlug: string): P
  * and against a vendor with three customers that re-identifies trivially.
  * Anonymous customers contribute to the aggregate and nothing else.
  */
+/**
+ * A customer's chain **as published** — null unless they consented to be named.
+ *
+ * `customerChain` above is deliberately ungated, because the vendor-level proof
+ * composes every customer's chain to count them and publishes only the named
+ * subset. That split is right, but it put the only gate on one of two public
+ * routes: `/attest/{v}/{c}` resolved through the gated `customerProof` while
+ * `/attest/{v}/{c}/chain` called the ungated function directly and served an
+ * anonymous customer's entire signed history to anyone who asked. Slugs are
+ * company names, so enumeration was trivial.
+ *
+ * So publication gets its own entry point and the ungated one stays internal.
+ * A future route reaching for "the chain" now lands on the gated function by
+ * default, which is the property that was missing: the rule lived in
+ * `customerProof`'s body, where only that route could benefit from it.
+ */
+export async function publishedCustomerChain(
+	vendorSlug: string,
+	customerSlug: string
+): Promise<SignedAttestation[] | null> {
+	const vendor = await findVendor(vendorSlug);
+	const customer = vendor && findCustomer(vendor, customerSlug);
+	if (!customer || consentOf(customer) !== "named") return null;
+	return customerChain(vendorSlug, customerSlug);
+}
+
 export async function customerProof(vendorSlug: string, customerSlug: string): Promise<CustomerProof | null> {
 	const vendor = await findVendor(vendorSlug);
 	const customer = vendor && findCustomer(vendor, customerSlug);

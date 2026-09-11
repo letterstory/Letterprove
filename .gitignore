@@ -24,3 +24,6 @@ experiments/**/results*.jsonl
 
 e2e-authz.mjs
 e2e-reset.local.mjs
+
+# Agent worktrees live here; never part of the tree.
+.worktrees/
