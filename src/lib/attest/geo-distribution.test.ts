@@ -3,12 +3,19 @@ import { geoDistribution } from "./geo-distribution";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
-/** Mimics `.from().select().eq().gte()`, which is where the query resolves. */
+/**
+ * Mimics `.from().select().eq().gte().order().range()`, which is where the query
+ * resolves now that the read pages (see src/lib/db/read-all.ts). One page comes
+ * back, which readAllRows treats as the last; the cap itself is exercised
+ * against real Postgres in paged-reads.schema.test.ts.
+ */
 function mockDb(result: { data?: unknown; error?: { message: string } }) {
 	const chain = {
 		select: () => chain,
 		eq: () => chain,
-		gte: () => Promise.resolve({ data: null, error: null, ...result }),
+		gte: () => chain,
+		order: () => chain,
+		range: () => Promise.resolve({ data: null, error: null, ...result }),
 	};
 	return { from: () => chain };
 }
