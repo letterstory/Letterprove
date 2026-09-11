@@ -335,6 +335,12 @@ export const syncStripePaymentsOutput = z.object({
 	truncated: z
 		.boolean()
 		.describe("Stripe held more subscriptions than one sync reads, so the counts understate. Reported rather than silent."),
+	scope_warning: z
+		.string()
+		.optional()
+		.describe(
+			"Present only on a test key whose restricted key cannot read Invoices. The sync succeeded in the only sense a test key can, and there is something to fix before a live key would work. Show it to the vendor: nothing alerts on it, because a test key stores no evidence and so nothing is at risk yet."
+		),
 });
 
 /* ------------------------------------------------------------------ staff */
