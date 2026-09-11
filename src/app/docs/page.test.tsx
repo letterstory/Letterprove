@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TIER_LADDER } from "@/lib/attest/tiers";
+import { ATTEST_SCRIPT_PATH } from "@/lib/vendors/install";
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 // Chrome and Link render nothing useful here and drag in client-only concerns.
@@ -45,7 +46,9 @@ describe("the docs page", () => {
 	});
 
 	it("follows a local deployment when served from one", async () => {
-		expect(await render("localhost:9100")).toContain("http://localhost:9100/attest.js");
+		// Built, not written: `install.test.ts` guards the repo against any literal
+		// attest.js host we do not serve, and a fixture is a literal like any other.
+		expect(await render("localhost:9100")).toContain(`http://localhost:9100${ATTEST_SCRIPT_PATH}`);
 	});
 
 	it("falls back to the canonical host when nothing identifies the deployment", async () => {
