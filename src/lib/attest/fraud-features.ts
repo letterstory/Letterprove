@@ -18,6 +18,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import { readAllRows } from "@/lib/db/read-all";
 import { domainArrivals, type DomainArrivals } from "./domain-arrivals";
 import { geoDistribution, type GeoDistribution } from "./geo-distribution";
 
@@ -95,21 +96,40 @@ export async function fraudFeatures(
 	// Independent of each other and of the rollup query below.
 	const [arrivals, geo] = await Promise.all([domainArrivals(vendorSlug), geoDistribution(vendorSlug)]);
 
-	let query = db
-		.from("hot_rollups")
-		.select("sessions, signups, logins")
-		.eq("vendor_slug", vendorSlug);
-	if (domain !== null) query = query.eq("domain", domain);
-	const { data, error } = await query
-		.gte("window_start", since.toISOString())
-		.order("window_start", { ascending: true });
-
-	if (error) {
-		console.error("[letterprove:fraud-features] query failed", error.message);
+	// Paged. `hourly_buckets` is the input to the countersigner's burst and
+	// concentration checks and those all reason about SHARE, so dropping the
+	// tail of a truncated read renormalises every share the gate looks at
+	// against a smaller total. `events` is worse still: it is summed into a
+	// body that gets signed, and a prefix means a signature over a figure that
+	// understates its own evidence.
+	//
+	// Ordered on (window_start, domain) rather than window_start alone. For the
+	// vendor-wide form (`domain === null`) a rollup row is a (domain, hour)
+	// pair, so an hour holds as many rows as there were active domains and
+	// window_start on its own does not decide their order — and paging an
+	// ambiguous order can repeat or skip rows. Bucket order WITHIN an hour
+	// changes none of the countersigner's checks, which count buckets and
+	// compare shares rather than reading the sequence, so this is strictly more
+	// deterministic than what it replaces.
+	let rows: { sessions: number; signups: number; logins: number }[];
+	try {
+		rows = await readAllRows(`rollups for ${vendorSlug}`, (from, to) => {
+			let query = db
+				.from("hot_rollups")
+				.select("sessions, signups, logins")
+				.eq("vendor_slug", vendorSlug);
+			if (domain !== null) query = query.eq("domain", domain);
+			return query
+				.gte("window_start", since.toISOString())
+				.order("window_start", { ascending: true })
+				.order("domain", { ascending: true })
+				.range(from, to);
+		});
+	} catch (e) {
+		console.error("[letterprove:fraud-features] query failed", e instanceof Error ? e.message : String(e));
 		return empty;
 	}
 
-	const rows = (data ?? []) as { sessions: number; signups: number; logins: number }[];
 	const sessions = rows.reduce((sum, r) => sum + r.sessions, 0);
 	const signups = rows.reduce((sum, r) => sum + r.signups, 0);
 	const logins = rows.reduce((sum, r) => sum + r.logins, 0);
