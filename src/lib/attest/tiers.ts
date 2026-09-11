@@ -57,9 +57,9 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 	},
 	3: {
 		name: "third-party confirmed",
-		means: "A payment for this company, read directly from the vendor's own Stripe account, alongside observed usage. The figure did not pass through the vendor's hands.",
+		means: "An invoice that actually settled for this company, read directly from the vendor's own live-mode Stripe account, alongside observed usage. A subscription on its own does not qualify: it says what the vendor meant to bill, and a free one reaches `active` for nothing.",
 		forgeable_by:
-			"Only by defrauding themselves. A vendor can cancel a subscription, but inventing one means paying real money to a real processor.",
+			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
 	},
 	4: {
 		name: "customer counter-signed",

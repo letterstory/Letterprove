@@ -30,7 +30,7 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Collection refuses unverified vendors | observe/route.ts checks vendor.domainVerified before recording anything |
 | ✅ Every vendor row is created with a domain-verification token | domain_verification_token has a DB default, so create_vendor gets one without asking — the self-serve signup form this once described was retired with the local dashboard |
 | ⬜ Fraud features (ASN distribution, hash counts) | fraud-features.ts still hardcodes these null — accepted gap, not wired to real ASN data yet |
-| ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing |
+| ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins settled invoices to observed domains and writes vendor_payment_evidence; a subscription with no invoice that actually settled is not evidence, and a TEST-mode key stores nothing |
 | ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
 | ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
 | ✅ Support / help infrastructure | the submit_support_request tool posts through lib/support/slack.ts to a Slack incoming webhook |
@@ -82,7 +82,7 @@ agent can weigh it instead of trusting it:
 | **0** | Vendor-asserted — the ordinary logo wall | Trivially |
 | **1** | Observed by our script in a real browser | With effort |
 | **2** | Bound to infrastructure facts the vendor doesn't control | Hard |
-| **3** | Corroborated by a third party — Stripe, IdP, DNS | No |
+| **3** | Corroborated by a third party — Stripe, IdP, DNS | Only by paying themselves real money |
 | **4** | Counter-signed by the customer themselves | No |
 
 **Tier 2 is the phase-one target.** The vendor can fabricate a payload, but not
@@ -91,9 +91,15 @@ request arrived from. Binding vendor-supplied facts to infrastructure-derived
 facts raises the cost of faking a month of usage from *editing a JSON file* to
 *running a distributed spoofing rig* — a real jump, and an auditable one.
 
-**Tier 3 is where `"verified": true` becomes fully honest**, because payment and
-identity-provider data never passes through the vendor's hands. That arrives
-with Stripe in phase three.
+**Tier 3 is where `"verified": true` stops resting on the vendor's own word**,
+because it is read from a third party's ledger: an invoice that actually
+settled in the vendor's live-mode Stripe account, for real money, recently.
+Note the honest limit — corroboration is not immunity. A vendor willing to pay
+themselves through their own Stripe account can still reach tier 3, and nothing
+binds that account to the vendor today. What changed is the price: from free to
+a real charge through a real processor, in an account Stripe has verified,
+leaving a record in the vendor's own books. Tier 4 is the only tier a vendor
+genuinely cannot produce alone.
 
 Rigor compounds. Ship tier 1–2, design the schema for 3–4, and never print the
 word *verified* where the tier doesn't earn it.
@@ -764,7 +770,7 @@ copy of the observations. The leaf keeps its data whole; the trunk stays small.
 |:---:|---|:---:|---|
 | **1** | Signups, logins, sessions, active accounts | 1–2 | Script only. Enough for *verified customer, active since, sessions/mo*. |
 | **2** | Feature adoption, seats | 2 | Named events from config. Fills the feature-level proof matrix. |
-| **3** | Payments — Stripe Connect, read-only | 3 | First claim that escapes vendor origination entirely. Contract value, tenure, renewal. |
+| **3** | Payments — read-only Stripe key, settled invoices | 3 | First claim corroborated against a third party's ledger rather than the vendor's word. Contract value, tenure, renewal. Shipped as a pasted restricted key, not Connect: nothing binds the Stripe account to the vendor, which is the open half. |
 | **4** | Retention, ROI, expansion | 3–4 | Most valuable, hardest. Needs customer counter-signing to be credible. |
 
 ---
@@ -1033,10 +1039,19 @@ signing](#what-is-actually-signing--decided-08-13).
   could not connect a key, so every customer was capped below tier 3 for a reason
   nothing in the product reported. `connect_stripe`, `get_stripe_connection`,
   `sync_stripe_payments` and `disconnect_stripe` are that path, restored on the
-  dispatcher. **Nothing calls `sync_stripe_payments` on a schedule** (no cron
-  entry in `vercel.json`), so payment evidence is exactly as fresh as the last
-  time someone asked for a sync: a vendor whose customer cancels keeps publishing
-  that payment until the next one.
+  dispatcher, and `/api/cron/stripe-sync` now drives it hourly.
+
+- **Nothing binds a vendor's Stripe account to the vendor.** This is the
+  remaining half of the tier-3 problem, and it is a product decision rather than
+  a bug. What shipped is a restricted key the vendor pastes in; the README
+  advertised Stripe Connect, which would bind the account by OAuth and is the
+  actual fix. As it stands a vendor may paste a key for any Stripe account they
+  control, so tier 3 proves that *some* live Stripe account settled an invoice
+  for a company we also observed using the product — not that the account is
+  theirs. `src/lib/stripe/fetch.ts` never calls `/v1/account`, and reading it
+  would need another restricted-key scope while proving only what the account
+  claims about itself. Connect is the answer; deciding to build it is not an
+  engineering call.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The

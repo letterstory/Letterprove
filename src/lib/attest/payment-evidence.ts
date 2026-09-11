@@ -8,13 +8,37 @@
  *
  * The reason this is worth a whole tier: every other signal in the system
  * originates, at root, with the vendor. The script runs on their site, the
- * customer list is theirs, the domain is theirs. Payment read from the
- * vendor's own Stripe account is the first fact that does NOT pass through
- * their hands — they can cancel a subscription, but they cannot fabricate one
- * without defrauding themselves.
+ * customer list is theirs, the domain is theirs. An invoice that settled
+ * through a processor is the first fact in the chain that costs the vendor
+ * real money to produce — see src/lib/stripe/map.ts for exactly which
+ * subscriptions clear that bar, and for what a determined vendor can still do.
+ *
+ * EVIDENCE GOES STALE, which is the other half of the claim. A row here is a
+ * present-tense assertion that a named company pays this vendor right now, and
+ * the only thing that can ever contradict it is the next successful sync. A
+ * vendor who revokes their own Stripe key stops those syncs, so without a
+ * ceiling on age the last favourable row stands for ever and the vendor is the
+ * one who chose when to stop the clock. Past the ceiling this reads as absent:
+ * not a claim that they stopped paying, just an honest refusal to keep
+ * asserting something nothing has confirmed since yesterday.
  */
 
 import { dbClient } from "@/lib/db/client";
+
+/**
+ * How old evidence may be before it stops counting.
+ *
+ * The Stripe sync cron runs hourly (vercel.json), so a day is twenty-four
+ * consecutive missed or failed syncs. Generous enough that an outage on
+ * Stripe's side or ours does not drop every vendor a tier over one bad hour,
+ * short enough that "corroborated" never means "corroborated last week".
+ */
+const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The oldest `synced_at` still worth reading, as an ISO timestamp. */
+function freshnessFloor(): string {
+	return new Date(Date.now() - MAX_EVIDENCE_AGE_MS).toISOString();
+}
 
 export interface PaymentEvidence {
 	/** ISO 4217, lower case as Stripe returns it. */
@@ -40,9 +64,12 @@ export async function paymentEvidenceFor(
 
 	const { data, error } = await db
 		.from("vendor_payment_evidence")
-		.select("currency, monthly_amount, since, subscription_count")
+		.select("currency, monthly_amount, since, subscription_count, synced_at")
 		.eq("vendor_id", vendorId)
 		.eq("domain", domain)
+		// Filtered in the query rather than after the read, so a stale row is
+		// indistinguishable from an absent one everywhere downstream.
+		.gte("synced_at", freshnessFloor())
 		.maybeSingle();
 
 	if (error || !data) {
@@ -57,6 +84,15 @@ export async function paymentEvidenceFor(
 	// round — no tier-3 claim is better than an unverifiable one.
 	if (!Number.isSafeInteger(amount)) {
 		console.error("[letterprove:payment] non-integer monthly_amount for", domain);
+		return null;
+	}
+
+	// A zero is not a smaller payment, it is the absence of one, and published
+	// as `contract_monthly: 0` inside a signed body it reads as the claim "this
+	// company pays us nothing". map.ts refuses to write one; this refuses to
+	// read one, because the write path is not the only way a row can arrive.
+	if (amount < 1) {
+		console.error("[letterprove:payment] non-positive monthly_amount for", domain);
 		return null;
 	}
 
@@ -84,7 +120,11 @@ export async function paymentEvidenceCount(vendorId: string): Promise<number | n
 	const { count, error } = await db
 		.from("vendor_payment_evidence")
 		.select("*", { count: "exact", head: true })
-		.eq("vendor_id", vendorId);
+		.eq("vendor_id", vendorId)
+		// The same freshness floor the read applies. A count that included rows
+		// too old to publish would tell a vendor their connection is producing
+		// evidence at the moment it has quietly stopped.
+		.gte("synced_at", freshnessFloor());
 
 	if (error || typeof count !== "number") return null;
 	return count;

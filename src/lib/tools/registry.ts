@@ -182,11 +182,11 @@ const KEY_REFUSAL: Record<KeyRejection | "not_configured" | "storage_unavailable
 	unrestricted: {
 		status: 400,
 		detail:
-			"That is an unrestricted secret key (sk_). It can refund your customers, and publishing proof never needs that. Create a restricted key (rk_) with read access to Subscriptions and Customers instead. Nothing was stored.",
+			"That is an unrestricted secret key (sk_). It can refund your customers, and publishing proof never needs that. Create a restricted key (rk_) with read access to Subscriptions, Customers and Invoices instead. Nothing was stored.",
 	},
 	publishable: {
 		status: 400,
-		detail: "That is a publishable key (pk_). It cannot read subscriptions at all. Create a restricted key (rk_) instead. Nothing was stored.",
+		detail: "That is a publishable key (pk_). It cannot read subscriptions at all. Create a restricted key (rk_) with read access to Subscriptions, Customers and Invoices instead. Nothing was stored.",
 	},
 	malformed: {
 		status: 400,
@@ -870,7 +870,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "connect_stripe",
 		description:
-			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
+			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key, which needs read access to Subscriptions, Customers and Invoices. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
 		capability: "vendor:write",
 		inputSchema: S.connectStripeInput,
 		outputSchema: S.connectStripeOutput,
@@ -924,7 +924,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "sync_stripe_payments",
 		description:
-			"Read the caller's vendor's Stripe subscriptions and join them to observed usage, replacing their payment evidence. No args. A test-mode key reports real counts and stores nothing.",
+			"Read the caller's vendor's Stripe subscriptions and settled invoices, join them to observed usage, and replace their payment evidence. No args. A subscription with no invoice that actually settled is not evidence and is reported as unmatched. A test-mode key reports real counts and stores nothing.",
 		capability: "vendor:write",
 		inputSchema: S.syncStripePaymentsInput,
 		outputSchema: S.syncStripePaymentsOutput,

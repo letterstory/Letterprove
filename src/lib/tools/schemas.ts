@@ -276,14 +276,14 @@ const stripeConnection = z.object({
 		.number()
 		.int()
 		.nullable()
-		.describe("Customer domains currently carrying tier-3 payment evidence. Null when the count could not be read, because a failed read is not a zero."),
+		.describe("Customer domains carrying payment evidence fresh enough to publish. Null when the count could not be read, because a failed read is not a zero. Evidence older than a day stops counting here as well as in the attestation, since nothing has confirmed it since."),
 });
 
 export const connectStripeInput = z.object({
 	restricted_key: z
 		.string()
 		.min(1)
-		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…), read scope on Subscriptions and Customers. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
+		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…), read scope on Subscriptions, Customers AND Invoices. Invoices is required: payment evidence is built from invoices that actually settled, because a subscription only says what you meant to bill. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
 });
 /**
  * The connection, never an echo of the argument.

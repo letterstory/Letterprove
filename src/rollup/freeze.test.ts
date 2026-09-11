@@ -61,6 +61,7 @@ function mockDb({ selectResult, upsertResult }: { selectResult: { data: unknown;
 	const chain = {} as {
 		select: ReturnType<typeof vi.fn>;
 		eq: ReturnType<typeof vi.fn>;
+		gte: ReturnType<typeof vi.fn>;
 		lt: ReturnType<typeof vi.fn>;
 		order: ReturnType<typeof vi.fn>;
 		limit: ReturnType<typeof vi.fn>;
@@ -69,6 +70,10 @@ function mockDb({ selectResult, upsertResult }: { selectResult: { data: unknown;
 	};
 	chain.select = vi.fn(() => chain);
 	chain.eq = vi.fn(() => chain);
+	// Payment evidence is read through a freshness floor, so the chain has to
+	// answer `.gte()` as well: evidence nothing has refreshed for a day stops
+	// being publishable.
+	chain.gte = vi.fn(() => chain);
 	chain.lt = vi.fn(() => chain);
 	chain.order = vi.fn(() => chain);
 	chain.limit = vi.fn(() => chain);

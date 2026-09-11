@@ -149,7 +149,7 @@ function runChecks() {
 			label: "Tier 3 — Stripe corroboration",
 			state: stripeIsReachable ? "done" : hasStripeSync ? "partial" : "planned",
 			detail: stripeIsReachable
-				? "lib/stripe/sync.ts joins subscriptions to observed domains and writes vendor_payment_evidence; a TEST-mode key deliberately stores nothing"
+				? "lib/stripe/sync.ts joins settled invoices to observed domains and writes vendor_payment_evidence; a subscription with no invoice that actually settled is not evidence, and a TEST-mode key stores nothing"
 				: hasStripeSync
 					? "lib/stripe/sync.ts and vendor_payment_evidence are intact, but nothing outside src/lib/stripe imports them — the vendor dashboard that called them went with the auth unification and no tool replaced it"
 					: "no lib/stripe/sync.ts or vendor_payment_evidence table — schema designed for it, not built",

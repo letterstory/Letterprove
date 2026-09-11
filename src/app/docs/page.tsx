@@ -29,9 +29,10 @@ import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
  *      from their own modules for the same reason.
  *
  * What is deliberately NOT dressed up: seats_active is always 0, `features`
- * and `since` are vendor-asserted, and tier 3 has never run against a
- * live-mode Stripe key. A page that reads better than the system behaves is
- * the one failure this product cannot afford.
+ * and `since` are vendor-asserted, tier 3 has never run against a live-mode
+ * Stripe key, and the tier-3 section says out loud what a determined vendor
+ * can still do. A page that reads better than the system behaves is the one
+ * failure this product cannot afford.
  */
 
 export const dynamic = "force-dynamic";
@@ -305,10 +306,11 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 							</li>
 							<li>
 								<code>contract_currency</code>, <code>contract_monthly</code> and{" "}
-								<code>contract_since</code> appear only when Stripe corroborated a payment. They are
-								absent rather than zero for everyone else, because a zero would assert &ldquo;pays
-								nothing&rdquo; where absence correctly says &ldquo;we hold no payment
-								evidence&rdquo;.
+								<code>contract_since</code> appear only when an invoice in the vendor&apos;s Stripe
+								account actually settled. They are absent rather than zero for everyone else,
+								because a zero would assert &ldquo;pays nothing&rdquo; where absence correctly says
+								&ldquo;we hold no payment evidence&rdquo;. <code>contract_since</code> is the first
+								settled invoice, not the subscription&apos;s start date.
 							</li>
 							<li>
 								<code>observed_through</code> is the end of the window summarised.{" "}
@@ -398,21 +400,82 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 							not come from the vendor.
 						</p>
 						<p>
-							<strong>Tier 3 is not capped either</strong>, for the same reason: a payment read from
-							your own Stripe account did not pass through your hands. You can cancel a
-							subscription; you cannot invent one without paying a real processor real money. A
-							vendor understating their own tier should not suppress third-party corroboration. Tier
-							3 still sits below the observation and domain gates, because money proves a commercial
-							relationship and not that the product was used.
+							<strong>Tier 3 is not capped either</strong>, for the same reason: it is read from a
+							third party&apos;s ledger rather than from anything you typed. A vendor understating
+							their own tier should not suppress that. Tier 3 still sits below the observation and
+							domain gates, because money proves a commercial relationship and not that the product
+							was used.
+						</p>
+
+						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">What tier 3 actually requires</h3>
+						<p>
+							It used to require an <code>active</code> subscription, which was not enough and was
+							not honest. A subscription is what you configured, not what anyone paid: a $0
+							recurring price reaches <code>active</code> the moment it is created, with no payment
+							method attached and no money involved, and so does a 100%-off coupon. A signed
+							tier-3 attestation naming any company you like cost nothing to manufacture in your own
+							account. Every condition below is now checked instead:
+						</p>
+						<ul>
+							<li>
+								The key is <strong>live mode</strong>. A test-mode key reports real counts and
+								stores nothing, because test payments are invented by definition.
+							</li>
+							<li>
+								The subscription carries a <strong>real recurring price above zero</strong> on a
+								real billing interval. The floor is simply &ldquo;above zero&rdquo;: any larger
+								figure would be denominated in one currency&apos;s minor unit and would mean
+								something different in yen, and it would exclude small customers who are real
+								customers. The cost of forgery is the next bullet, not the size of the number.
+							</li>
+							<li>
+								An <strong>invoice actually settled</strong> against it — paid, for a non-zero
+								amount, with a charge or payment intent behind it. An invoice marked paid by hand
+								(Stripe&apos;s <code>paid_out_of_band</code>) is you asserting payment, so it does
+								not count, and it is reported back to you as such rather than dropped.
+							</li>
+							<li>
+								That payment is <strong>recent</strong> relative to the billing interval: about a
+								billing period plus a grace window for retries. A subscription that stays active
+								for years while nothing is collected stops publishing as paid.
+							</li>
+							<li>
+								<code>contract_since</code> is dated from the <strong>first settled invoice</strong>
+								, never from the subscription&apos;s start date. A start date is a field you set,
+								and Stripe accepts a backdated one, so tenure read from it was settable to any year
+								you liked.
+							</li>
+						</ul>
+						<p>
+							Because of the invoice read, a restricted key now needs read access to{" "}
+							<strong>Invoices</strong> as well as Subscriptions and Customers. A key without it
+							fails the sync with that instruction rather than falling back to the weaker evidence:
+							a corroboration check you can switch off by removing a permission is not a
+							corroboration check.
 						</p>
 						<p>
-							Two honest caveats about tier 3 as it stands.{" "}
-							<strong>It has never run against a live-mode Stripe key in production.</strong> The
+							<strong>Evidence expires.</strong> The sync runs hourly, and payment evidence older
+							than a day stops being published — not as a claim that the customer stopped paying,
+							but as an honest refusal to keep asserting something nothing has confirmed since
+							yesterday. Repeated sync failures clear the evidence outright. Both exist because
+							disconnecting Stripe is something you control: without them, revoking your own key
+							would freeze the last favourable answer in place for ever, with nothing left in the
+							system that could ever contradict it.
+						</p>
+						<p>
+							The honest limit: <strong>this raises the price of a forged tier 3 from nothing to a
+							real charge through a real processor, in a live Stripe account Stripe has verified,
+							leaving a record in your own books.</strong> It does not make it impossible. A vendor
+							willing to pay themselves can still reach tier 3, and nothing here binds the Stripe
+							account to the vendor in the first place — the key is pasted in, not granted through
+							Connect. Read tier 3 as corroboration by a third party&apos;s ledger, not as immunity.
+						</p>
+						<p>
+							One more caveat.{" "}
+							<strong>Tier 3 has never run against a live-mode Stripe key in production.</strong> The
 							publishing half is tested against the real schema with a live-mode flag, but a
 							test-mode key deliberately stores nothing, so no production attestation has ever
-							carried real payment evidence. And <strong>nothing syncs on a schedule</strong>:
-							payment evidence is exactly as fresh as the last time someone ran a sync, so a
-							cancelled subscription keeps publishing until the next one.
+							carried real payment evidence.
 						</p>
 						<p>
 							The aggregate document uses a narrower rule of its own: tier 2 when anything at all

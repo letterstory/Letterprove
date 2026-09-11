@@ -1,11 +1,11 @@
 /**
- * One vendor's Stripe sync: read subscriptions, join them to observed usage,
- * store what survived.
+ * One vendor's Stripe sync: read subscriptions and the invoices that settled,
+ * join them to observed usage, store what survived.
  *
  * The three pieces this composes are each testable alone — credentials.ts
  * holds the secret, fetch.ts talks to Stripe, map.ts decides what counts. This
- * file is the wiring and the two policy decisions that only make sense once
- * they are together:
+ * file is the wiring and the policy decisions that only make sense once they
+ * are together:
  *
  *   1. A TEST-MODE credential never produces evidence. Test payments are
  *      invented by definition, and a tier-3 claim built from them would be
@@ -20,15 +20,40 @@
  *      check. mapPayments defaults to fail-closed, and nothing here passes
  *      allowUnobserved, so a vendor with no telemetry gets no payment evidence
  *      rather than all of it.
+ *
+ *   3. A FAILED SYNC EVENTUALLY CLEARS EVIDENCE. It used to do the opposite:
+ *      it stamped `last_synced_at` on the way out and left the rows standing,
+ *      so a vendor who revoked their own Stripe key froze a favourable claim in
+ *      place permanently and the only consequence was an alert addressed to
+ *      them. Evidence a vendor can stop us from refreshing is evidence they
+ *      control. Consecutive failures are counted, the count clears the rows
+ *      once it passes the threshold, and `last_synced_at` now means what it
+ *      says: the last time a sync actually succeeded.
  */
 
 import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { credentialFor } from "./credentials";
-import { fetchSubscriptions } from "./fetch";
+import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
 import { mapPayments } from "./map";
 
 const OBSERVED_WINDOW_DAYS = 30;
+
+/**
+ * Consecutive failed syncs before standing evidence is deleted.
+ *
+ * The cron runs hourly, so three is three hours of a claim we can no longer
+ * corroborate — long enough that a Stripe blip or one expired token does not
+ * wipe a vendor's proof, short enough that revoking a key is not a way to
+ * freeze a favourable claim. It is a backstop rather than the main defence:
+ * `paymentEvidenceFor` already refuses to read a row older than a day, so the
+ * claim stops publishing well before this deletes anything.
+ */
+const FAILURES_BEFORE_CLEARING = 3;
+
+/** What the vendor is told when their restricted key predates the invoice read. */
+const SCOPE_HELP =
+	"Your Stripe restricted key cannot read Invoices, and payment evidence now requires an invoice that actually settled. Add read access to Invoices on the key in Stripe, then sync again.";
 
 export type SyncResult =
 	| {
@@ -49,19 +74,26 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	if (!credential) return { ok: false, error: "No Stripe key connected." };
 
 	const fetched = await fetchSubscriptions(credential.key);
-	if (!fetched.ok) {
-		await db
-			.from("vendor_stripe_credentials")
-			.update({ last_sync_error: fetched.error, last_synced_at: new Date().toISOString() })
-			.eq("vendor_id", vendorId);
-		return { ok: false, error: fetched.error };
+	if (!fetched.ok) return recordFailure(vendorId, fetched.error);
+
+	// The corroboration read. A subscription says what a vendor means to bill;
+	// only an invoice says money moved, and tier 3's entire claim is the second
+	// thing. A failure here is a failed sync, not a sync that publishes the
+	// weaker evidence: falling back to subscriptions alone would mean a vendor
+	// could get the old, forgeable behaviour back by breaking one permission.
+	const invoices = await fetchPaidInvoices(credential.key);
+	if (!invoices.ok) {
+		return recordFailure(vendorId, invoices.scope ? SCOPE_HELP : invoices.error);
 	}
 
 	const observed = await observedDomains(vendorSlug);
 	const { data: vendorRow } = await db.from("vendors").select("domain").eq("id", vendorId).maybeSingle();
-	const mapping = mapPayments(fetched.subscriptions, observed, { vendorDomain: vendorRow?.domain });
+	const mapping = mapPayments(fetched.subscriptions, observed, invoices.payments, {
+		vendorDomain: vendorRow?.domain,
+	});
 
 	const syncedAt = new Date().toISOString();
+	const truncated = fetched.truncated || invoices.truncated;
 
 	// A test key is allowed to reach this point precisely so the counts below
 	// are real and a vendor can see their wiring works — but nothing is written
@@ -72,18 +104,14 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 		// forever: the live path replaces evidence wholesale on every sync, and
 		// this branch is the only one that never reaches it. Test payments
 		// corroborate nothing, and neither does a key nobody has connected.
-		await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
-		await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
-		await db
-			.from("vendor_stripe_credentials")
-			.update({ last_synced_at: syncedAt, last_sync_error: null })
-			.eq("vendor_id", vendorId);
+		await clearEvidence(vendorId);
+		await recordSuccess(vendorId, syncedAt);
 		return {
 			ok: true,
 			matched: mapping.matched.length,
 			unmatched: mapping.unmatched.length,
 			testMode: true,
-			truncated: fetched.truncated,
+			truncated,
 		};
 	}
 
@@ -91,8 +119,7 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	// last sync must DISAPPEAR from evidence — merging would leave a stale row
 	// asserting a customer still pays when they stopped, which is the worst
 	// kind of wrong for a signed claim.
-	await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
-	await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
+	await clearEvidence(vendorId);
 
 	if (mapping.matched.length > 0) {
 		const { error } = await db.from("vendor_payment_evidence").insert(
@@ -106,7 +133,7 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 				synced_at: syncedAt,
 			}))
 		);
-		if (error) return { ok: false, error: "Couldn't store payment evidence." };
+		if (error) return recordFailure(vendorId, "Couldn't store payment evidence.");
 	}
 
 	if (mapping.unmatched.length > 0) {
@@ -121,18 +148,68 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 		);
 	}
 
-	await db
-		.from("vendor_stripe_credentials")
-		.update({ last_synced_at: syncedAt, last_sync_error: null })
-		.eq("vendor_id", vendorId);
+	await recordSuccess(vendorId, syncedAt);
 
 	return {
 		ok: true,
 		matched: mapping.matched.length,
 		unmatched: mapping.unmatched.length,
 		testMode: false,
-		truncated: fetched.truncated,
+		truncated,
 	};
+}
+
+async function clearEvidence(vendorId: string): Promise<void> {
+	const db = dbClient();
+	if (!db) return;
+	await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
+	await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
+}
+
+async function recordSuccess(vendorId: string, syncedAt: string): Promise<void> {
+	const db = dbClient();
+	if (!db) return;
+	await db
+		.from("vendor_stripe_credentials")
+		.update({
+			last_synced_at: syncedAt,
+			last_sync_error: null,
+			last_sync_failed_at: null,
+			consecutive_sync_failures: 0,
+		})
+		.eq("vendor_id", vendorId);
+}
+
+/**
+ * Record a failed sync, and delete the evidence once failures pile up.
+ *
+ * `last_synced_at` is deliberately NOT touched. It used to be stamped here,
+ * which made the one column that could answer "how old is this evidence?" say
+ * "just now" every hour a broken key failed.
+ */
+async function recordFailure(vendorId: string, error: string): Promise<SyncResult> {
+	const db = dbClient();
+	if (!db) return { ok: false, error };
+
+	const { data } = await db
+		.from("vendor_stripe_credentials")
+		.select("consecutive_sync_failures")
+		.eq("vendor_id", vendorId)
+		.maybeSingle();
+
+	const failures = (Number(data?.consecutive_sync_failures) || 0) + 1;
+	await db
+		.from("vendor_stripe_credentials")
+		.update({
+			last_sync_error: error,
+			last_sync_failed_at: new Date().toISOString(),
+			consecutive_sync_failures: failures,
+		})
+		.eq("vendor_id", vendorId);
+
+	if (failures >= FAILURES_BEFORE_CLEARING) await clearEvidence(vendorId);
+
+	return { ok: false, error };
 }
 
 /**
