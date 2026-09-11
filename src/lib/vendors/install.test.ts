@@ -47,13 +47,21 @@ describe("originFromHeaders", () => {
  *
  * Scoped to attest.js references specifically, so it fails on the mistake
  * rather than on every URL anyone ever writes down.
+ *
+ * `public` is a root and `.js` is a scanned extension because the original
+ * scope missed the file most likely to be copied by hand. attest.js's own
+ * docblock still carried `https://cdn.letterprove.com/attest.js` after every
+ * other copy of that string had been corrected, and this guard did not see it:
+ * `public` was outside ROOTS and `.js` was not a scanned extension. A snippet
+ * in the script's own header is the one an integrator reads first.
  */
 describe("no source file names a host for attest.js that we do not serve", () => {
-	const ROOTS = ["src", "README.md"];
+	const ROOTS = ["src", "public", "README.md"];
 	const SERVED_BY_US = /^https:\/\/(app\.)?letterprove\.com$/;
+	const SCANNED = [".ts", ".tsx", ".md", ".js"];
 
 	function walk(path: string): string[] {
-		if (statSync(path).isFile()) return path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".md") ? [path] : [];
+		if (statSync(path).isFile()) return SCANNED.some((ext) => path.endsWith(ext)) ? [path] : [];
 		return readdirSync(path).flatMap((entry) => walk(join(path, entry)));
 	}
 

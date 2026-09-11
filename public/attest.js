@@ -2,10 +2,19 @@
  * attest.js — the client-side half of collection. See README § Collection
  * and § Event schema for the contract this implements.
  *
- * Install:
- *   <script src="https://cdn.letterprove.com/attest.js" data-key="lp_live_…"></script>
+ * Install: copy the snippet out of the Proofs tab, which builds it from the
+ * origin actually serving the page. The host is never written down.
  *
- * Public API (fires POST /v1/observe on the vendor's behalf):
+ *   <script src="{this app's origin}/attest.js" data-key="lp_live_…"></script>
+ *
+ * This file is `public/attest.js`, so it is served by this app at this app's
+ * own origin and nowhere else. A snippet naming any other host 404s, and this
+ * script is built never to break a host page, so that 404 is indistinguishable
+ * from a site with no traffic: the vendor sees an empty dashboard and concludes
+ * the product does not work. That has already happened twice, once for 65
+ * hours. src/lib/vendors/install.ts holds the incidents and the derivation.
+ *
+ * Public API (fires POST /api/v1/observe on the vendor's behalf):
  *   Letterprove.identify(email)  // establishes domain, fires one "session" per page load
  *   Letterprove.signup(email)    // identifies, then fires "signup"
  *   Letterprove.login(email)     // identifies, then fires "login"

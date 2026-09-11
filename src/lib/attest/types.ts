@@ -23,11 +23,28 @@ export interface AttestationBody {
 	 */
 	verified: boolean;
 	tier: Tier;
-	/** First observed activity, `YYYY-MM`. */
+	/**
+	 * VENDOR-ASSERTED, `YYYY-MM`. Copied from the customer record the vendor
+	 * maintains, not derived from the event stream. Nothing here observes a
+	 * first-activity date, so do not read it as one.
+	 */
 	since: string;
-	/** Features observed in active use. */
+	/**
+	 * VENDOR-ASSERTED. Named feature events are a phase-2 addition and are not
+	 * wired: `/api/v1/config` serves an empty `signals` registry and `ev` is a
+	 * closed enum of session/signup/login, so nothing observes feature use
+	 * today. These are the strings the vendor put on the customer record.
+	 */
 	features: string[];
+	/** MEASURED. Sum of hourly rollups for this domain over the trailing 30 days. */
 	sessions_30d: number;
+	/**
+	 * ALWAYS 0 TODAY. Phase-1 events carry no per-user dimension, so there is
+	 * nothing honest to sum (rollup/snapshots.ts, decision 2026-08-12). Signed
+	 * as a literal zero rather than omitted because the field is required and
+	 * covered by the signature; read it as "not yet measured", never as a
+	 * measurement of zero.
+	 */
 	seats_active: number;
 	/**
 	 * Payment corroborated by Stripe, present ONLY at tier 3. Absent rather
