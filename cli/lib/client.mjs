@@ -4,12 +4,21 @@
 // one non-browser credential (an OAuth access token, see src/lib/oauth-auth.ts),
 // so the CLI has exactly one too. A second credential kind that the server
 // cannot actually verify would be a worse failure than not having one.
+//
+// `url` here is LETTERSTORY's origin, not Letterprove's. Letterprove holds no
+// identity of its own since the 2026-09 auth unification — every vendor tool
+// is now reached through Letterstory's own OAuth-authenticated dispatcher
+// (`POST /api/integrations/tools/letterprove_{name}`), which forwards to
+// Letterprove using the shared service secret (see
+// src/lib/letterprove/tools-client.ts in the `ls` repo). This CLI's command
+// surface (customers, status, keys, …) is unchanged; only the door it walks
+// through to reach it moved.
 
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
-export const DEFAULT_API_URL = "https://app.letterprove.com";
+export const DEFAULT_API_URL = "https://app.letterstory.com";
 
 // A CliError is a message already made human-readable; the entry point prints
 // it and exits 1 without a stack trace. Anything else is a real bug.
@@ -144,21 +153,50 @@ export class LetterproveClient {
 		}
 	}
 
+	/**
+	 * There is no `/api/v1/whoami` anymore — Letterprove tracks no per-token
+	 * identity of its own. The closest read is "does this org have a vendor
+	 * linked at all", so that's what this reports; a session that resolves but
+	 * isn't linked yet is still a valid, useful answer (not an error).
+	 */
 	async whoami() {
-		return this.request("/api/v1/whoami");
+		const link = await this.callTool("find_vendor_by_org", {});
+		return {
+			vendor: link.linked ? { slug: link.slug, domain: link.domain } : null,
+			capabilities: ["vendor:read", "vendor:write"],
+		};
 	}
 
-	/** What this session's token is allowed to call — GET /api/v1/tools. */
+	/**
+	 * Letterprove's own tools now live inside Letterstory's manifest, named
+	 * `letterprove_{name}`. This is the same unauthenticated discovery
+	 * Letterstory's own CLI uses (GET /api/mcp) — filtered to just this app's
+	 * tools, with the prefix stripped so every existing command here
+	 * (`callTool("get_status")`, etc.) keeps working unchanged.
+	 */
 	async listTools() {
-		return this.request("/api/v1/tools");
+		const endpoint = `${this.url}/api/mcp`;
+		let res;
+		try {
+			res = await this.fetch(endpoint, { headers: { accept: "application/json" } });
+		} catch (err) {
+			throw new CliError(`Could not reach ${endpoint}: ${err.message}`);
+		}
+		if (!res.ok) throw new CliError(`Discovery failed (HTTP ${res.status}) at ${endpoint}`);
+		const doc = await res.json();
+		const tools = (doc.tools ?? [])
+			.filter((t) => t.name.startsWith("letterprove_"))
+			.map((t) => ({ ...t, name: t.name.slice("letterprove_".length) }));
+		return { tools };
 	}
 
 	/**
 	 * Every vendor-automation command (customers, status, ...) goes through
-	 * this one call — POST /api/v1/tools/{name} — rather than each command
-	 * hand-rolling its own endpoint and error shape.
+	 * this one call — POST /api/integrations/tools/letterprove_{name}, the
+	 * generic REST dispatcher Letterstory's own integrations already use —
+	 * rather than each command hand-rolling its own endpoint and error shape.
 	 */
 	async callTool(name, args = {}) {
-		return this.request(`/api/v1/tools/${name}`, { method: "POST", body: args });
+		return this.request(`/api/integrations/tools/letterprove_${name}`, { method: "POST", body: args });
 	}
 }
