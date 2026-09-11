@@ -14,15 +14,26 @@ vi.mock("./geo-distribution", () => ({
 	geoDistribution: vi.fn().mockResolvedValue({ regions: {}, unknown: 0, distinctRegions: 0 }),
 }));
 
-/** Mimics the chainable `.from().select().eq().eq().gte().order()` shape the query uses. */
+/**
+ * Mimics the chainable `.from().select().eq()[.eq()].gte().order().range()`
+ * shape the query uses, resolving at `.range()` because the read pages now (see
+ * src/lib/db/read-all.ts).
+ *
+ * `eq` returns a node that accepts a further `eq` as well as `gte`, because the
+ * vendor-wide form (`domain === null`) applies only one filter. The previous
+ * mock hard-wired exactly two, so a vendor-wide call would have walked off the
+ * end of the chain — and that is the form the aggregate attestation uses.
+ * Paging past the cap is covered against real Postgres in
+ * paged-reads.schema.test.ts.
+ */
 function mockDb(result: { data: unknown; error: unknown }) {
-	const order = vi.fn().mockResolvedValue(result);
-	const gte = vi.fn().mockReturnValue({ order });
-	const eq2 = vi.fn().mockReturnValue({ gte });
-	const eq1 = vi.fn().mockReturnValue({ eq: eq2 });
-	const select = vi.fn().mockReturnValue({ eq: eq1 });
+	const range = vi.fn().mockResolvedValue(result);
+	const order: ReturnType<typeof vi.fn> = vi.fn(() => ({ order, range }));
+	const gte = vi.fn().mockReturnValue({ order, range });
+	const eq: ReturnType<typeof vi.fn> = vi.fn(() => ({ eq, gte }));
+	const select = vi.fn().mockReturnValue({ eq });
 	const from = vi.fn().mockReturnValue({ select });
-	return { from, select, eq1, eq2, gte, order };
+	return { from, select, eq, gte, order, range };
 }
 
 describe("fraudFeatures", () => {
@@ -56,8 +67,8 @@ describe("fraudFeatures", () => {
 		expect(result.events).toEqual({ sessions: 30, signups: 3, logins: 6 });
 		expect(result.hourly_buckets).toEqual([13, 15, 11]);
 		expect(db.from).toHaveBeenCalledWith("hot_rollups");
-		expect(db.eq1).toHaveBeenCalledWith("vendor_slug", "vantage");
-		expect(db.eq2).toHaveBeenCalledWith("domain", "acme-corp.example");
+		expect(db.eq).toHaveBeenCalledWith("vendor_slug", "vantage");
+		expect(db.eq).toHaveBeenCalledWith("domain", "acme-corp.example");
 	});
 
 	it("falls back to an all-zero window rather than throwing when the query errors", async () => {

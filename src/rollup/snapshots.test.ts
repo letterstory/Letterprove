@@ -3,14 +3,23 @@ import { currentSnapshot } from "./snapshots";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
-/** Mimics the chainable `.from().select().eq().eq().gte()` shape the query uses. */
+/**
+ * Mimics the chainable `.from().select().eq().eq().gte().order().range()` shape
+ * the query uses. It resolves at `.range()` because the read pages now (see
+ * src/lib/db/read-all.ts): a signed `sessions_30d` must not be summed over
+ * whatever prefix PostgREST felt like returning. One page comes back, which
+ * readAllRows treats as the last; the real boundary is covered against Postgres
+ * in src/lib/attest/paged-reads.schema.test.ts.
+ */
 function mockDb(result: { data: unknown; error: unknown }) {
-	const gte = vi.fn().mockResolvedValue(result);
+	const range = vi.fn().mockResolvedValue(result);
+	const order: ReturnType<typeof vi.fn> = vi.fn(() => ({ order, range }));
+	const gte = vi.fn().mockReturnValue({ order, range });
 	const eq2 = vi.fn().mockReturnValue({ gte });
 	const eq1 = vi.fn().mockReturnValue({ eq: eq2 });
 	const select = vi.fn().mockReturnValue({ eq: eq1 });
 	const from = vi.fn().mockReturnValue({ select });
-	return { from, gte, eq1, eq2, select };
+	return { from, gte, eq1, eq2, select, order, range };
 }
 
 describe("currentSnapshot", () => {

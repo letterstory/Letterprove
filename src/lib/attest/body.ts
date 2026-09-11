@@ -32,6 +32,14 @@ export const TTL_SECONDS = 3600;
  * one tier a vendor can't forge (README § The trust model). So it isn't
  * capped by domainVerified/observed the way tiers 1-3 are; it short-circuits
  * ahead of them.
+ *
+ * What it is worth depends entirely on WHOSE domain it is bound to. A
+ * counter-signature proves a mailbox on `customer.domain` approved the claim,
+ * and a vendor who registered that domain themselves holds that mailbox. The
+ * README accepts that trade and this function keeps it: it does not try to
+ * decide whether a domain is "really" a third party. It is the published body
+ * that has to carry `customer_domain`, so a reader can make that judgement
+ * instead of taking tier 4 on faith.
  */
 export function earned(
 	customer: CustomerFixture,
@@ -106,6 +114,12 @@ export async function attestationBody(
 		vendor: vendor.slug,
 		customer: customer.slug,
 		customer_name: customer.name,
+		// The subject of the claim, not decoration. Name and domain are both
+		// vendor-chosen and unrelated to each other, so a document carrying only
+		// the name gives a reader no way to tell a real "Acme Corp" from a
+		// lookalike registered on a domain the vendor owns. See customer_domain
+		// in ./types.ts.
+		customer_domain: customer.domain,
 		verified,
 		tier,
 		since: customer.since,

@@ -3,12 +3,21 @@ import { domainArrivals } from "./domain-arrivals";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
-/** Mimics the supabase-js chain domainArrivals builds, resolving on .order(). */
+/**
+ * Mimics the supabase-js chain domainArrivals builds, resolving on `.range()`.
+ *
+ * The read pages now (see src/lib/db/read-all.ts), so it finishes at `.range()`
+ * rather than `.order()`. One page comes back, which readAllRows correctly
+ * treats as the last; that a second page is actually requested is proven
+ * against real Postgres in paged-reads.schema.test.ts, where a table with more
+ * than 1000 rows can really exist.
+ */
 function mockDb(result: { data?: unknown; error?: { message: string } }) {
 	const chain = {
 		select: () => chain,
 		eq: () => chain,
-		order: () => Promise.resolve({ data: null, error: null, ...result }),
+		order: () => chain,
+		range: () => Promise.resolve({ data: null, error: null, ...result }),
 	};
 	return { from: () => chain };
 }

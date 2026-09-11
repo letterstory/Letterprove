@@ -23,6 +23,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import { readAllRows } from "@/lib/db/read-all";
 
 export interface DomainArrivals {
 	/**
@@ -53,21 +54,40 @@ export async function domainArrivals(vendorSlug: string): Promise<DomainArrivals
 
 	// Ascending, so the first row seen for a domain is its earliest and the
 	// very first row is the vendor's own start. One pass, no per-domain query.
-	const { data, error } = await db
-		.from("hot_rollups")
-		.select("domain, window_start")
-		.eq("vendor_slug", vendorSlug)
-		.order("window_start", { ascending: true });
-
-	if (error) {
+	//
+	// Paged, and this is the reader where truncation hurts most. The query is
+	// deliberately unwindowed, because first seen has to mean first seen ever,
+	// so its row count only ever grows. An unbounded select stops at 1000 with
+	// no error and no marker (see read-all.ts) and, because the order is
+	// ASCENDING, the 1000 it keeps are the OLDEST. Every domain discovered
+	// after that point falls off the end silently: first_seen freezes, the
+	// countersigner's clump detector scores a fixed historic arrival curve, and
+	// a vendor inventing a hundred customers tomorrow produces no new arrivals
+	// for it to cluster on. The one check built to catch fabricated breadth
+	// would go blind and stay blind.
+	//
+	// Tie-broken on `domain` because `window_start` alone is not unique — the
+	// rollup writes one row per (domain, hour) — and paging a query whose order
+	// is ambiguous can repeat or skip rows across a page boundary.
+	let rows: { domain: string; window_start: string }[];
+	try {
+		rows = await readAllRows(`rollups for ${vendorSlug}`, (from, to) =>
+			db
+				.from("hot_rollups")
+				.select("domain, window_start")
+				.eq("vendor_slug", vendorSlug)
+				.order("window_start", { ascending: true })
+				.order("domain", { ascending: true })
+				.range(from, to),
+		);
+	} catch (e) {
 		// Same posture as fraudFeatures: fail to an unremarkable empty rather
 		// than throwing. An absent signal is scored as "nothing to say here",
 		// never as evidence of innocence.
-		console.error("[letterprove:domain-arrivals] query failed", error.message);
+		console.error("[letterprove:domain-arrivals] query failed", e instanceof Error ? e.message : String(e));
 		return empty;
 	}
 
-	const rows = (data ?? []) as { domain: string; window_start: string }[];
 	if (rows.length === 0) return empty;
 
 	const firstByDomain = new Map<string, string>();

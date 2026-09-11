@@ -28,6 +28,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import { readAllRows } from "@/lib/db/read-all";
 
 export interface GeoDistribution {
 	/**
@@ -51,21 +52,45 @@ export async function geoDistribution(vendorSlug: string): Promise<GeoDistributi
 	if (!db) return EMPTY;
 
 	const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-	const { data, error } = await db
-		.from("hot_events")
-		.select("country, region")
-		.eq("vendor_slug", vendorSlug)
-		.gte("receipt_ts", since);
-
-	if (error) {
+	// Paged, and this is the only one of these readers that was ALREADY being
+	// truncated. Measured against production on 2026-09-10: lettertrace has
+	// 1056 hot_events rows inside the 30-day window and the unbounded select
+	// returned exactly 1000 of them. Every distribution shipped since the row
+	// count crossed the cap was counted over a prefix. This table holds raw
+	// events rather than hourly rollups, so it reaches the cap roughly a
+	// hundred times sooner than anything reading hot_rollups.
+	//
+	// Ordered on (receipt_ts, id): hot_events_vendor_receipt_idx already covers
+	// the filter and this ordering, and `id` breaks ties so the order is total.
+	// Paging an ambiguous order can repeat or skip rows, which here would mean
+	// counting a region twice.
+	//
+	// Paging makes this correct, NOT cheap. It is still a full scan per
+	// customer per freeze, of a result identical for every customer of the same
+	// vendor, and the countersigner's zod schema strips `geo_distribution`
+	// before scoring — so today it is computed, shipped and discarded. A
+	// Postgres-side group-by would return a dozen rows instead of thousands and
+	// could not truncate at all. See the module doc above.
+	let rows: { country: string | null; region: string | null }[];
+	try {
+		rows = await readAllRows(`geo events for ${vendorSlug}`, (from, to) =>
+			db
+				.from("hot_events")
+				.select("country, region")
+				.eq("vendor_slug", vendorSlug)
+				.gte("receipt_ts", since)
+				.order("receipt_ts", { ascending: true })
+				.order("id", { ascending: true })
+				.range(from, to),
+		);
+	} catch (e) {
 		// Same posture as the other extractors: fail to an unremarkable empty
 		// rather than throwing. An absent signal is "nothing to say", never
 		// evidence of innocence.
-		console.error("[letterprove:geo] query failed", error.message);
+		console.error("[letterprove:geo] query failed", e instanceof Error ? e.message : String(e));
 		return EMPTY;
 	}
 
-	const rows = (data ?? []) as { country: string | null; region: string | null }[];
 	const counts = new Map<string, number>();
 	let unknown = 0;
 

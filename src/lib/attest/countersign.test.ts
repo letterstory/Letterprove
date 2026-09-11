@@ -41,6 +41,7 @@ function body(overrides: Partial<AttestationBody> = {}): AttestationBody {
 		vendor: "vantage",
 		customer: "acme-corp",
 		customer_name: "Acme Corp",
+		customer_domain: "acme.com",
 		verified: true,
 		tier: 2,
 		since: "2023-03",
