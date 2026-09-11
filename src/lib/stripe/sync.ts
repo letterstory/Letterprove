@@ -63,6 +63,13 @@ export type SyncResult =
 			/** True when a test-mode key meant nothing was stored as evidence. */
 			testMode: boolean;
 			truncated: boolean;
+			/**
+			 * Set only on a test key whose restricted key cannot read Invoices.
+			 * The sync succeeded in the only sense available to a test key, and
+			 * the vendor has something to fix before a live key would work. It is
+			 * carried back rather than alerted because nothing is at risk yet.
+			 */
+			scopeWarning?: string;
 	  }
 	| { ok: false; error: string };
 
@@ -83,6 +90,31 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	// could get the old, forgeable behaviour back by breaking one permission.
 	const invoices = await fetchPaidInvoices(credential.key);
 	if (!invoices.ok) {
+		// A missing Invoices scope on a TEST key is not a failed sync, and must
+		// not page anyone. Nothing is at risk: a test key writes no evidence
+		// whatever it can read, so there is no published claim to go stale and
+		// nothing a human on our side can or should do at 3am. It is a real
+		// thing the vendor has to fix before a live key will work, so it travels
+		// back as a warning they can see rather than an alert we swallow.
+		//
+		// This is the shape the tier-3 change got wrong: it put a required read
+		// in front of the branch below, whose whole purpose is to let a vendor
+		// confirm their wiring works before they have anything to prove. The
+		// first vendor to connect a test key paged the alert channel hourly for
+		// thirteen hours about a permission that would not have changed one
+		// stored row.
+		if (!credential.livemode && invoices.scope) {
+			await clearEvidence(vendorId);
+			await recordSuccess(vendorId, new Date().toISOString());
+			return {
+				ok: true,
+				matched: 0,
+				unmatched: 0,
+				testMode: true,
+				truncated: fetched.truncated,
+				scopeWarning: SCOPE_HELP,
+			};
+		}
 		return recordFailure(vendorId, invoices.scope ? SCOPE_HELP : invoices.error);
 	}
 
