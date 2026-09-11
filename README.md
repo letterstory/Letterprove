@@ -582,6 +582,11 @@ nobody, and it is therefore the only signed claim most vendors can publish
 today — naming a customer needs that customer's consent, counting them does
 not.
 
+Both per-customer paths are consent-gated, and `/chain` is not a way around
+that: a customer who has not agreed to be named 404s on the document *and* on
+its history, with the same 404 an unknown customer gets, so guessing slugs
+never confirms that a private customer exists.
+
 Agents evaluating a vendor mostly crawl **the vendor's own domain**, so the
 script also injects JSON-LD into the vendor's page, and vendors may proxy
 `vendor.com/proofs/*` to us. Same-origin proof is what gets cited.

@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "docs:status": "node scripts/gen-readme-status.mjs",
     "keygen": "node scripts/keygen.mjs",
     "verify": "node scripts/verify.mjs"
@@ -34,6 +35,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "jsdom": "^30.0.1",
