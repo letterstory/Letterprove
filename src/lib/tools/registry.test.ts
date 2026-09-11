@@ -1241,6 +1241,49 @@ describe("the Stripe tools", () => {
 		});
 	});
 
+	it("sync_stripe_payments carries the Invoices-scope warning through to the caller", async () => {
+		// The warning exists because the sync deliberately does NOT fail here: a
+		// test key stores no evidence, so a missing scope puts nothing at risk
+		// and must not page anyone (#142). That makes this string the only way
+		// the vendor ever learns there is something to fix before a live key
+		// would work, so dropping it at the tool layer would make the problem
+		// silent rather than solved.
+		const { dispatchTool } = await import("./registry");
+		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		vi.mocked(syncVendorPayments).mockResolvedValue({
+			ok: true,
+			matched: 0,
+			unmatched: 0,
+			testMode: true,
+			truncated: false,
+			scopeWarning: "Your Stripe restricted key cannot read Invoices...",
+		});
+
+		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toMatchObject({
+			test_mode: true,
+			scope_warning: "Your Stripe restricted key cannot read Invoices...",
+		});
+	});
+
+	it("omits scope_warning entirely when there is nothing to warn about", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		vi.mocked(syncVendorPayments).mockResolvedValue({
+			ok: true,
+			matched: 2,
+			unmatched: 0,
+			testMode: false,
+			truncated: false,
+		});
+
+		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
+		const body = outcome.kind === "result" && outcome.result.ok ? outcome.result.body : {};
+
+		expect(body).not.toHaveProperty("scope_warning");
+	});
+
 	it("sync_stripe_payments tells a caller it has no key rather than failing at Stripe", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { connectionFor } = await import("@/lib/stripe/credentials");

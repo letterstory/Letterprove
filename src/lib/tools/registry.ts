@@ -985,6 +985,11 @@ export const TOOLS: BoundTool[] = [
 					unmatched: result.unmatched,
 					test_mode: result.testMode,
 					truncated: result.truncated,
+					// Only ever set on a test key that cannot read Invoices. It
+					// deliberately does not fail the sync (nothing is at risk when
+					// nothing is stored), which means this string is the only way
+					// the vendor ever learns about it.
+					...(result.scopeWarning ? { scope_warning: result.scopeWarning } : {}),
 				},
 			};
 		},
