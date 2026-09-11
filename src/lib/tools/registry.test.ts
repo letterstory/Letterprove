@@ -194,6 +194,37 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	// A vendor who renames a customer loses that customer's counter-signature,
+	// and with it the strongest claim in the system. Making them diff the row to
+	// find out would hide a consequence they cannot undo alone: re-earning one
+	// needs the customer to act again.
+	it("tells the caller when an update discarded a counter-signature", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { updateCustomer } = await import("@/lib/vendors/customers");
+		vi.mocked(updateCustomer).mockResolvedValue({
+			ok: true,
+			data: {
+				customer: customerRow({ name: "Globex", countersigned_at: null }) as never,
+				countersignatureCleared: true,
+				pendingConsentCleared: false,
+			},
+		});
+
+		const outcome = await dispatchTool("update_customer", { slug: "acme", name: "Globex" }, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: {
+				ok: true,
+				body: {
+					customer: customerRow({ name: "Globex", countersigned_at: null }),
+					countersignature_cleared: true,
+					pending_consent_cleared: false,
+				},
+			},
+		});
+	});
+
 	it("passes a domain-gate refusal from the shared service straight through", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { updateCustomer } = await import("@/lib/vendors/customers");

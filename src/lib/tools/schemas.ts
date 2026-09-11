@@ -184,7 +184,19 @@ export const updateCustomerInput = z.object({
 	consent: consent.optional(),
 	features: z.array(z.enum(FEATURES as unknown as [string, ...string[]])).optional(),
 });
-export const updateCustomerOutput = z.object({ customer });
+export const updateCustomerOutput = z.object({
+	customer,
+	countersignature_cleared: z
+		.boolean()
+		.describe(
+			"True when this update discarded a tier-4 counter-signature. Name and domain are what the customer approved, so changing either voids it. Re-earning one needs the customer to act again, and a decline blocks the next ask for 30 days.",
+		),
+	pending_consent_cleared: z
+		.boolean()
+		.describe(
+			"True when this update invalidated a consent link that was still live. It was minted against the old name and domain, so an approval on it would land on a claim its approver never saw.",
+		),
+});
 
 export const deleteCustomerInput = z.object({ slug: z.string().min(1) });
 export const deleteCustomerOutput = z

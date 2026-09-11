@@ -18,6 +18,27 @@ export interface AttestationBody {
 	/** Display name of that customer. */
 	customer_name: string;
 	/**
+	 * VENDOR-ASSERTED. The company domain this claim is joined on, and the only
+	 * field a reader can use to tell "Acme Corp" the customer from "Acme Corp"
+	 * the lookalike.
+	 *
+	 * Every other field describes the claim; this one identifies its subject.
+	 * The domain is what telemetry joins on, and what a consent link's
+	 * recipient had to hold a mailbox at, so it is what a tier-4
+	 * counter-signature is actually bound to. The vendor picks it freely (any
+	 * domain that is not free-mail, one of ours, or a reserved TLD), so
+	 * publishing the name without it meant a vendor could register acme-hq.com,
+	 * name the row "Acme Corp", approve their own consent link, and publish
+	 * tier 4 with nothing in the document a reader could notice the
+	 * substitution in. Self-approving on a domain you control is an accepted
+	 * trade (README, "Why delivery is the binding"); doing it invisibly is not.
+	 *
+	 * Added 2026-09-10. Snapshots frozen before then do not carry it, which is
+	 * why the field is additive rather than versioned: the signature covers
+	 * whatever fields a body had, so old entries still verify unchanged.
+	 */
+	customer_domain: string;
+	/**
 	 * True only when the evidence supports it at the stated tier. This word is
 	 * the product's whole credibility; never set it from vendor assertion alone.
 	 */
