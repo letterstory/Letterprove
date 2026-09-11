@@ -583,6 +583,12 @@ nobody, and it is therefore the only signed claim most vendors can publish
 today — naming a customer needs that customer's consent, counting them does
 not.
 
+Both per-customer paths are consent-gated, and `/chain` is not a way around
+that: a customer who has not agreed to be named 404s on the document *and* on
+its history, with the same 404 an unknown customer gets, so guessing slugs
+never confirms that a private customer exists. (`/chain` was ungated until
+[#137](https://github.com/letterstory/Letterprove/pull/137).)
+
 Agents evaluating a vendor mostly crawl **the vendor's own domain**, and
 same-origin proof is what gets cited, so the route to that today is a vendor
 proxying `vendor.com/proofs/*` to us. `/proofs/{vendor}` emits the JSON-LD
