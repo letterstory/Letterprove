@@ -1,5 +1,23 @@
 # `@letterstory/letterprove-cli`
 
+> [!WARNING]
+> **Sign-in does not currently work, so no command below can reach the server.**
+>
+> `letterprove login` runs a browser OAuth 2.1 flow against `/api/oauth/*`. Those endpoints
+> no longer exist. Letterprove's own OAuth server was retired with the auth unification
+> ([#124](https://github.com/letterstory/Letterprove/pull/124) /
+> [#130](https://github.com/letterstory/Letterprove/pull/130)), which made Letterstory the
+> identity authority: there is now exactly one non-browser door into the tool dispatcher,
+> and it is Letterstory's backend proving itself with a shared service secret
+> (`src/lib/oauth-auth.ts`). A caller holding a CLI bearer token gets a 401, and there is no
+> token to hold, because nothing mints one. `GET /api/v1/tools`, which `letterprove tools`
+> reads, was retired at the same time.
+>
+> Everything a vendor can do today happens in Letterstory's Proofs tab. This README is left
+> in place because whether a vendor CLI comes back, and what it would authenticate with, is
+> an open product decision rather than something to quietly delete. Read the rest of this
+> page as a record of what the CLI did, not as instructions you can follow.
+
 Manage your Letterprove vendor account from your terminal. The CLI is a thin client over
 the same tool dispatcher an agent would call (`POST /api/v1/tools/{name}`), so it never
 drifts from the API.
@@ -24,6 +42,10 @@ node cli/bin/letterprove.mjs --help
 ```
 
 ## Authenticate
+
+**This section describes a flow that no longer has a server behind it.** See the warning at
+the top of this page. It is kept as the record of how the CLI authenticated, not as a
+working procedure.
 
 ```bash
 letterprove login

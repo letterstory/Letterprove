@@ -20,11 +20,17 @@
  * honestly. Free-mail is a person, our own domains are us, and neither is a
  * company — see lib/identity/domains.ts.
  *
- * NOT CHAINED OR FROZEN YET. This serves a single fresh entry per hour rather
- * than a persisted history. Chaining it needs its own storage and cadence
- * design alongside rollup/freeze.ts, and the same immutability caveat applies
- * that already does for customer snapshots — a wrong entry is permanent. That
- * is a deliberate follow-up, not an oversight.
+ * CHAINED AND FROZEN. rollup/freeze-aggregates.ts persists one signed entry
+ * per vendor per hour, rollup/aggregate-history.ts reads that history back, and
+ * `/attest/{vendor}/chain` publishes it. What `vendorAggregateChain` serves is
+ * the frozen rows plus one live entry for the current hour, which is usually
+ * not frozen yet, so the chain never goes blank between a deploy and the first
+ * cron tick.
+ *
+ * The immutability caveat that applies to customer snapshots applies here too:
+ * a frozen entry is permanent, so a wrong one is permanent. That is why the
+ * freeze refuses a development-key signature and refuses a body built on a
+ * failed telemetry read, rather than persisting a signed zero.
  */
 
 import { canonicalBytes } from "./canonical";

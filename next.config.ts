@@ -10,12 +10,11 @@ const nextConfig: NextConfig = {
 		return [
 			{ source: "/.well-known/letterprove.json", destination: "/api/well-known/letterprove" },
 			{ source: "/.well-known/letterprove-jwks.json", destination: "/api/well-known/jwks" },
-			// RFC 8414 fixes this path exactly — a client appends it to the issuer
-			// and expects the document there, so it is not ours to name.
-			{
-				source: "/.well-known/oauth-authorization-server",
-				destination: "/api/well-known/oauth-authorization-server",
-			},
+			// There is no RFC 8414 rewrite here anymore. The OAuth server retired
+			// with the auth unification (#124/#130) and its discovery route went
+			// with it, so the rewrite pointed at nothing and the spec-mandated path
+			// answered 404. A rewrite onto a missing destination is worse than no
+			// rewrite: it reads as a working surface to anyone scanning this file.
 		];
 	},
 };

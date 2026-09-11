@@ -1,8 +1,10 @@
 /**
  * JSON-LD for the vendor's own page.
  *
- * Agents evaluating a vendor mostly crawl the VENDOR's domain, not ours, so the
- * script injects this into their page and it is emitted on our proof page too.
+ * Agents evaluating a vendor mostly crawl the VENDOR's domain, not ours. The
+ * only thing that emits this today is our own /proofs/{vendor} page, so it
+ * reaches the vendor's domain only when they proxy `vendor.com/proofs/*` to us.
+ * attest.js does NOT inject it: the collector never writes to the host page.
  *
  * A caveat worth keeping in mind while reading it: schema.org has no vocabulary
  * for a signed attestation. This markup is a DISCOVERY aid — it tells a crawler

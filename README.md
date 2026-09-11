@@ -199,7 +199,7 @@ And it is not a defence against a compromised Letterstory: whoever holds the
 shared secret can name any user id they like. It defends against the realistic
 failure, which is a mistake on the far side of the seam.
 
-The public collection and proof surfaces — `/v1/observe`, `/v1/config`,
+The public collection and proof surfaces — `/api/v1/observe`, `/api/v1/config`,
 `/attest/*`, `/proofs/*`, `/.well-known/*` — are unauthenticated by design and
 were never touched by any of this.
 
@@ -312,7 +312,7 @@ sequenceDiagram
     participant Pub as Letterprove<br/>publish (chained)
     participant Agent as Evaluating agent
 
-    Browser->>LP: POST /v1/observe<br/>{k, domain, ev, cfg, ts}
+    Browser->>LP: POST /api/v1/observe<br/>{k, domain, ev, cfg, ts}
     LP->>LP: bind receipt_ts, origin, ASN<br/>validate cfg version
     LP->>Store: append raw event (Hot)
     Note over Store: hourly job
@@ -334,7 +334,7 @@ sequenceDiagram
 
 ### Emission
 
-Browser fires `POST /v1/observe` per the [event schema](#event-schema--decided).
+Browser fires `POST /api/v1/observe` per the [event schema](#event-schema--decided).
 Domain only, sendBeacon-safe, key-scoped. Nothing is trusted from the client
 except that it happened — counting and validation both run server-side.
 
@@ -379,9 +379,10 @@ except that it happened — counting and validation both run server-side.
 
 ### Presentation
 
-6. **Agent fetches.** An evaluating agent — or the vendor's own page via
-   `attest.js`-injected JSON-LD, or a same-origin proxy — requests
-   `/attest/{vendor}/{customer}.json` or `/proofs/{vendor}`.
+6. **Agent fetches.** An evaluating agent — or a same-origin proxy on the
+   vendor's domain — requests `/attest/{vendor}/{customer}.json` or
+   `/proofs/{vendor}`, the latter of which carries JSON-LD pointing back at the
+   signed documents.
 7. **Agent verifies.** It pulls the public key from
    `/.well-known/letterprove-jwks.json` by `key_id`, checks the signature,
    and — if it wants the audit trail — walks `prev_hash` back through
@@ -448,7 +449,7 @@ Three events, not a general analytics firehose. The firehose is what turns this
 into a six-month schema debate.
 
 ```jsonc
-POST /v1/observe          // sendBeacon-safe, key-scoped, origin-pinned
+POST /api/v1/observe      // sendBeacon-safe, key-scoped, origin-pinned
 {
   "k":      "lp_live_…",  // publishable key — identifies vendor, validates origin
   "domain": "acme.com",   // the join key — domain only, always
@@ -500,7 +501,7 @@ The script pulls its collection config from Letterprove at boot. Signals change
 without shipping new script and without a vendor ever re-pulling.
 
 ```jsonc
-GET /v1/config?k=lp_live_…
+GET /api/v1/config?k=lp_live_…
 → 200, Cache-Control: max-age=…, stale-while-revalidate
 {
   "cfg":     7,
@@ -588,9 +589,14 @@ its history, with the same 404 an unknown customer gets, so guessing slugs
 never confirms that a private customer exists. (`/chain` was ungated until
 [#137](https://github.com/letterstory/Letterprove/pull/137).)
 
-Agents evaluating a vendor mostly crawl **the vendor's own domain**, so the
-script also injects JSON-LD into the vendor's page, and vendors may proxy
-`vendor.com/proofs/*` to us. Same-origin proof is what gets cited.
+Agents evaluating a vendor mostly crawl **the vendor's own domain**, and
+same-origin proof is what gets cited, so the route to that today is a vendor
+proxying `vendor.com/proofs/*` to us. `/proofs/{vendor}` emits the JSON-LD
+(`src/lib/attest/jsonld.ts`), which rides along through such a proxy.
+`attest.js` does not inject anything into the vendor's page: it is a collector
+and nothing else, and giving it DOM-writing behaviour would break the rule that
+it can never affect the host page. Injecting from the script is a plausible
+future, not a shipped one.
 
 ### Shape
 
@@ -962,8 +968,8 @@ slug, domain and key.
   is evidence.** Its customers' domains are not registered and will never emit
   a real event, so every proof it publishes honestly shows `sessions_30d: 0`.
 - **`lettertrace` is a real, live integration.** `lettertrace.com` is the
-  domain `POST /v1/observe` pins the browser's `Origin` header against, and its
-  customer rows are real companies. It is also the entire denominator behind
+  domain `POST /api/v1/observe` pins the browser's `Origin` header against, and
+  its customer rows are real companies. It is also the entire denominator behind
   every fraud threshold — see [Open](#open).
 
 Everything downstream of either — the rollup, signing, chaining, the endpoints,
@@ -996,7 +1002,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
 | 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), [Customer counter-signing](#customer-counter-signing--built-08-21), and [Why delivery is the binding](#why-delivery-is-the-binding--fixed-08-23) |
-| 10 | Event schema and config endpoint shapes — `POST /v1/observe` (`session\|signup\|login`), `GET /v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
+| 10 | Event schema and config endpoint shapes — `POST /api/v1/observe` (`session\|signup\|login`), `GET /api/v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |
 | 13 | **Client API** — `identify`/`signup`/`login`, one line of vendor integration to hand the script an email | ✅ **Decided (08-13)** — see [Client API](#client-api--decided) |
