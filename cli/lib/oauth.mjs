@@ -1,13 +1,21 @@
 // Browser-based OAuth 2.1 login (RFC 8252 loopback redirect + PKCE) for the
-// Letterprove CLI. This talks to the app's own /api/oauth/* endpoints — see
-// src/lib/oauth/core.ts for the matching server half.
-
+// Letterprove CLI.
+//
+// Letterprove holds no identity of its own since the 2026-09 auth
+// unification (see src/lib/oauth-auth.ts) — its own /api/oauth/* server was
+// retired along with local vendor accounts. This CLI now authenticates
+// against LETTERSTORY's authorization server instead (`url` below is
+// Letterstory's origin, see DEFAULT_API_URL in ./client.mjs), using the same
+// `letterstory_cli` client Letterstory's own CLI logs in as — it already
+// carries wildcard scope, so a login here grants the `vendor:read`/
+// `vendor:write` capabilities Letterprove's tools require. This is the exact
+// mechanism, unmodified; only which server it talks to changed.
 import { randomBytes, createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { CliError } from "./client.mjs";
 
-export const CLIENT_ID = "letterprove_cli";
+export const CLIENT_ID = "letterstory_cli";
 const CALLBACK_TIMEOUT_MS = 180_000;
 
 function generatePkce() {

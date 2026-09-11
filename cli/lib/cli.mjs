@@ -1,12 +1,14 @@
 // Command dispatch for the Letterprove CLI.
 //
-// Step 1 of the CLI was auth and nothing else: login, logout, whoami, config.
-// This is step 2 — customers and status — built over the same Bearer token,
-// routed through the one server-side seam (POST /api/v1/tools/{name}, see
-// src/lib/tools/registry.ts) rather than each command growing its own
-// endpoint. Vendor creation is not here: it is a one-time, cookie-session
-// signup step a token cannot bootstrap itself (see the registry's own
-// comment on why it has no tool entry).
+// This command surface (customers, status, keys, vendor, snapshots, support)
+// is unchanged from when it was first built over Letterprove's own bearer
+// tokens. What changed (2026-09) is the door it walks through to get there:
+// Letterprove's own OAuth server was retired in the LS↔LP auth unification,
+// so login and every tool call now go to LETTERSTORY instead (see the header
+// comments in ./oauth.mjs and ./client.mjs) — this file didn't need to know.
+// `staff *` commands are not yet ported to that door (Letterprove's staff
+// tools are an internal surface, not part of this pass) and will 404 until
+// they are; everything else works the same as before.
 
 import {
 	LetterproveClient,
@@ -51,7 +53,7 @@ Flags:
   --json                                       Machine-readable output, where supported
 
 Environment:
-  LETTERPROVE_API_URL                          Override the API base URL
+  LETTERPROVE_API_URL                          Override the Letterstory base URL this CLI logs into and calls
   LETTERPROVE_CONFIG_HOME                      Override the home dir holding .letterprove/
 `;
 
@@ -195,9 +197,11 @@ async function cmdWhoami({ config, flags, io }) {
 		return 0;
 	}
 	io.log(`url:          ${config.url}`);
-	io.log(`vendor:       ${result.vendor?.name ?? "(unknown)"} (${result.vendor?.slug ?? "-"})`);
-	if (result.vendor?.domain) io.log(`domain:       ${result.vendor.domain}`);
-	if (result.vendor?.category) io.log(`category:     ${result.vendor.category}`);
+	if (result.vendor) {
+		io.log(`vendor:       ${result.vendor.slug} (${result.vendor.domain})`);
+	} else {
+		io.log(`vendor:       (not linked yet — link one from Letterstory's Proofs setup)`);
+	}
 	io.log(`capabilities: ${(result.capabilities ?? []).join(", ") || "(none)"}`);
 	return 0;
 }
@@ -227,8 +231,7 @@ async function cmdTools({ config, flags, io }) {
 		return 0;
 	}
 	for (const t of tools ?? []) {
-		const mark = t.available ? " " : "x";
-		io.log(`[${mark}] ${t.name.padEnd(20)} ${t.description}`);
+		io.log(`${t.name.padEnd(20)} ${t.description ?? ""}`);
 	}
 	return 0;
 }
