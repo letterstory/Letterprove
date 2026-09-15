@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/fixtures/vendors", () => ({ findVendor: vi.fn() }));
+vi.mock("@/lib/fixtures/vendors", () => ({ findPublishedVendor: vi.fn() }));
 vi.mock("next/navigation", () => ({
 	notFound: vi.fn(() => {
 		// Real notFound() throws a routing signal; throwing here lets the test
@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import ProofLayout from "./layout";
-import { findVendor } from "@/lib/fixtures/vendors";
+import { findPublishedVendor } from "@/lib/fixtures/vendors";
 import { notFound } from "next/navigation";
 
 beforeEach(() => vi.clearAllMocks());
@@ -25,8 +25,13 @@ beforeEach(() => vi.clearAllMocks());
  * so the check belongs here, above the boundary.
  */
 describe("proof page vendor guard", () => {
+	/*
+	 * `findPublishedVendor`, not `findVendor`. An UNPUBLISHED vendor resolves to
+	 * undefined here exactly as an unknown one does, which is what makes the
+	 * two 404s indistinguishable — see the tests further down this file.
+	 */
 	it("calls notFound() for a vendor that doesn't exist", async () => {
-		vi.mocked(findVendor).mockResolvedValue(undefined);
+		vi.mocked(findPublishedVendor).mockResolvedValue(undefined);
 
 		await expect(
 			ProofLayout({ children: null, params: Promise.resolve({ vendor: "no-such-vendor" }) }),
@@ -36,7 +41,7 @@ describe("proof page vendor guard", () => {
 	});
 
 	it("renders children for a vendor that does exist", async () => {
-		vi.mocked(findVendor).mockResolvedValue({ slug: "acme", name: "Acme" } as never);
+		vi.mocked(findPublishedVendor).mockResolvedValue({ slug: "acme", name: "Acme" } as never);
 
 		await expect(
 			ProofLayout({ children: null, params: Promise.resolve({ vendor: "acme" }) }),
@@ -46,10 +51,10 @@ describe("proof page vendor guard", () => {
 	});
 
 	it("looks the vendor up by the slug from the route, not anything else", async () => {
-		vi.mocked(findVendor).mockResolvedValue({ slug: "lettertrace", name: "Lettertrace" } as never);
+		vi.mocked(findPublishedVendor).mockResolvedValue({ slug: "lettertrace", name: "Lettertrace" } as never);
 
 		await ProofLayout({ children: null, params: Promise.resolve({ vendor: "lettertrace" }) });
 
-		expect(findVendor).toHaveBeenCalledWith("lettertrace");
+		expect(findPublishedVendor).toHaveBeenCalledWith("lettertrace");
 	});
 });

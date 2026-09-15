@@ -31,7 +31,7 @@ describe("every tool declares a real contract", () => {
 		// Without this, every it.each below would vacuously pass if TOOLS were
 		// empty or failed to import — the failure that makes a suite green and
 		// worthless.
-		expect(TOOLS.length).toBe(25);
+		expect(TOOLS.length).toBe(27);
 	});
 
 	it.each(TOOLS.map((t) => [t.name, t] as const))("%s declares an output shape that says something", (_n, tool) => {

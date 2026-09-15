@@ -15,7 +15,7 @@ function db() {
 	return { from: () => ({ insert }) };
 }
 function existing(): VendorFixture {
-	return { id: "v", slug: "v", name: "V", domain: "v.com", category: "c", key: "k", domainVerified: true, customers: [] };
+	return { id: "v", slug: "v", name: "V", domain: "v.com", category: "c", key: "k", domainVerified: true, proofsPublishedAt: "2026-01-01T00:00:00.000Z", customers: [] };
 }
 
 beforeEach(() => {

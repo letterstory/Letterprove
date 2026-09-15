@@ -37,6 +37,8 @@ export interface VendorRow {
 	key: string;
 	members: VendorMember[];
 	customers: { total: number; named: number };
+	/** When this vendor's proofs went public, or null while they are private. */
+	published_at: string | null;
 	/** What the vendor-level attestation currently says, or null if it publishes nothing. */
 	aggregate: { companies: number; sessions: number; tier: Tier } | null;
 }
@@ -104,6 +106,11 @@ export async function vendorRoster(): Promise<VendorRow[] | null> {
 					total: v.customers.length,
 					named: v.customers.filter((c) => consentOf(c) === "named").length,
 				},
+				// Whether anything below is actually reachable by a stranger. A
+				// private vendor's aggregate is computed and frozen exactly as a
+				// public one's, so without this the roster reads identically for
+				// a vendor whose proofs are live and one whose proofs 404.
+				published_at: v.proofsPublishedAt,
 				// A null aggregate means telemetry could not be read, which is not
 				// the same as publishing nothing — the page distinguishes them.
 				aggregate: agg

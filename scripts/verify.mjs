@@ -2,8 +2,8 @@
 /**
  * Independent verifier for Letterprove attestations.
  *
- *   npm run verify -- http://localhost:9100/attest/vantage/acme-corp.json
- *   npm run verify -- http://localhost:9100/attest/vantage/acme-corp/chain
+ *   npm run verify -- http://localhost:9100/attest/{vendor}/{customer}.json
+ *   npm run verify -- http://localhost:9100/attest/{vendor}/{customer}/chain
  *   npm run verify -- ./snapshot.json --jwks http://localhost:9100/.well-known/letterprove-jwks.json
  *
  * This file deliberately shares NO code with the service. It re-implements

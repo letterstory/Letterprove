@@ -93,6 +93,28 @@ describe("freezeAggregates", () => {
 		expect(db.upsert).not.toHaveBeenCalled();
 	});
 
+	/*
+	 * A vendor is private until someone publishes them, and the freeze must not
+	 * care. If it skipped private vendors, the chain would grow a hole across
+	 * exactly the weeks a vendor spends watching the product work before going
+	 * public — and publishing would then mean rebuilding history rather than
+	 * flipping a flag. `allVendors`, not `publishedVendors`, is what makes that
+	 * true, and it is one import away from being wrong.
+	 */
+	it("freezes a vendor whose proofs are still private", async () => {
+		const db = mockDb({});
+		await setup(db);
+		const { allVendors } = await import("@/lib/fixtures/vendors");
+		vi.mocked(allVendors).mockResolvedValue([
+			{ slug: "letterstory", customers: [], proofsPublishedAt: null },
+		] as never);
+
+		const r = await freezeAggregates();
+
+		expect(r).toMatchObject({ ok: true, frozen: 1 });
+		expect(db.upsert).toHaveBeenCalled();
+	});
+
 	it("surfaces a read error rather than throwing", async () => {
 		await setup(mockDb({ lastError: "select boom" }));
 		// Scoped to the vendor, so the alert built from it names the blast radius.

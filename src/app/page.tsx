@@ -1,16 +1,21 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
-import { allVendors } from "@/lib/fixtures/vendors";
+import { publishedVendors } from "@/lib/fixtures/vendors";
 import { originFromHeaders } from "@/lib/vendors/install";
 
 // This list is now DB-backed, not a hardcoded fixture — a vendor who signs
 // up should appear here without waiting for the next deploy, so this can't
 // be statically prerendered at build time.
+//
+// `publishedVendors`, not `allVendors`. The heading over it says "Published
+// proofs" and now means it: a vendor is private until someone publishes them,
+// and listing a private one here would name them on our own front page while
+// every route about them 404s.
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-	const vendors = await allVendors();
+	const vendors = await publishedVendors();
 
 	// The command a visitor copies must point at the deployment they are reading
 	// it on. This said `http://localhost:9100/attest/vantage/acme-corp.json` in

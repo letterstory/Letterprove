@@ -2,10 +2,10 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { vendorJsonLd } from "@/lib/attest/jsonld";
-import { vendorProof, type CustomerProof } from "@/lib/attest/proofs";
-import { vendorAggregate } from "@/lib/attest/aggregate";
+import { publishedVendorProof, type CustomerProof } from "@/lib/attest/proofs";
+import { publishedVendorAggregate } from "@/lib/attest/aggregate";
 import { AttestedAt, RelativeAge } from "./AttestedAt";
-import { FEATURES, findVendor } from "@/lib/fixtures/vendors";
+import { FEATURES, findPublishedVendor } from "@/lib/fixtures/vendors";
 
 /**
  * Per-vendor page title, replacing the generic site-wide one.
@@ -18,7 +18,7 @@ import { FEATURES, findVendor } from "@/lib/fixtures/vendors";
  */
 export async function generateMetadata({ params }: { params: Promise<{ vendor: string }> }) {
 	const { vendor: slug } = await params;
-	const vendor = await findVendor(slug);
+	const vendor = await findPublishedVendor(slug);
 	if (!vendor) notFound();
 
 	return {
@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: { params: Promise<{ vendor: s
 
 export default async function ProofPage({ params }: { params: Promise<{ vendor: string }> }) {
 	const { vendor: slug } = await params;
-	const [proof, aggregate] = await Promise.all([vendorProof(slug), vendorAggregate(slug)]);
+	const [proof, aggregate] = await Promise.all([publishedVendorProof(slug), publishedVendorAggregate(slug)]);
 	if (!proof) notFound();
 
 	/*

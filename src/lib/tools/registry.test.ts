@@ -84,12 +84,17 @@ let vendorRow: {
 	category?: string;
 	domain_verified_at?: string | null;
 	domain_verification_token?: string | null;
+	proofs_published_at?: string | null;
 } | null = {
 	key: "lp_live_acme_old",
 	slug: "acme",
 	name: "Acme Inc",
 };
 let vendorUpdateError: { message: string } | null = null;
+// What was actually written to `vendors`. The update mock is rebuilt on every
+// from() call, so an assertion about the payload has nowhere else to look —
+// and for publish/unpublish the payload IS the behaviour.
+const vendorUpdates: Record<string, unknown>[] = [];
 
 // submit_support_request resolves the caller's email off a bearer token via
 // the service-role client's admin API — there's no cookie session to read it
@@ -107,9 +112,10 @@ const FAKE_DB = {
 						maybeSingle: vi.fn(async () => ({ data: vendorRow })),
 					})),
 				})),
-				update: vi.fn(() => ({
-					eq: vi.fn(async () => ({ error: vendorUpdateError })),
-				})),
+				update: vi.fn((patch: Record<string, unknown>) => {
+					vendorUpdates.push(patch);
+					return { eq: vi.fn(async () => ({ error: vendorUpdateError })) };
+				}),
 			};
 		}
 		return {
@@ -132,6 +138,7 @@ beforeEach(async () => {
 	membershipRow = { vendor_id: "v1" };
 	vendorRow = { key: "lp_live_acme_old", slug: "acme" };
 	vendorUpdateError = null;
+	vendorUpdates.length = 0;
 	authUserRow = { email: "u1@example.com" };
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(FAKE_DB);
@@ -357,14 +364,29 @@ describe("dispatchTool", () => {
 	it("reports get_status by delegating to the shared status service", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { getVendorStatus } = await import("@/lib/vendors/status");
-		vi.mocked(getVendorStatus).mockResolvedValue({ ok: true, receiving: true, installed: true, count: 3 });
+		vi.mocked(getVendorStatus).mockResolvedValue({
+			ok: true,
+			receiving: true,
+			installed: true,
+			count: 3,
+			publishedAt: "2026-01-01T00:00:00.000Z",
+		});
 
 		const outcome = await dispatchTool("get_status", {}, principal(["vendor:read"]));
 
 		expect(getVendorStatus).toHaveBeenCalledWith("v1");
 		expect(outcome).toEqual({
 			kind: "result",
-			result: { ok: true, body: { receiving: true, installed: true, count: 3 } },
+			result: {
+				ok: true,
+				body: {
+					receiving: true,
+					installed: true,
+					count: 3,
+					published: true,
+					published_at: "2026-01-01T00:00:00.000Z",
+				},
+			},
 		});
 	});
 
@@ -1064,6 +1086,111 @@ describe("responses carry what their caller needs", () => {
 		expect(fail.kind === "result" && fail.result.ok && (fail.result.body as { domain: string }).domain).toBe(
 			"acme.com",
 		);
+	});
+});
+
+/**
+ * Publication: the flip that decides whether any of this is reachable.
+ *
+ * A vendor is private until someone publishes them (README § A vendor is
+ * private until someone publishes them). These two tools are the only way that
+ * flag moves, so what matters here is who may move it, what it refuses, and
+ * that it writes a date rather than a boolean — the timestamp is what tells a
+ * vendor and support when the proofs actually went out.
+ */
+describe("publish_proofs and unpublish_proofs", () => {
+	it("publishes the caller's own vendor and reports when it went public", async () => {
+		const { dispatchTool } = await import("./registry");
+		vendorRow = { slug: "acme", domain_verified_at: "2026-09-01T00:00:00.000Z", proofs_published_at: null };
+
+		const outcome = await dispatchTool("publish_proofs", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || !outcome.result.ok) throw new Error("expected success");
+		const body = outcome.result.body as { published: boolean; published_at: string; slug: string };
+		expect(body.published).toBe(true);
+		expect(body.slug).toBe("acme");
+		expect(typeof body.published_at).toBe("string");
+		expect(vendorUpdates).toEqual([{ proofs_published_at: body.published_at }]);
+	});
+
+	/*
+	 * Nothing is collected for an unverified domain, so the only document we
+	 * could sign for one is a zero — a confident public claim with no evidence
+	 * under it, which is the thing this product exists to stop being normal.
+	 */
+	it("refuses to publish a vendor whose domain is unverified", async () => {
+		const { dispatchTool } = await import("./registry");
+		vendorRow = { slug: "acme", domain_verified_at: null, proofs_published_at: null };
+
+		const outcome = await dispatchTool("publish_proofs", {}, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 409, body: { error: "domain_not_verified" } },
+		});
+		expect(vendorUpdates).toEqual([]);
+	});
+
+	// Publication is a fact about the past; a retry must not restate it as today.
+	it("is idempotent, returning the original date rather than rewriting it", async () => {
+		const { dispatchTool } = await import("./registry");
+		vendorRow = {
+			slug: "acme",
+			domain_verified_at: "2026-09-01T00:00:00.000Z",
+			proofs_published_at: "2026-09-02T09:00:00.000Z",
+		};
+
+		const outcome = await dispatchTool("publish_proofs", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toEqual({
+			published: true,
+			published_at: "2026-09-02T09:00:00.000Z",
+			slug: "acme",
+		});
+		expect(vendorUpdates).toEqual([]);
+	});
+
+	it("takes the proofs back down by clearing the date", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("unpublish_proofs", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind).toBe("result");
+		if (outcome.kind !== "result" || !outcome.result.ok) throw new Error("expected success");
+		expect((outcome.result.body as { published: boolean }).published).toBe(false);
+		expect(vendorUpdates).toEqual([{ proofs_published_at: null }]);
+	});
+
+	/*
+	 * Unpublishing stops serving; it cannot un-fetch. A response that only said
+	 * `published: false` would invite reading it as a retraction, and a signed
+	 * document someone already holds stays valid forever — that is the point of
+	 * signing it.
+	 */
+	it("says out loud that unpublishing does not invalidate anything already fetched", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("unpublish_proofs", {}, principal(["vendor:write"]));
+
+		if (outcome.kind !== "result" || !outcome.result.ok) throw new Error("expected success");
+		expect((outcome.result.body as { note: string }).note).toMatch(/remain signed and verifiable/i);
+	});
+
+	// Publication is the vendor's own decision about their own row: read-only
+	// scope must not be able to make it, and there is no vendor argument to aim
+	// at anyone else's.
+	it("refuses a read-only caller", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		expect(await dispatchTool("publish_proofs", {}, principal(["vendor:read"]))).toEqual({
+			kind: "denied",
+			capability: "vendor:write",
+		});
+		expect(await dispatchTool("unpublish_proofs", {}, principal(["vendor:read"]))).toEqual({
+			kind: "denied",
+			capability: "vendor:write",
+		});
 	});
 });
 

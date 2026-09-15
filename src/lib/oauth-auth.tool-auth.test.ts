@@ -23,7 +23,7 @@ function post(body: unknown, auth?: string): Request {
 }
 
 function vendor(): VendorFixture {
-	return { id: VENDOR_ID, slug: "v", name: "V", domain: "v.com", category: "c", key: "k", domainVerified: true, customers: [] };
+	return { id: VENDOR_ID, slug: "v", name: "V", domain: "v.com", category: "c", key: "k", domainVerified: true, proofsPublishedAt: "2026-01-01T00:00:00.000Z", customers: [] };
 }
 
 beforeEach(() => {

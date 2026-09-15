@@ -10,14 +10,14 @@ import { GET } from "./route";
  * long one it is allowed to have precisely BECAUSE nothing here is
  * withdrawable.
  *
- * `vendorAggregate` is mocked at the module boundary — signing and chain
+ * `publishedVendorAggregate` is mocked at the module boundary — signing and chain
  * composition are covered exhaustively in lib/attest/aggregate.test.ts, and
  * repeating them here would test the library twice and the route not at all.
  */
 
-vi.mock("@/lib/attest/aggregate", () => ({ vendorAggregate: vi.fn() }));
+vi.mock("@/lib/attest/aggregate", () => ({ publishedVendorAggregate: vi.fn() }));
 
-import { vendorAggregate } from "@/lib/attest/aggregate";
+import { publishedVendorAggregate } from "@/lib/attest/aggregate";
 
 const AGGREGATE = {
 	vendor: "vantage",
@@ -46,7 +46,7 @@ function get(vendor: string) {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	vi.mocked(vendorAggregate).mockResolvedValue(AGGREGATE as never);
+	vi.mocked(publishedVendorAggregate).mockResolvedValue(AGGREGATE as never);
 	vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
@@ -73,10 +73,11 @@ describe("GET /attest/[vendor]", () => {
 	});
 
 	it("404s an unknown vendor rather than publishing a signed zero", async () => {
-		// vendorAggregate returns null for both an unknown vendor and telemetry
+		// publishedVendorAggregate returns null for an unknown vendor, an
+		// unpublished one, and telemetry
 		// it could not read. Neither may publish as "0 companies observed": a
 		// signed zero is a claim, and a wrong one.
-		vi.mocked(vendorAggregate).mockResolvedValue(null);
+		vi.mocked(publishedVendorAggregate).mockResolvedValue(null);
 
 		const res = await get("no-such-vendor");
 
@@ -87,7 +88,7 @@ describe("GET /attest/[vendor]", () => {
 	});
 
 	it("keeps the 404 CORS-open and uncacheable", async () => {
-		vi.mocked(vendorAggregate).mockResolvedValue(null);
+		vi.mocked(publishedVendorAggregate).mockResolvedValue(null);
 
 		const res = await get("no-such-vendor");
 
@@ -101,7 +102,7 @@ describe("GET /attest/[vendor] — cache headers", () => {
 		// The ttl is signed into the body. If the header and the body disagreed,
 		// a verifier reading `ttl` would be told one staleness bound while the
 		// edge enforced another.
-		vi.mocked(vendorAggregate).mockResolvedValue({ ...AGGREGATE, ttl: 900 } as never);
+		vi.mocked(publishedVendorAggregate).mockResolvedValue({ ...AGGREGATE, ttl: 900 } as never);
 
 		const res = await get("vantage");
 
@@ -134,20 +135,20 @@ describe("GET /attest/[vendor] — the .json suffix", () => {
 
 		expect(suffixed.status).toBe(200);
 		expect(await suffixed.json()).toEqual(await plain.json());
-		expect(vendorAggregate).toHaveBeenNthCalledWith(1, "vantage");
-		expect(vendorAggregate).toHaveBeenNthCalledWith(2, "vantage");
+		expect(publishedVendorAggregate).toHaveBeenNthCalledWith(1, "vantage");
+		expect(publishedVendorAggregate).toHaveBeenNthCalledWith(2, "vantage");
 	});
 
 	it("strips the suffix once only", async () => {
 		await get("vantage.json.json");
 
-		expect(vendorAggregate).toHaveBeenCalledWith("vantage.json");
+		expect(publishedVendorAggregate).toHaveBeenCalledWith("vantage.json");
 	});
 
 	it("leaves a slug that merely contains .json alone", async () => {
 		await get("jsonhero");
 
-		expect(vendorAggregate).toHaveBeenCalledWith("jsonhero");
+		expect(publishedVendorAggregate).toHaveBeenCalledWith("jsonhero");
 	});
 });
 

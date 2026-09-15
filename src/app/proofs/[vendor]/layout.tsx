@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { findVendor } from "@/lib/fixtures/vendors";
+import { findPublishedVendor } from "@/lib/fixtures/vendors";
 
 /**
  * Resolves the vendor here, above the loading boundary, so an unknown one gets
@@ -35,8 +35,14 @@ import { findVendor } from "@/lib/fixtures/vendors";
  * resolve before the shell can flush. That buys the correct status while
  * keeping the skeleton.
  *
- * Cost is one extra `findVendor` per request — a single indexed lookup by
+ * Cost is one extra vendor lookup per request — a single indexed read by
  * slug, on a page that already builds a signed chain per customer.
+ *
+ * `findPublishedVendor`, not `findVendor`: a vendor is private until someone
+ * publishes it, and an unpublished one gets the identical 404 an unknown one
+ * gets. Resolving it here rather than in `page.tsx` is what makes that a 404
+ * STATUS — the reasoning above applies unchanged, and applies harder: a 200
+ * on an unpublished vendor would tell a crawler the slug is real.
  */
 export default async function ProofLayout({
 	children,
@@ -46,7 +52,7 @@ export default async function ProofLayout({
 	params: Promise<{ vendor: string }>;
 }) {
 	const { vendor } = await params;
-	if (!(await findVendor(vendor))) notFound();
+	if (!(await findPublishedVendor(vendor))) notFound();
 
 	return <>{children}</>;
 }

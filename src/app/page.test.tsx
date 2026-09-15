@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
-vi.mock("@/lib/fixtures/vendors", () => ({ allVendors: vi.fn() }));
+vi.mock("@/lib/fixtures/vendors", () => ({ publishedVendors: vi.fn() }));
 // Chrome and Link render nothing useful here and drag in client-only concerns.
 vi.mock("@/components/chrome", () => ({
 	DevKeyBanner: () => null,
@@ -21,9 +21,9 @@ function textOf(node: unknown): string {
 
 async function render(host: string | null, slugs: string[] = ["vantage", "lettertrace"]) {
 	const { headers } = await import("next/headers");
-	const { allVendors } = await import("@/lib/fixtures/vendors");
+	const { publishedVendors } = await import("@/lib/fixtures/vendors");
 	vi.mocked(headers).mockResolvedValue(new Headers(host ? { host } : {}) as never);
-	vi.mocked(allVendors).mockResolvedValue(
+	vi.mocked(publishedVendors).mockResolvedValue(
 		slugs.map((slug) => ({ slug, name: slug, domain: `${slug}.com`, category: "c", key: "k", customers: [] })) as never
 	);
 	const { default: Home } = await import("./page");

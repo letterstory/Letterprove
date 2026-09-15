@@ -97,6 +97,31 @@ export const getStatusOutput = z.object({
 	receiving: z.boolean().describe("Any event in the last 24h."),
 	installed: z.boolean().describe("Has the script EVER checked in — distinguishes quiet from never installed."),
 	count: z.number().int(),
+	published: z.boolean().describe("Whether this vendor's proofs are public. Collection runs either way."),
+	published_at: z.string().nullable().describe("When they went public. Null while private."),
+});
+
+/**
+ * Publication, both directions. No arguments in either: the vendor is the
+ * caller's own, resolved from the principal, so there is nothing to tamper
+ * with — and publishing is an intentional act rather than a boolean somebody
+ * can flip the wrong way in a single call.
+ */
+export const publishProofsInput = empty;
+export const publishProofsOutput = z.object({
+	published: z.literal(true),
+	published_at: z.string(),
+	slug: z.string().describe("For building the now-live /proofs and /attest URLs."),
+});
+
+export const unpublishProofsInput = empty;
+export const unpublishProofsOutput = z.object({
+	published: z.literal(false),
+	note: z
+		.string()
+		.describe(
+			"Unpublishing stops serving; it cannot un-fetch. Anything already retrieved while public stays valid and signed.",
+		),
 });
 
 export const getInstallSnippetInput = empty;
@@ -383,6 +408,10 @@ export const vendorRosterOutput = z.object({
 				.array(z.object({ email: z.string(), role: z.string() }))
 				.describe("Addresses. Nothing else in the tool surface returns these — hence staff:read."),
 			customers: z.object({ total: z.number().int(), named: z.number().int() }),
+			published_at: z
+				.string()
+				.nullable()
+				.describe("When this vendor's proofs went public, or null while private. See findPublishedVendor()."),
 			aggregate: z
 				.object({ companies: z.number().int(), sessions: z.number().int(), tier: z.number().int() })
 				.nullable()

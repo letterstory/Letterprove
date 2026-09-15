@@ -9,7 +9,16 @@
 import { attestationBody, earned, TTL_SECONDS } from "./body";
 import { buildChain, head } from "./chain";
 import { GENESIS_HASH, snapshotHash } from "./verify";
-import { allVendors, consentOf, findCustomer, findVendor, type CustomerFixture, type VendorFixture } from "../fixtures/vendors";
+import {
+	allVendors,
+	consentOf,
+	findCustomer,
+	findPublishedVendor,
+	findVendor,
+	publishedVendors,
+	type CustomerFixture,
+	type VendorFixture,
+} from "../fixtures/vendors";
 import { loadPersistedChain } from "@/rollup/history";
 import { tierReport } from "@/lib/tiers/report";
 import type { SignedAttestation, Tier } from "./types";
@@ -139,9 +148,17 @@ export async function customerChain(vendorSlug: string, customerSlug: string): P
  * pseudonymous attestation still says "some customer of this vendor did X",
  * and against a vendor with three customers that re-identifies trivially.
  * Anonymous customers contribute to the aggregate and nothing else.
+ *
+ * TWO CONSENTS, one door. `findPublishedVendor` rather than `findVendor`:
+ * the customer has to have agreed to be named AND the vendor has to have
+ * published at all. They are separate decisions by separate parties, and a
+ * customer who consented before the vendor launched must not be the thing
+ * that launches them. Everything else about the shape is unchanged — the
+ * chain is still computed and still frozen for a private vendor, so
+ * publishing is a flip, not a rebuild.
  */
 export async function customerProof(vendorSlug: string, customerSlug: string): Promise<CustomerProof | null> {
-	const vendor = await findVendor(vendorSlug);
+	const vendor = await findPublishedVendor(vendorSlug);
 	const customer = vendor && findCustomer(vendor, customerSlug);
 	if (!customer || consentOf(customer) !== "named") return null;
 
@@ -200,8 +217,35 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 	};
 }
 
+/**
+ * `vendorProof`, gated — what the public vendor surfaces serve.
+ *
+ * `vendorProof` itself stays ungated because it is also internal composition:
+ * `get_proof_summary` is a vendor reading their own rollup back through a
+ * token scoped to their own vendor id, which is not publication and must keep
+ * working while they are private. Same split, same reasoning, and the same
+ * naming as `customerChain` / `customerProof` above — the gated door has a
+ * different name so the call site says which one it opened.
+ */
+export async function publishedVendorProof(vendorSlug: string): Promise<VendorProof | null> {
+	if (!(await findPublishedVendor(vendorSlug))) return null;
+	return vendorProof(vendorSlug);
+}
+
 export async function vendorSlugs(): Promise<string[]> {
 	return (await allVendors()).map((v) => v.slug);
+}
+
+/**
+ * The slugs a stranger may be told about.
+ *
+ * Discovery (/.well-known/letterprove.json) enumerates these. A private
+ * vendor listed there would be named, and linked to, by the one document
+ * agents are told to read first — which would make the 404s on its routes a
+ * formality rather than a gate.
+ */
+export async function publishedVendorSlugs(): Promise<string[]> {
+	return (await publishedVendors()).map((v) => v.slug);
 }
 
 export interface CustomerSnapshotSummary {

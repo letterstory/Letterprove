@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./proofs", () => ({ vendorSlugs: vi.fn() }));
+vi.mock("./proofs", () => ({ publishedVendorSlugs: vi.fn() }));
 
-import { vendorSlugs } from "./proofs";
+import { publishedVendorSlugs } from "./proofs";
 import { discoveryDocument } from "./discovery";
 
 /**
@@ -17,7 +17,7 @@ import { discoveryDocument } from "./discovery";
  */
 beforeEach(() => {
 	vi.clearAllMocks();
-	vi.mocked(vendorSlugs).mockResolvedValue(["acme", "globex"]);
+	vi.mocked(publishedVendorSlugs).mockResolvedValue(["acme", "globex"]);
 });
 
 describe("discoveryDocument", () => {
@@ -68,7 +68,7 @@ describe("discoveryDocument", () => {
 	});
 
 	it("survives having nothing published", async () => {
-		vi.mocked(vendorSlugs).mockResolvedValue([]);
+		vi.mocked(publishedVendorSlugs).mockResolvedValue([]);
 		const doc = await discoveryDocument("https://app.letterprove.com");
 		expect(doc.proofs).toEqual([]);
 		expect(doc.signing.jwks_uri).toContain("/.well-known/");
