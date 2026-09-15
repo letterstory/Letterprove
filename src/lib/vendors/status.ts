@@ -1,7 +1,7 @@
 import { dbClient } from "@/lib/db/client";
 
 export type VendorStatusResult =
-	| { ok: true; receiving: boolean; installed: boolean; count: number }
+	| { ok: true; receiving: boolean; installed: boolean; count: number; publishedAt: string | null }
 	| { ok: false; status: number; error: string };
 
 /**
@@ -18,12 +18,21 @@ export type VendorStatusResult =
  * installed but no identify()/signup()/login() call anywhere is `installed:
  * true, receiving: false` forever — that's not broken, see ping.ts — and
  * without this field it's indistinguishable from a script that never loaded.
+ *
+ * `publishedAt` is a third, separate question: is any of this PUBLIC. A vendor
+ * is private until someone publishes them, and collection runs either way, so
+ * "receiving events" and "serving proofs" are no longer the same state and a
+ * status tool that answered only the first would be quietly misleading.
  */
 export async function getVendorStatus(vendorId: string): Promise<VendorStatusResult> {
 	const db = dbClient();
 	if (!db) return { ok: false, status: 404, error: "Not configured" };
 
-	const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle();
+	const { data: vendor } = await db
+		.from("vendors")
+		.select("slug, proofs_published_at")
+		.eq("id", vendorId)
+		.maybeSingle();
 	if (!vendor) return { ok: false, status: 404, error: "Not configured" };
 
 	const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -36,5 +45,11 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 	if (error) return { ok: false, status: 500, error: "Count failed" };
 
 	const total = count ?? 0;
-	return { ok: true, receiving: total > 0, installed: ping != null, count: total };
+	return {
+		ok: true,
+		receiving: total > 0,
+		installed: ping != null,
+		count: total,
+		publishedAt: vendor.proofs_published_at ?? null,
+	};
 }

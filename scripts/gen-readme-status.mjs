@@ -116,6 +116,14 @@ function runChecks() {
 	// than the vendor's own click — worth its own row, since tier 4 "existing"
 	// and tier 4 "meaning something" were different things for two days.
 	const consentIsDeliveryBound = existsSync(path.join(ROOT, "src/lib/vendors/consent-recipient.ts"));
+	// Same structural pairing: the gated resolver has to exist in code AND the
+	// column it reads has to be migrated. A `findPublishedVendor` with no
+	// `proofs_published_at` behind it would answer "private" for everyone and
+	// take every proof in the product dark, which is a half-landed feature
+	// worth refusing to call done.
+	const publicationIsOptIn =
+		/findPublishedVendor/.test(read("src/lib/fixtures/vendors.ts") ?? "") &&
+		/proofs_published_at/.test(migrations);
 
 	return [
 		{
@@ -167,6 +175,13 @@ function runChecks() {
 			detail: consentIsDeliveryBound
 				? "consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token"
 				: "the consent link is handed to the vendor, so nothing stops them approving on their customer's behalf",
+		},
+		{
+			label: "Publication is opt-in — a vendor is private until someone publishes it",
+			state: publicationIsOptIn ? "done" : "planned",
+			detail: publicationIsOptIn
+				? "findPublishedVendor() is the gated resolver every public route goes through; collection, freeze and signing still run while private, so publishing is a flip rather than a rebuild"
+				: "every public route resolves through findVendor(), so a vendor is published the moment its row exists",
 		},
 		{
 			label: "Support / help infrastructure",

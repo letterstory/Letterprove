@@ -1,6 +1,6 @@
 import { isDemonstration, signingMode } from "./keys";
 import { methodUrl } from "./method";
-import { vendorSlugs } from "./proofs";
+import { publishedVendorSlugs } from "./proofs";
 import { tierLadderDocument } from "./tiers";
 
 /**
@@ -58,7 +58,11 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		// the one thing that is actually signed for them. `chain` is what makes
 		// it auditable rather than merely signed: walk it and you can prove no
 		// earlier figure was restated.
-		proofs: (await vendorSlugs()).map((slug) => ({
+		// Published vendors only. This is the first document an agent reads, so
+		// a private vendor listed here would be named and linked by the very
+		// thing that tells agents where to look, and the 404s behind it would be
+		// a formality.
+		proofs: (await publishedVendorSlugs()).map((slug) => ({
 			vendor: slug,
 			url: `${origin}/proofs/${slug}`,
 			aggregate: `${origin}/attest/${slug}.json`,

@@ -55,7 +55,7 @@ describe("getVendorStatus", () => {
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, count: 0, ping: null }) as never);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0 });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0, publishedAt: null });
 	});
 
 	it("reports receiving=false, installed=true when config has been fetched but no event has landed", async () => {
@@ -64,7 +64,7 @@ describe("getVendorStatus", () => {
 			mockDb({ vendor: { slug: "acme" }, count: 0, ping: { vendor_slug: "acme" } }) as never
 		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0 });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0, publishedAt: null });
 	});
 
 	it("reports receiving=true once at least one event landed", async () => {
@@ -73,7 +73,33 @@ describe("getVendorStatus", () => {
 			mockDb({ vendor: { slug: "acme" }, count: 5, ping: { vendor_slug: "acme" } }) as never
 		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5 });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5, publishedAt: null });
+	});
+
+	/*
+	 * Publication is a separate axis from collection: a vendor can be receiving
+	 * events for weeks while private, which is the whole point of the flag. The
+	 * cases above pass a vendor row with no `proofs_published_at` and get
+	 * `publishedAt: null` beside a live event count, which is exactly that
+	 * state.
+	 */
+	it("reports when the vendor's proofs went public, separately from whether it is receiving", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(
+			mockDb({
+				vendor: { slug: "acme", proofs_published_at: "2026-09-14T10:00:00.000Z" },
+				count: 5,
+				ping: { vendor_slug: "acme" },
+			}) as never,
+		);
+
+		expect(await getVendorStatus("v1")).toEqual({
+			ok: true,
+			receiving: true,
+			installed: true,
+			count: 5,
+			publishedAt: "2026-09-14T10:00:00.000Z",
+		});
 	});
 
 	it("reports a count failure distinctly from a missing vendor", async () => {

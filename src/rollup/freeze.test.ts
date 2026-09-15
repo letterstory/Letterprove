@@ -31,14 +31,14 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 			name: "Vantage",
 			domain: "vantage.example",
 			category: "customer data platforms",
-			key: "lp_live_vantage_9f2c", domainVerified: true,
+			key: "lp_live_vantage_9f2c", domainVerified: true, proofsPublishedAt: "2026-01-01T00:00:00.000Z",
 			customers: [
 				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api", "analytics"], consent: "named" },
 				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso", "api", "analytics", "sla"], consent: "anonymous" },
 				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
 			],
 		},
-		{ id: "00000000-0000-0000-0000-000000000001", slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, customers: [] },
+		{ id: "00000000-0000-0000-0000-000000000001", slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, proofsPublishedAt: "2026-01-01T00:00:00.000Z", customers: [] },
 	];
 	return {
 		...original,
@@ -133,6 +133,42 @@ describe("freezeSnapshots", () => {
 		const [row, opts] = upsertCalls[0] as [Record<string, unknown>, Record<string, unknown>];
 		expect((row.attestation as { prev_hash: string }).prev_hash).toBe(GENESIS_HASH);
 		expect(opts).toEqual({ onConflict: "vendor_slug,customer_slug,hour_bucket" });
+	});
+
+	/*
+	 * Publication gates PUBLICATION and nothing else. A private vendor's
+	 * history is built and frozen exactly like a public one's — that is the
+	 * property that lets a vendor collect quietly for weeks and then go public
+	 * with a chain that already reaches back to genesis, instead of starting
+	 * one on launch day. `allVendors`, not `publishedVendors`: one import away
+	 * from a hole in the chain.
+	 */
+	it("freezes a vendor whose proofs are still private", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		const { currentSnapshot } = await import("@/rollup/snapshots");
+		const { findVendor } = await import("@/lib/fixtures/vendors");
+		vi.mocked(currentSnapshot).mockResolvedValue({
+			observed_through: "2026-08-12T22:00:00.000Z",
+			published_at: "2026-08-12T22:00:00.000Z",
+			sessions_30d: 5,
+			seats_active: 0,
+			observed: true,
+			readOk: true,
+		});
+		const db = mockDb({ selectResult: { data: null, error: null }, upsertResult: { error: null } });
+		vi.mocked(dbClient).mockReturnValue(db as never);
+
+		// The fixture array is shared across this file, so take it private for
+		// the length of this test only.
+		const vantage = (await findVendor("vantage"))!;
+		const was = vantage.proofsPublishedAt;
+		vantage.proofsPublishedAt = null;
+		try {
+			expect(await freezeSnapshots()).toEqual({ ok: true, frozen: 3 });
+			expect(db.upsert.mock.calls).toHaveLength(3);
+		} finally {
+			vantage.proofsPublishedAt = was;
+		}
 	});
 
 	it("chains onto the previous hour's persisted hash rather than genesis", async () => {

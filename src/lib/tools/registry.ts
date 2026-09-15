@@ -465,7 +465,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_status",
 		description:
-			"Whether the caller's vendor has received any events in the last 24h and how many, plus whether the tracking script has ever successfully checked in at all.",
+			"Whether the caller's vendor has received any events in the last 24h and how many, whether the tracking script has ever successfully checked in at all, and whether the vendor's proofs are public yet.",
 		capability: "vendor:read",
 		inputSchema: S.getStatusInput,
 		outputSchema: S.getStatusOutput,
@@ -474,7 +474,20 @@ export const TOOLS: BoundTool[] = [
 			if (typeof vendorId !== "string") return vendorId;
 			const result = await getVendorStatus(vendorId);
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
-			return { ok: true, body: { receiving: result.receiving, installed: result.installed, count: result.count } };
+			return {
+				ok: true,
+				body: {
+					receiving: result.receiving,
+					installed: result.installed,
+					count: result.count,
+					// The one read-back for the publication flag. Without it a
+					// vendor has a write with no matching read and no way to
+					// answer "is any of this public yet" short of curling their
+					// own proof URL and interpreting a 404.
+					published: result.publishedAt !== null,
+					published_at: result.publishedAt,
+				},
+			};
 		},
 	}),
 	defineTool({
@@ -740,6 +753,97 @@ export const TOOLS: BoundTool[] = [
 			return {
 				ok: true,
 				body: { domain: vendor.domain, verified: true, checked: true, message, verified_at: verifiedAt },
+			};
+		},
+	}),
+	defineTool({
+		/*
+		 * Publication is the vendor's own decision, so this is `vendor:write`
+		 * and takes no vendor argument — the row is resolved from the caller's
+		 * principal, the same way `verify_domain` and `rotate_key` resolve
+		 * theirs.
+		 *
+		 * WHY NOT STAFF-ONLY, given self-serve does not exist yet. Staff
+		 * already reach this: `authenticateToolRequest` builds the principal
+		 * from the org the call is acting for, so a staff member working inside
+		 * a vendor's Letterstory workspace gets `vendor:write` for that vendor
+		 * today. A staff-scoped duplicate taking a slug would add a second
+		 * write path to the same field and reach nothing the first one cannot
+		 * — and a second path to a gate is how gates rot. When self-serve
+		 * lands, this tool is already it.
+		 *
+		 * REFUSES AN UNVERIFIED DOMAIN. `POST /v1/observe` records nothing for
+		 * a vendor whose domain is unproven, so publishing one publishes a
+		 * signed document that can only ever say zero — a confident public
+		 * claim with no evidence under it, which is the thing this product
+		 * exists to stop being normal.
+		 */
+		name: "publish_proofs",
+		description:
+			"Make the caller's vendor proofs public — /proofs/{slug}, /attest/{slug} and both chain routes start resolving. Collection, rollups and signing were already running; this only opens the doors. Args: none.",
+		capability: "vendor:write",
+		inputSchema: S.publishProofsInput,
+		outputSchema: S.publishProofsOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("slug, domain_verified_at, proofs_published_at")
+				.eq("id", vendorId)
+				.maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			if (!vendor.domain_verified_at) {
+				return { ok: false, status: 409, body: { error: "domain_not_verified" } };
+			}
+
+			// Idempotent: publishing an already-public vendor returns the date
+			// it actually went public rather than restating it as today. This
+			// is a fact about the past and a retry must not rewrite it.
+			if (vendor.proofs_published_at) {
+				return {
+					ok: true,
+					body: { published: true, published_at: vendor.proofs_published_at, slug: vendor.slug },
+				};
+			}
+
+			const publishedAt = new Date().toISOString();
+			const { error } = await db.from("vendors").update({ proofs_published_at: publishedAt }).eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			return { ok: true, body: { published: true, published_at: publishedAt, slug: vendor.slug } };
+		},
+	}),
+	defineTool({
+		/*
+		 * The way back. Publication is reversible because a vendor must be able
+		 * to stop — but it is not a retraction, and the response says so rather
+		 * than letting the name imply otherwise. A signed document fetched
+		 * while the vendor was public stays valid forever: that is the whole
+		 * point of signing it.
+		 */
+		name: "unpublish_proofs",
+		description:
+			"Take the caller's vendor proofs private again. Every public route 404s; collection, rollups and signing continue. Does not invalidate anything already fetched. Args: none.",
+		capability: "vendor:write",
+		inputSchema: S.unpublishProofsInput,
+		outputSchema: S.unpublishProofsOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const { error } = await db.from("vendors").update({ proofs_published_at: null }).eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			return {
+				ok: true,
+				body: {
+					published: false,
+					note: "Public routes now 404. Documents fetched while this vendor was public remain signed and verifiable — unpublishing stops serving, it cannot un-fetch.",
+				},
 			};
 		},
 	}),

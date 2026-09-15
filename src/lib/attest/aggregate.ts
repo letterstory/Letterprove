@@ -39,7 +39,7 @@ import { methodUrl } from "./method";
 import { signAttestation } from "./sign";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import { partitionDomains } from "@/lib/identity/domains";
-import { findVendor } from "@/lib/fixtures/vendors";
+import { findPublishedVendor, findVendor } from "@/lib/fixtures/vendors";
 import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { loadAggregateHistory } from "@/rollup/aggregate-history";
@@ -245,6 +245,31 @@ export async function vendorAggregateChain(vendorSlug: string): Promise<SignedAg
 
 export async function vendorAggregate(vendorSlug: string): Promise<SignedAggregate | null> {
 	const chain = await vendorAggregateChain(vendorSlug);
+	return chain ? chain[chain.length - 1] : null;
+}
+
+/**
+ * The two gated doors — what `/attest/{vendor}` and `/attest/{vendor}/chain`
+ * serve. A vendor is private until someone publishes it (fixtures/vendors.ts,
+ * `findPublishedVendor`), and the aggregate is the surface that made that
+ * matter: creating a vendor used to publish a signed count of their customers
+ * at the moment the row existed, zeros first and then real numbers, without
+ * anyone choosing to say either.
+ *
+ * The ungated pair above stays ungated on purpose. `signAggregate` is what the
+ * hourly freeze calls and `aggregateBody` is what the staff roster calls —
+ * both must keep running while a vendor is private, or the chain grows a hole
+ * across exactly the weeks a vendor spends watching it work before going
+ * public, and publishing would mean rebuilding history rather than flipping a
+ * flag.
+ */
+export async function publishedVendorAggregateChain(vendorSlug: string): Promise<SignedAggregate[] | null> {
+	if (!(await findPublishedVendor(vendorSlug))) return null;
+	return vendorAggregateChain(vendorSlug);
+}
+
+export async function publishedVendorAggregate(vendorSlug: string): Promise<SignedAggregate | null> {
+	const chain = await publishedVendorAggregateChain(vendorSlug);
 	return chain ? chain[chain.length - 1] : null;
 }
 

@@ -213,6 +213,31 @@ export default async function DocsPage() {
 							and the old one stops working at once, so every install has to be updated in the same
 							change.
 						</p>
+
+						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">
+							Nothing is public until you publish it
+						</h3>
+						<p>
+							Installing the script publishes nothing. Until you publish, every public URL about
+							you — <code>/proofs/&lt;you&gt;</code>, <code>/attest/&lt;you&gt;</code> and both
+							chain paths — answers <strong>404</strong>, the same 404 a vendor who does not exist
+							gets, and you are absent from the discovery document. Nobody can tell from the
+							outside that you are here.
+						</p>
+						<p>
+							Everything else runs the whole time. Events are collected, rolled up hourly, signed,
+							chained and frozen exactly as they would be if you were public. So publishing is a
+							switch, not a build: the day you turn it on, your history already reaches back to
+							your first observation instead of starting that morning. Install, watch it work for
+							as long as you like, and go public when the numbers are worth showing.
+						</p>
+						<p>
+							Publish and unpublish from the Proofs tab. Publishing needs your domain verified,
+							because nothing is collected for an unverified domain and the only document we could
+							sign for you would be a zero. Unpublishing takes every URL back to 404 — but it
+							cannot un-fetch: an attestation someone already retrieved while you were public stays
+							signed and stays verifiable, which is the whole point of signing it.
+						</p>
 					</Section>
 
 					<Section n={2} id="client-api" title="The client API">
@@ -646,6 +671,13 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
 							Every proof endpoint is public, unauthenticated and CORS-open, answers JSON as UTF-8,
 							and carries <Mono>x-letterprove: on</Mono>. A proof nobody can fetch cross-origin is
 							not proof.
+						</p>
+						<p>
+							All of them resolve only once you have{" "}
+							<a href="#install" className="text-mint hover:underline">
+								published
+							</a>
+							. Before that they answer 404, indistinguishably from a vendor who does not exist.
 						</p>
 						<Endpoints origin={origin} />
 						<p>

@@ -33,6 +33,7 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins settled invoices to observed domains and writes vendor_payment_evidence; a subscription with no invoice that actually settled is not evidence, and a TEST-mode key stores nothing |
 | ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
 | ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
+| ✅ Publication is opt-in — a vendor is private until someone publishes it | findPublishedVendor() is the gated resolver every public route goes through; collection, freeze and signing still run while private, so publishing is a flip rather than a rebuild |
 | ✅ Support / help infrastructure | the submit_support_request tool posts through lib/support/slack.ts to a Slack incoming webhook |
 <!-- STATUS:AUTO:END -->
 
@@ -572,6 +573,65 @@ visible.
 
 ## Publication
 
+### A vendor is private until someone publishes them — **Decided (09-14)**
+
+Nothing about a vendor is public until `vendors.proofs_published_at` is set.
+While it is null, `/proofs/{vendor}`, `/attest/{vendor}`, and both chain routes
+answer **404** — the same 404 an unknown vendor gets — and the vendor is absent
+from the home page and from `/.well-known/letterprove.json`.
+
+What is gated is **publication and only publication**:
+
+| | Private | Published |
+|---|---|---|
+| Collecting events | ✅ | ✅ |
+| Hourly rollups | ✅ | ✅ |
+| Frozen to `published_snapshots` / `published_aggregates` | ✅ | ✅ |
+| Signed and counter-signed | ✅ | ✅ |
+| Readable by the vendor (`get_proof_summary`, `list_snapshots`) | ✅ | ✅ |
+| Every public route | **404** | ✅ |
+| Listed in discovery | ✗ | ✅ |
+
+That is the same split, for the same reason, as [consent](#how-it-is-enforced--built-08-13):
+history is built the whole time, it just doesn't leave the building. So
+publishing needs no backfill and no re-signing — a vendor who has been
+collecting for a month goes public with a chain that already reaches back to
+their first observation, rather than starting one on launch day.
+
+**Why this exists.** Until 09-14 a vendor was published the moment its row
+existed. Creating `letterstory` as a second vendor — for fraud calibration, and
+to dogfood our own install — immediately served a signed aggregate of zeros at
+`/attest/letterstory`, and installing the collector would have turned those
+zeros into a public, signed count of how many companies use Letterstory, before
+Letterprove had launched. Every real vendor will want to install, watch it work
+for a few weeks, and go public deliberately. Publishing a customer count from
+minute one is the wrong default for a product whose entire subject is consent.
+
+**404, not a "this vendor is private" page.** An unpublished vendor has to be
+indistinguishable from one that does not exist, or guessing slugs confirms
+which companies have installed Letterprove and not launched yet — a fact about
+someone else's roadmap. Same rule the consent gate applies to a withheld
+customer.
+
+**How it is enforced.** `findPublishedVendor()` in `src/lib/fixtures/vendors.ts`
+is the gated resolver, sitting beside the ungated `findVendor()` every internal
+caller keeps using; `publishedVendorProof`, `publishedVendorAggregate`,
+`publishedVendorAggregateChain` and `publishedVendorSlugs` are the gated doors
+in front of the composition functions of the same name. The two-function shape
+is deliberate: the consent rule once lived inside one function's body and only
+the route that happened to call it was protected ([#137](https://github.com/letterstory/Letterprove/pull/137)),
+so the gated door has a different name and the call site says which one it
+opened.
+
+**Flipping it.** `publish_proofs` and `unpublish_proofs` on the tool dispatcher,
+both `vendor:write` and both argument-less — the vendor is resolved from the
+caller's principal. Staff reach them the same way a vendor does, by acting for
+that vendor's Letterstory org, so there is no staff-scoped duplicate taking a
+slug. `publish_proofs` refuses a vendor whose domain is unverified, because the
+collector records nothing for one and the only document it could publish is a
+signed zero. Unpublishing stops serving; it cannot un-fetch, and the tool's
+response says so.
+
 ### Endpoints
 
 | Path | Serves |
@@ -589,8 +649,11 @@ nobody, and it is therefore the only signed claim most vendors can publish
 today — naming a customer needs that customer's consent, counting them does
 not.
 
-Both per-customer paths are consent-gated, and `/chain` is not a way around
-that: a customer who has not agreed to be named 404s on the document *and* on
+Every path in that table is publication-gated: they resolve only for a vendor
+whose proofs have been published (see above), and 404 identically otherwise.
+
+Both per-customer paths are additionally consent-gated, and `/chain` is not a
+way around that: a customer who has not agreed to be named 404s on the document *and* on
 its history, with the same 404 an unknown customer gets, so guessing slugs
 never confirms that a private customer exists. (`/chain` was ungated until
 [#137](https://github.com/letterstory/Letterprove/pull/137).)
@@ -989,13 +1052,20 @@ With no signing key configured the service derives a deterministic one from a
 published seed, ids it `dev-insecure-…`, and says so on every page and in the
 discovery document. Mint a real one with `npm run keygen`.
 
+A fresh local database has **no vendors at all** — the pre-unification seed was
+deleted by `20260828130000`, and a vendor created since is private until
+someone publishes it. So the proof surfaces below 404 until you create one
+(`create_vendor`), verify its domain, and publish it (`publish_proofs`). That is
+the product's real first-run experience, and it is worth walking rather than
+short-cutting.
+
 | Surface | |
 |---|---|
 | `/` | Index of published proofs |
-| `/proofs/vantage` | The report — HTML for a person, JSON for `Accept: application/json` or a `.json` suffix |
-| `/attest/vantage` | The vendor's aggregate attestation |
-| `/attest/vantage/acme-corp.json` | One signed attestation |
-| `/attest/vantage/acme-corp/chain` | Its full signed history |
+| `/proofs/{vendor}` | The report — HTML for a person, JSON for `Accept: application/json` or a `.json` suffix |
+| `/attest/{vendor}` | The vendor's aggregate attestation |
+| `/attest/{vendor}/{customer}.json` | One signed attestation |
+| `/attest/{vendor}/{customer}/chain` | Its full signed history |
 | `/verify` | The human reading of the discovery document — how to check any of this yourself |
 | `/keys` | The human reading of the JWKS, including why retired keys stay |
 | `/.well-known/letterprove.json` | Discovery |
@@ -1010,7 +1080,7 @@ a page.
 ### Verify it yourself
 
 ```bash
-npm run verify -- http://localhost:9100/attest/vantage/acme-corp/chain
+npm run verify -- http://localhost:9100/attest/{vendor}/{customer}/chain
 ```
 
 `scripts/verify.mjs` shares **no code** with the service. It re-implements
@@ -1029,13 +1099,20 @@ reads `vendors` and `vendor_customers` through the service-role client. The two
 identities that used to be literals were seeded into those tables at the same
 slug, domain and key.
 
-- **`vantage` is demo data.** **Vantage does not exist and nothing it publishes
-  is evidence.** Its customers' domains are not registered and will never emit
-  a real event, so every proof it publishes honestly shows `sessions_30d: 0`.
 - **`lettertrace` is a real, live integration.** `lettertrace.com` is the
   domain `POST /api/v1/observe` pins the browser's `Origin` header against, and
-  its customer rows are real companies. It is also the entire denominator behind
-  every fraud threshold — see [Open](#open).
+  its customer rows are real companies. It is the only vendor whose proofs are
+  published, and the entire denominator behind every fraud threshold — see
+  [Open](#open).
+- **`letterstory` is real and private.** Created 09-14 as a second vendor, to
+  give those thresholds a denominator of more than one and to dogfood our own
+  install. `proofs_published_at` is null, so it collects and chains like any
+  other vendor and publishes nothing — see [A vendor is private until someone
+  publishes them](#a-vendor-is-private-until-someone-publishes-them--decided-09-14).
+- **`vantage` was demo data, and is gone.** It was org-less, so
+  `20260828130000_unify_auth_drop_local_identity.sql` deleted it along with the
+  rest of the pre-unification seed. Anything still pointing at `/proofs/vantage`
+  is stale.
 
 Everything downstream of either — the rollup, signing, chaining, the endpoints,
 the JSON-LD, the verifier — is the production path, and has been since
@@ -1079,6 +1156,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 19 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#a-decline-is-remembered--built-08-27) |
 | 20 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
 | 21 | **A vendor may counter-sign a domain they control; they may not do it invisibly.** The attestation publishes `customer_domain`, and changing a customer's name or domain discards the counter-signature and any live consent link | ✅ **Decided (09-10)** — see [Making the accepted case visible](#making-the-accepted-case-visible--built-09-10) |
+| 22 | **A vendor is private until someone publishes them.** Collection, rollup, freeze, signing and countersigning all run while private; only publication is gated, and an unpublished vendor 404s exactly as an unknown one does | ✅ **Decided (09-14)** — see [A vendor is private until someone publishes them](#a-vendor-is-private-until-someone-publishes-them--decided-09-14) |
 
 ### Open
 

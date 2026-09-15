@@ -26,6 +26,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 			category: "customer data platforms",
 			key: "lp_live_vantage_9f2c",
 			domainVerified: true,
+			proofsPublishedAt: "2026-01-01T00:00:00.000Z",
 			customers: [
 				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api"], consent: "named" },
 				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso"], consent: "anonymous" },
@@ -40,6 +41,14 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 		...original,
 		allVendors: async () => VENDORS,
 		findVendor: async (slug: string) => VENDORS.find((v) => v.slug === slug),
+		// `findPublishedVendor` has to be mocked alongside `findVendor`, not left
+		// to the spread: it calls `findVendor` through the module's own binding,
+		// which the spread does not replace, so the real (DB-backed, unconfigured
+		// here) lookup would run and every public route would 404.
+		findPublishedVendor: async (slug: string) => {
+			const vendor = VENDORS.find((v) => v.slug === slug);
+			return vendor && vendor.proofsPublishedAt !== null ? vendor : undefined;
+		},
 	};
 });
 

@@ -1,5 +1,5 @@
 import { logProofAccess } from "@/lib/access/log";
-import { vendorAggregateChain } from "@/lib/attest/aggregate";
+import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
 import { notFound, proofJson } from "@/lib/http";
 
 /**
@@ -16,7 +16,11 @@ import { notFound, proofJson } from "@/lib/http";
  * creation for exactly this reason (see api/vendor/customers), rather than
  * left to be discovered when someone's proof silently 404s.
  *
- * Public like every other proof surface: it names nobody.
+ * Names nobody, so no consent gate — but publication-gated all the same, via
+ * `publishedVendorAggregateChain`. The history is built and frozen for a
+ * private vendor exactly as for a public one; what publication decides is
+ * whether it leaves the building. That is what makes going public a flip
+ * rather than a rebuild.
  */
 export async function GET(
 	request: Request,
@@ -25,10 +29,10 @@ export async function GET(
 	const { vendor } = await params;
 	logProofAccess(request, `${vendor}/aggregate/chain`);
 
-	const chain = await vendorAggregateChain(vendor);
-	// Null covers an unknown vendor and an unreadable telemetry read alike.
-	// Neither should publish as an empty history, which would read as "this
-	// vendor has never claimed anything".
+	const chain = await publishedVendorAggregateChain(vendor);
+	// Null covers an unknown vendor, an unpublished one, and an unreadable
+	// telemetry read alike. None should publish as an empty history, which
+	// would read as "this vendor has never claimed anything".
 	if (!chain) return notFound(`no aggregate history for "${vendor}"`);
 
 	return proofJson({ vendor, kind: "aggregate", length: chain.length, chain });

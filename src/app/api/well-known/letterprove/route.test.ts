@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
-vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn() }));
+vi.mock("@/lib/attest/proofs", () => ({ publishedVendorSlugs: vi.fn() }));
 vi.mock("@/lib/attest/keys", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/attest/keys")>()),
 	isDemonstration: vi.fn(),
@@ -11,9 +11,9 @@ vi.mock("@/lib/attest/keys", async (importOriginal) => ({
 const REQ = new Request("https://app.letterprove.com/.well-known/letterprove.json");
 
 async function discovery(opts: { slugs?: string[]; demo?: boolean } = {}) {
-	const { vendorSlugs } = await import("@/lib/attest/proofs");
+	const { publishedVendorSlugs } = await import("@/lib/attest/proofs");
 	const { isDemonstration, signingMode } = await import("@/lib/attest/keys");
-	vi.mocked(vendorSlugs).mockResolvedValue(opts.slugs ?? ["lettertrace"]);
+	vi.mocked(publishedVendorSlugs).mockResolvedValue(opts.slugs ?? ["lettertrace"]);
 	vi.mocked(isDemonstration).mockReturnValue(opts.demo ?? false);
 	vi.mocked(signingMode).mockReturnValue(opts.demo ? "development" : "countersigned");
 	return (await GET(REQ)).json();

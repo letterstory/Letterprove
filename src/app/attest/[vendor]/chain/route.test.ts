@@ -12,9 +12,9 @@ import { GET } from "./route";
  * ever stops being enforced here.
  */
 
-vi.mock("@/lib/attest/aggregate", () => ({ vendorAggregateChain: vi.fn() }));
+vi.mock("@/lib/attest/aggregate", () => ({ publishedVendorAggregateChain: vi.fn() }));
 
-import { vendorAggregateChain } from "@/lib/attest/aggregate";
+import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
 import type { SignedAggregate } from "@/lib/attest/aggregate";
 
 function entry(overrides: Partial<SignedAggregate>): SignedAggregate {
@@ -59,7 +59,7 @@ function get(vendor: string) {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	vi.mocked(vendorAggregateChain).mockResolvedValue(linkedPair());
+	vi.mocked(publishedVendorAggregateChain).mockResolvedValue(linkedPair());
 	vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
@@ -87,7 +87,7 @@ describe("GET /attest/[vendor]/chain", () => {
 	it("404s an unknown vendor rather than publishing an empty history", async () => {
 		// An empty array would read as "this vendor has never claimed anything",
 		// which is a claim of its own and not one the evidence supports.
-		vi.mocked(vendorAggregateChain).mockResolvedValue(null);
+		vi.mocked(publishedVendorAggregateChain).mockResolvedValue(null);
 
 		const res = await get("no-such-vendor");
 
@@ -96,7 +96,7 @@ describe("GET /attest/[vendor]/chain", () => {
 	});
 
 	it("404s rather than serving an empty chain when history could not be read", async () => {
-		vi.mocked(vendorAggregateChain).mockResolvedValue(null);
+		vi.mocked(publishedVendorAggregateChain).mockResolvedValue(null);
 
 		const res = await get("vantage");
 
@@ -129,7 +129,7 @@ describe("GET /attest/[vendor]/chain — chain integrity as served", () => {
 
 	it("does not reorder or rewrite what the library handed it", async () => {
 		const chain = linkedPair();
-		vi.mocked(vendorAggregateChain).mockResolvedValue(chain);
+		vi.mocked(publishedVendorAggregateChain).mockResolvedValue(chain);
 
 		const body = await (await get("vantage")).json();
 
@@ -145,7 +145,7 @@ describe("GET /attest/[vendor]/chain — cache headers", () => {
 	// /attest/{vendor} does. Documented rather than changed, since nothing
 	// signs the header itself.
 	it("uses the proofJson default of one hour, not the entries' own ttl", async () => {
-		vi.mocked(vendorAggregateChain).mockResolvedValue(linkedPair().map((e) => ({ ...e, ttl: 900 })));
+		vi.mocked(publishedVendorAggregateChain).mockResolvedValue(linkedPair().map((e) => ({ ...e, ttl: 900 })));
 
 		const res = await get("vantage");
 
@@ -170,7 +170,7 @@ describe("GET /attest/[vendor]/chain — the .json suffix", () => {
 	it("passes the vendor segment through verbatim, .json suffix included", async () => {
 		await get("vantage.json");
 
-		expect(vendorAggregateChain).toHaveBeenCalledWith("vantage.json");
+		expect(publishedVendorAggregateChain).toHaveBeenCalledWith("vantage.json");
 	});
 
 	it("echoes the raw segment back in the envelope's vendor field", async () => {

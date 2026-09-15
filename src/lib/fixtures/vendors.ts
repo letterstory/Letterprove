@@ -92,11 +92,43 @@ export interface VendorFixture {
 	 * see lib/vendors/verification.ts. Caps everything at tier 0 when false.
 	 */
 	domainVerified: boolean;
+	/**
+	 * When this vendor's proofs became public, or null while they are private.
+	 *
+	 * A vendor is private until someone publishes it. Everything internal runs
+	 * regardless — collection, rollup, freeze, signing, countersigning — so the
+	 * chain has no hole in it and publishing is a flip rather than a rebuild.
+	 * What this gates is publication and only publication: see
+	 * `findPublishedVendor` below, which is the resolution point every public
+	 * route goes through.
+	 *
+	 * Deliberately not called `publishedAt`. An attestation body already has a
+	 * `published_at` meaning "when this document was signed", and proofs.ts
+	 * reads both in the same function.
+	 */
+	proofsPublishedAt: string | null;
 	customers: CustomerFixture[];
 }
 
 /** Every feature we know how to attest, in display order. */
 export const FEATURES = ["sso", "audit_log", "api", "analytics", "sla"] as const;
+
+/**
+ * One list, four lookups. Hand-copied subsets are how `domain_verified_at`
+ * once went missing from all three vendor selects at once, silently capping
+ * every vendor at tier 0 — and `proofs_published_at` would fail the same way,
+ * except that a missing publication flag reads as "private" and takes a live
+ * vendor's proofs dark instead.
+ */
+const VENDOR_COLUMNS = "id, slug, name, domain, category, key, domain_verified_at, proofs_published_at";
+
+/**
+ * The columns every vendor_customers read here selects, for the same reason.
+ * Distinct from `CUSTOMER_COLUMNS` in lib/vendors/customers.ts, which is the
+ * TOOL-facing shape: that one carries `id` and this one carries `vendor_id`.
+ */
+const VENDOR_CUSTOMER_COLUMNS =
+	"vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at";
 
 interface VendorRow {
 	id: string;
@@ -104,6 +136,7 @@ interface VendorRow {
 	name: string;
 	domain: string;
 	domain_verified_at?: string | null;
+	proofs_published_at?: string | null;
 	category: string;
 	key: string;
 }
@@ -130,6 +163,7 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 		category: row.category,
 		key: row.key,
 		domainVerified: Boolean(row.domain_verified_at),
+		proofsPublishedAt: row.proofs_published_at ?? null,
 		customers: customers.map((c) => ({
 			slug: c.slug,
 			name: c.name,
@@ -155,12 +189,12 @@ export async function allVendors(): Promise<VendorFixture[]> {
 	const db = dbClient();
 	if (!db) return [];
 
-	const { data: rows } = await db.from("vendors").select("id, slug, name, domain, category, key, domain_verified_at");
+	const { data: rows } = await db.from("vendors").select(VENDOR_COLUMNS);
 	if (!rows || rows.length === 0) return [];
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
+		.select(VENDOR_CUSTOMER_COLUMNS)
 		.in(
 			"vendor_id",
 			rows.map((r) => r.id),
@@ -187,17 +221,62 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 
 	const { data: row } = await db
 		.from("vendors")
-		.select("id, slug, name, domain, category, key, domain_verified_at")
+		.select(VENDOR_COLUMNS)
 		.eq("slug", slug)
 		.maybeSingle();
 	if (!row) return undefined;
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
+		.select(VENDOR_CUSTOMER_COLUMNS)
 		.eq("vendor_id", row.id);
 
 	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
+}
+
+/**
+ * Whether this vendor's proofs are public.
+ *
+ * The only way publication should ask, the same way `consentOf` is the only
+ * way it should ask about a customer. A vendor is private until someone
+ * publishes it, and absent means private for the same reason it does for
+ * consent: the failure mode of guessing wrong is a signed, public, permanently
+ * fetchable claim about a party who never agreed to make it.
+ */
+export function isPublished(vendor: VendorFixture): boolean {
+	return vendor.proofsPublishedAt !== null;
+}
+
+/**
+ * `findVendor`, gated — **the resolution point every public surface goes
+ * through.**
+ *
+ * The two-function shape is deliberate and is copied from `customerChain` /
+ * `customerProof` next door in attest/proofs.ts, which exists because the
+ * consent rule had lived inside one function's body and only the route that
+ * happened to call it was protected. The same trap is here: `findVendor` is
+ * what the collector, the freeze, the countersigner and every vendor-scoped
+ * tool call, and every one of them must keep working while a vendor is
+ * private. So the gate is not inside `findVendor`; it is a second, differently
+ * named door, and "which door am I calling" is answerable by reading the call
+ * site.
+ *
+ * **Undefined, not a distinct "private" result.** Callers 404 on undefined
+ * already, and an unpublished vendor must be indistinguishable from an unknown
+ * one — exactly what the consent gate does for a withheld customer. A response
+ * that said "this vendor exists but is private" would let anyone confirm, by
+ * guessing slugs, that a company has installed Letterprove and not launched
+ * yet. That is a commercial fact about someone else's roadmap, and it is not
+ * ours to leak.
+ */
+export async function findPublishedVendor(slug: string): Promise<VendorFixture | undefined> {
+	const vendor = await findVendor(slug);
+	return vendor && isPublished(vendor) ? vendor : undefined;
+}
+
+/** `allVendors`, gated. For listings a stranger reads — the home page, discovery. */
+export async function publishedVendors(): Promise<VendorFixture[]> {
+	return (await allVendors()).filter(isPublished);
 }
 
 /**
@@ -223,14 +302,14 @@ export async function findVendorByOrg(orgId: string): Promise<VendorFixture | un
 
 	const { data: row } = await db
 		.from("vendors")
-		.select("id, slug, name, domain, category, key, domain_verified_at")
+		.select(VENDOR_COLUMNS)
 		.eq("letterstory_org_id", orgId)
 		.maybeSingle();
 	if (!row) return undefined;
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
+		.select(VENDOR_CUSTOMER_COLUMNS)
 		.eq("vendor_id", row.id);
 
 	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);
@@ -247,14 +326,14 @@ export async function findVendorByKey(key: string): Promise<VendorFixture | unde
 
 	const { data: row } = await db
 		.from("vendors")
-		.select("id, slug, name, domain, category, key, domain_verified_at")
+		.select(VENDOR_COLUMNS)
 		.eq("key", key)
 		.maybeSingle();
 	if (!row) return undefined;
 
 	const { data: customerRows } = await db
 		.from("vendor_customers")
-		.select("vendor_id, slug, name, domain, since, tier, verified, features, consent, countersigned_at")
+		.select(VENDOR_CUSTOMER_COLUMNS)
 		.eq("vendor_id", row.id);
 
 	return toFixture(row, (customerRows ?? []) as unknown as CustomerRow[]);

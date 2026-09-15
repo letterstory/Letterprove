@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: () => null }));
 vi.mock("@/lib/vendors/status", () => ({
-	getVendorStatus: vi.fn(async () => ({ ok: true, receiving: true, installed: true, count: 3 })),
+	getVendorStatus: vi.fn(async () => ({
+		ok: true,
+		receiving: true,
+		installed: true,
+		count: 3,
+		publishedAt: "2026-01-01T00:00:00.000Z",
+	})),
 }));
 
 /**
@@ -50,7 +56,16 @@ describe("the output guard", () => {
 		// The real payload, served intact, despite a schema that rejects it.
 		expect(outcome).toEqual({
 			kind: "result",
-			result: { ok: true, body: { receiving: true, installed: true, count: 3 } },
+			result: {
+				ok: true,
+				body: {
+					receiving: true,
+					installed: true,
+					count: 3,
+					published: true,
+					published_at: "2026-01-01T00:00:00.000Z",
+				},
+			},
 		});
 		restore();
 	});
