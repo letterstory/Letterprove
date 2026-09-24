@@ -834,7 +834,7 @@ published at all.
 |---|---|---|
 | **Contents** | Counts, tiers, windows, features, `(domain, origin, receipt_ts, coarse_geo, cfg, key_id)` | Salted per-user hashes, ASN, raw observations |
 | **Purpose** | What an agent reads and cites | Counting distinct humans, detecting fabrication |
-| **Retention** | Indefinite, immutable, chained | Short TTL |
+| **Retention** | Indefinite, immutable, chained | Raw observations 35 days (`prune_hot_events`, hourly); hourly rollups kept |
 
 The internal record is enough to prove distinctness and catch a spoofing rig.
 It is never enough to name a person, and it never appears in public JSON.
