@@ -172,6 +172,32 @@ describe("createCustomer against a real Postgres schema", () => {
 		expect(row!.domain).toBe("letterbrace.com");
 	});
 
+	// The domain classifier itself (free_mail vs. internal vs. company) is
+	// exhaustively unit-tested in identity/domains.test.ts; what's untested
+	// anywhere is that THIS call site actually wires that check in for the
+	// free_mail branch — every existing e2e case here only exercises
+	// "internal". Same `classified.kind !== "company"` gate, but proven
+	// against the real table so a future refactor that special-cases one
+	// kind and not the other would be caught here.
+	it("refuses a consumer mailbox domain, since a person's inbox is never a customer", async () => {
+		const { createCustomer } = await import("./customers");
+		const supabase = pgliteSupabase();
+
+		const result = await createCustomer(supabase as never, EXTERNAL_VENDOR_ID, {
+			slug: "gmail-e2e",
+			name: "Some Person",
+			domain: "gmail.com",
+			since: "2024-01",
+			consent: "named",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.body).toMatchObject({ kind: "free_mail" });
+
+		const row = await customerRow(EXTERNAL_VENDOR_ID, "gmail-e2e");
+		expect(row).toBeNull();
+	});
+
 	it("refuses a Letter Company vendor claiming another Letter Company domain as its customer", async () => {
 		const { createCustomer } = await import("./customers");
 		const supabase = pgliteSupabase();
@@ -211,6 +237,26 @@ describe("updateCustomer against a real Postgres schema", () => {
 		expect(result.ok).toBe(true);
 		const row = await customerRow(EXTERNAL_VENDOR_ID, "moves-to-letterbrace");
 		expect(row!.domain).toBe("letterbrace.com");
+	});
+
+	it("refuses moving a customer onto a consumer mailbox domain", async () => {
+		const { createCustomer, updateCustomer } = await import("./customers");
+		const supabase = pgliteSupabase();
+
+		await createCustomer(supabase as never, EXTERNAL_VENDOR_ID, {
+			slug: "stays-off-gmail",
+			name: "Placeholder",
+			domain: "placeholder3.example.com",
+			since: "2024-01",
+		});
+
+		const result = await updateCustomer(supabase as never, EXTERNAL_VENDOR_ID, "stays-off-gmail", {
+			domain: "gmail.com",
+		});
+
+		expect(result.ok).toBe(false);
+		const row = await customerRow(EXTERNAL_VENDOR_ID, "stays-off-gmail");
+		expect(row!.domain).toBe("placeholder3.example.com");
 	});
 
 	it("refuses a Letter Company vendor moving a customer onto another Letter Company domain", async () => {
