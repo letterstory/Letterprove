@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OAuthPrincipal } from "@/lib/oauth/scopes";
+import { bootstrapPglite, pgliteSupabase } from "@/lib/test-support/pglite-supabase";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
@@ -41,30 +40,7 @@ let pg: PGlite;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeAll(async () => {
-	pg = new PGlite();
-
-	// Supabase-specific bits the raw migration files assume exist — see
-	// route.schema.test.ts's identical setup for why.
-	await pg.exec(`
-		do $$ begin
-			if not exists (select from pg_roles where rolname = 'anon') then create role anon; end if;
-			if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-			if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;
-		end $$;
-		create schema if not exists auth;
-		create table if not exists auth.users (id uuid primary key);
-		create or replace function auth.uid() returns uuid language sql stable as $$
-			select null::uuid
-		$$;
-	`);
-
-	const dir = join(process.cwd(), "supabase/migrations");
-	const files = readdirSync(dir)
-		.filter((f) => f.endsWith(".sql"))
-		.sort();
-	for (const f of files) {
-		await pg.exec(readFileSync(join(dir, f), "utf8"));
-	}
+	pg = await bootstrapPglite();
 
 	await pg.query("insert into auth.users (id) values ($1), ($2)", [MEMBER_USER_ID, OUTSIDER_USER_ID]);
 	await pg.query(
@@ -80,70 +56,10 @@ afterAll(async () => {
 	await pg.close();
 });
 
-/** A `.from(table).select(cols).eq(...).update(...).maybeSingle()` shim backed by the real pglite Postgres. */
-function pgliteSupabase() {
-	return {
-		auth: {
-			admin: {
-				getUserById: vi.fn(async (id: string) => ({ data: { user: { id, email: `${id}@example.com` } }, error: null })),
-			},
-		},
-		from(table: string) {
-			const state: { columns: string; filters: [string, unknown][]; updatePatch?: Record<string, unknown> } = {
-				columns: "*",
-				filters: [],
-			};
-			const builder = {
-				select(columns: string) {
-					state.columns = columns;
-					return builder;
-				},
-				eq(column: string, value: unknown) {
-					state.filters.push([column, value]);
-					return builder;
-				},
-				update(patch: Record<string, unknown>) {
-					state.updatePatch = patch;
-					return builder;
-				},
-				async maybeSingle() {
-					// A real Supabase client resolves a query error into { error }
-					// rather than throwing — most vividly here, where the table
-					// itself no longer exists. pg.query throws instead, so that
-					// gets converted here to keep the shim honest to what
-					// registry.ts's `if (!membership)` check actually sees.
-					try {
-						if (state.updatePatch) {
-							const cols = Object.keys(state.updatePatch);
-							const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(", ");
-							const whereClause = state.filters.map(([c], i) => `${c} = $${cols.length + i + 1}`).join(" and ");
-							const { rows } = await pg.query(
-								`update ${table} set ${setClause}${whereClause ? ` where ${whereClause}` : ""} returning ${state.columns}`,
-								[...Object.values(state.updatePatch), ...state.filters.map(([, v]) => v)],
-							);
-							return { data: rows[0] ?? null, error: null };
-						}
-						const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
-						const params = state.filters.map(([, v]) => v);
-						const { rows } = await pg.query(
-							`select ${state.columns} from ${table}${where ? ` where ${where}` : ""} limit 1`,
-							params,
-						);
-						return { data: rows[0] ?? null, error: null };
-					} catch (error) {
-						return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
-					}
-				},
-			};
-			return builder;
-		},
-	};
-}
-
 beforeEach(async () => {
 	vi.clearAllMocks();
 	const { dbClient } = await import("@/lib/db/client");
-	vi.mocked(dbClient).mockReturnValue(pgliteSupabase() as never);
+	vi.mocked(dbClient).mockReturnValue(pgliteSupabase(pg, { withAuthAdmin: true }) as never);
 
 	fetchMock = vi.fn().mockResolvedValue({ ok: true });
 	vi.stubGlobal("fetch", fetchMock);

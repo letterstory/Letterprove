@@ -1,7 +1,6 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { bootstrapPglite, pgliteSupabase } from "@/lib/test-support/pglite-supabase";
 
 /**
  * observe/route.test.ts mocks findVendorByKey and recordObservation entirely
@@ -29,28 +28,7 @@ const VERIFIED_VENDOR_ID = "44444444-4444-4444-4444-444444444444";
 const UNVERIFIED_VENDOR_ID = "55555555-5555-5555-5555-555555555555";
 
 beforeAll(async () => {
-	pg = new PGlite();
-
-	await pg.exec(`
-		do $$ begin
-			if not exists (select from pg_roles where rolname = 'anon') then create role anon; end if;
-			if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-			if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;
-		end $$;
-		create schema if not exists auth;
-		create table if not exists auth.users (id uuid primary key);
-		create or replace function auth.uid() returns uuid language sql stable as $$
-			select null::uuid
-		$$;
-	`);
-
-	const dir = join(process.cwd(), "supabase/migrations");
-	const files = readdirSync(dir)
-		.filter((f) => f.endsWith(".sql"))
-		.sort();
-	for (const f of files) {
-		await pg.exec(readFileSync(join(dir, f), "utf8"));
-	}
+	pg = await bootstrapPglite();
 
 	await pg.query(
 		`insert into vendors (id, slug, name, domain, category, key, letterstory_org_id, domain_verified_at)
@@ -68,74 +46,10 @@ afterAll(async () => {
 	await pg.close();
 });
 
-/** `.from(table).select(cols).eq(...).maybeSingle()` / plain awaited select-list / awaited insert — enough of the Supabase surface for findVendorByKey + recordObservation, unmodified. */
-function pgliteSupabase() {
-	return {
-		from(table: string) {
-			const state: { columns: string; filters: [string, unknown][]; insertRow?: Record<string, unknown> } = {
-				columns: "*",
-				filters: [],
-			};
-
-			async function runInsert() {
-				const cols = Object.keys(state.insertRow!);
-				const placeholders = cols.map((_, i) => `$${i + 1}`);
-				try {
-					await pg.query(
-						`insert into ${table} (${cols.join(", ")}) values (${placeholders.join(", ")})`,
-						Object.values(state.insertRow!),
-					);
-					return { data: null, error: null };
-				} catch (e: unknown) {
-					const err = e as { message?: string };
-					return { data: null, error: { message: String(err.message ?? e) } };
-				}
-			}
-
-			async function runSelectList() {
-				const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
-				const { rows } = await pg.query(
-					`select ${state.columns} from ${table}${where ? ` where ${where}` : ""}`,
-					state.filters.map(([, v]) => v),
-				);
-				return { data: rows, error: null };
-			}
-
-			const builder = {
-				select(columns: string) {
-					state.columns = columns;
-					return builder;
-				},
-				insert(row: Record<string, unknown>) {
-					state.insertRow = row;
-					return builder;
-				},
-				eq(column: string, value: unknown) {
-					state.filters.push([column, value]);
-					return builder;
-				},
-				async maybeSingle() {
-					const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
-					const { rows } = await pg.query(
-						`select ${state.columns} from ${table}${where ? ` where ${where}` : ""} limit 1`,
-						state.filters.map(([, v]) => v),
-					);
-					return { data: rows[0] ?? null, error: null };
-				},
-				then<T>(onFulfilled: (v: { data: unknown; error: unknown }) => T, onRejected?: (e: unknown) => T) {
-					const p = state.insertRow ? runInsert() : runSelectList();
-					return p.then(onFulfilled, onRejected);
-				},
-			};
-			return builder;
-		},
-	};
-}
-
 beforeEach(async () => {
 	vi.clearAllMocks();
 	const { dbClient } = await import("@/lib/db/client");
-	vi.mocked(dbClient).mockReturnValue(pgliteSupabase() as never);
+	vi.mocked(dbClient).mockReturnValue(pgliteSupabase(pg) as never);
 	const { oauthRateLimit } = await import("@/lib/oauth/ratelimit");
 	vi.mocked(oauthRateLimit).mockResolvedValue(true);
 });

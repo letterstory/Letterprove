@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { NextRequest } from "next/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { bootstrapPglite, pgliteSupabase } from "@/lib/test-support/pglite-supabase";
 
 /**
  * consent.test.ts mocks dbClient() entirely, so it can't see anything real
@@ -21,104 +20,16 @@ vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
 let db: PGlite;
 
 beforeAll(async () => {
-	db = new PGlite();
-
-	await db.exec(`
-		do $$ begin
-			if not exists (select from pg_roles where rolname = 'anon') then create role anon; end if;
-			if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-			if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;
-		end $$;
-		create schema if not exists auth;
-		create table if not exists auth.users (id uuid primary key);
-		create or replace function auth.uid() returns uuid language sql stable as $$
-			select null::uuid
-		$$;
-	`);
-
-	const dir = join(process.cwd(), "supabase/migrations");
-	const files = readdirSync(dir)
-		.filter((f) => f.endsWith(".sql"))
-		.sort();
-	for (const f of files) {
-		await db.exec(readFileSync(join(dir, f), "utf8"));
-	}
+	db = await bootstrapPglite();
 });
 
 afterAll(async () => {
 	await db.close();
 });
 
-/**
- * A minimal `.from(table)` query-builder shim backed by the real pglite
- * Postgres, covering exactly the chains consent.ts and generateConsentLink
- * use: select/eq/gt/maybeSingle, and update/eq/gt/select/maybeSingle. Errors
- * from Postgres (unique violation, etc.) come back with the real SQLSTATE, so
- * `error.code` checks in the real code exercise for real.
- */
+/** consent.ts and generateConsentLink, unmodified, against the real schema — see pglite-supabase.ts. */
 function pgliteClient() {
-	return {
-		from(table: string) {
-			const wheres: { col: string; op: string; val: unknown }[] = [];
-			let mode: "select" | "update" | null = null;
-			let selectCols = "*";
-			let updatePatch: Record<string, unknown> | null = null;
-			let returningCols = "id";
-
-			const builder = {
-				select(cols: string) {
-					if (mode === "update") {
-						returningCols = cols;
-						return builder;
-					}
-					mode = "select";
-					selectCols = cols;
-					return builder;
-				},
-				update(patch: Record<string, unknown>) {
-					mode = "update";
-					updatePatch = patch;
-					return builder;
-				},
-				eq(col: string, val: unknown) {
-					wheres.push({ col, op: "=", val });
-					return builder;
-				},
-				gt(col: string, val: unknown) {
-					wheres.push({ col, op: ">", val });
-					return builder;
-				},
-				async maybeSingle() {
-					if (mode === "select") {
-						const clause = wheres.map((w, i) => `${w.col} ${w.op} $${i + 1}`).join(" and ");
-						const { rows } = await db.query(
-							`select ${selectCols} from ${table} where ${clause}`,
-							wheres.map((w) => w.val),
-						);
-						return { data: rows[0] ?? null, error: null };
-					}
-
-					const setCols = Object.keys(updatePatch!);
-					const setClause = setCols.map((c, i) => `${c} = $${i + 1}`).join(", ");
-					const setParams = setCols.map((c) => updatePatch![c]);
-					const offset = setParams.length;
-					const whereClause = wheres.map((w, i) => `${w.col} ${w.op} $${offset + i + 1}`).join(" and ");
-					const params = [...setParams, ...wheres.map((w) => w.val)];
-					try {
-						const { rows } = await db.query(
-							`update ${table} set ${setClause} where ${whereClause} returning ${returningCols}`,
-							params,
-						);
-						return { data: rows[0] ?? null, error: null };
-					} catch (e) {
-						const pgErr = e as { code?: string; message: string };
-						return { data: null, error: { code: pgErr.code, message: pgErr.message } };
-					}
-				},
-			};
-			return builder;
-		},
-	};
+	return pgliteSupabase(db);
 }
 
 async function seedVendorAndCustomer(overrides: {
