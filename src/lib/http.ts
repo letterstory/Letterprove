@@ -78,6 +78,17 @@ export function collectorResponse(accepted: boolean): NextResponse {
 }
 
 /**
+ * A request over its rate limit. No `cache-control`: a client that backs off
+ * and retries shortly must not have this response cached against it.
+ */
+export function rateLimited(): NextResponse {
+	return NextResponse.json(
+		{ error: "rate_limited" },
+		{ status: 429, headers: { "access-control-allow-origin": "*", "x-letterprove": "on" } }
+	);
+}
+
+/**
  * `GET /v1/config` — cached via real `Cache-Control`/`stale-while-revalidate`
  * so the browser does the work, not a custom TTL field. Short-lived on
  * purpose: signals are meant to change without a script re-ship, and this is

@@ -1,8 +1,7 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OAuthPrincipal } from "@/lib/oauth/scopes";
+import { bootstrapPglite, pgliteSupabase } from "@/lib/test-support/pglite-supabase";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
@@ -35,114 +34,17 @@ const OTHER_ORG = "c0ffee00-0000-4000-8000-000000000002";
 let pg: PGlite;
 
 beforeAll(async () => {
-	pg = new PGlite();
-
-	// Supabase-specific bits the raw migration files assume exist — identical
-	// setup to registry.e2e.test.ts / route.schema.test.ts.
-	await pg.exec(`
-		do $$ begin
-			if not exists (select from pg_roles where rolname = 'anon') then create role anon; end if;
-			if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-			if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;
-		end $$;
-		create schema if not exists auth;
-		create table if not exists auth.users (id uuid primary key);
-		create or replace function auth.uid() returns uuid language sql stable as $$
-			select null::uuid
-		$$;
-	`);
-
-	const dir = join(process.cwd(), "supabase/migrations");
-	const files = readdirSync(dir)
-		.filter((f) => f.endsWith(".sql"))
-		.sort();
-	for (const f of files) {
-		await pg.exec(readFileSync(join(dir, f), "utf8"));
-	}
+	pg = await bootstrapPglite();
 });
 
 afterAll(async () => {
 	await pg.close();
 });
 
-/**
- * A Supabase-client shim over the real pglite Postgres — enough surface for
- * provisionVendorForOrg + findVendorByOrg, unmodified:
- *   • `.from(t).insert(row)`                    (awaited -> {error}, 23505 on unique violation)
- *   • `.from(t).select(c).eq(k,v).maybeSingle()`(single row)
- *   • `.from(t).select(c).eq(k,v)`              (awaited -> {data: rows[]})
- */
-function pgliteSupabase() {
-	return {
-		from(table: string) {
-			const state: { columns: string; filters: [string, unknown][]; insertRow?: Record<string, unknown> } = {
-				columns: "*",
-				filters: [],
-			};
-
-			async function runInsert() {
-				const cols = Object.keys(state.insertRow!);
-				const placeholders = cols.map((_, i) => `$${i + 1}`);
-				try {
-					await pg.query(
-						`insert into ${table} (${cols.join(", ")}) values (${placeholders.join(", ")})`,
-						Object.values(state.insertRow!),
-					);
-					return { data: null, error: null };
-				} catch (e: unknown) {
-					const err = e as { code?: string; message?: string };
-					const code =
-						err.code ?? (String(err.message ?? e).includes("duplicate key") ? "23505" : undefined);
-					return { data: null, error: { code, message: String(err.message ?? e) } };
-				}
-			}
-
-			async function runSelectList() {
-				const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
-				const { rows } = await pg.query(
-					`select ${state.columns} from ${table}${where ? ` where ${where}` : ""}`,
-					state.filters.map(([, v]) => v),
-				);
-				return { data: rows, error: null };
-			}
-
-			const builder = {
-				select(columns: string) {
-					state.columns = columns;
-					return builder;
-				},
-				insert(row: Record<string, unknown>) {
-					state.insertRow = row;
-					return builder;
-				},
-				eq(column: string, value: unknown) {
-					state.filters.push([column, value]);
-					return builder;
-				},
-				async maybeSingle() {
-					const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
-					const { rows } = await pg.query(
-						`select ${state.columns} from ${table}${where ? ` where ${where}` : ""} limit 1`,
-						state.filters.map(([, v]) => v),
-					);
-					return { data: rows[0] ?? null, error: null };
-				},
-				// Terminal `await builder` with no `.maybeSingle()`: an insert
-				// (provision) or a list select (findVendorByOrg's vendor_customers).
-				then<T>(onF: (v: { data: unknown; error: unknown }) => T, onR?: (e: unknown) => T) {
-					const p = state.insertRow ? runInsert() : runSelectList();
-					return p.then(onF, onR);
-				},
-			};
-			return builder;
-		},
-	};
-}
-
 beforeEach(async () => {
 	vi.clearAllMocks();
 	const { dbClient } = await import("@/lib/db/client");
-	vi.mocked(dbClient).mockReturnValue(pgliteSupabase() as never);
+	vi.mocked(dbClient).mockReturnValue(pgliteSupabase(pg) as never);
 });
 
 function service(orgId: string): OAuthPrincipal {

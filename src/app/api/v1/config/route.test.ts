@@ -13,8 +13,10 @@ import { GET } from "./route";
 
 vi.mock("@/lib/fixtures/vendors", () => ({ findVendorByKey: vi.fn() }));
 vi.mock("@/lib/telemetry/ping", () => ({ recordConfigPing: vi.fn() }));
+vi.mock("@/lib/oauth/ratelimit", () => ({ oauthRateLimit: vi.fn(), oauthClientIp: vi.fn(() => "203.0.113.9") }));
 
 import { findVendorByKey } from "@/lib/fixtures/vendors";
+import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { recordConfigPing } from "@/lib/telemetry/ping";
 
 const VENDOR = {
@@ -36,6 +38,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(findVendorByKey).mockResolvedValue(VENDOR as never);
 	vi.mocked(recordConfigPing).mockResolvedValue(undefined);
+	vi.mocked(oauthRateLimit).mockResolvedValue(true);
 });
 
 describe("GET /v1/config", () => {
@@ -126,6 +129,43 @@ describe("GET /v1/config — cache headers", () => {
 		expect(res.headers.get("access-control-allow-origin")).toBe("*");
 		expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
 		expect(res.headers.get("x-letterprove")).toBe("on");
+	});
+});
+
+describe("GET /v1/config — rate limiting", () => {
+	// Casey's audit: this endpoint had zero rate limiting, unlike POST
+	// /v1/observe's IP+vendor buckets. Same backstop, IP-scoped only — there's
+	// no vendor bucket here because there's no per-vendor write to protect.
+	it("rejects once the IP bucket is exhausted, before even looking up the key", async () => {
+		vi.mocked(oauthRateLimit).mockResolvedValue(false);
+
+		const res = await get("?k=lp_live_vantage_9f2c");
+
+		expect(res.status).toBe(429);
+		expect(findVendorByKey).not.toHaveBeenCalled();
+		expect(recordConfigPing).not.toHaveBeenCalled();
+	});
+
+	it("scopes the limiter to the caller's IP", async () => {
+		await get("?k=lp_live_vantage_9f2c");
+
+		expect(oauthRateLimit).toHaveBeenCalledWith("config:ip:203.0.113.9", 60, expect.any(Number));
+	});
+
+	it("carries no cache-control on a 429, so a client backs off rather than caching the rejection", async () => {
+		vi.mocked(oauthRateLimit).mockResolvedValue(false);
+
+		const res = await get("?k=lp_live_vantage_9f2c");
+
+		expect(res.headers.get("cache-control")).toBeNull();
+	});
+
+	it("still answers once the bucket has room again", async () => {
+		vi.mocked(oauthRateLimit).mockResolvedValue(true);
+
+		const res = await get("?k=lp_live_vantage_9f2c");
+
+		expect(res.status).toBe(200);
 	});
 });
 

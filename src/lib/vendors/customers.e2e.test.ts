@@ -1,7 +1,6 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { bootstrapPglite, pgliteSupabase as sharedPgliteSupabase } from "@/lib/test-support/pglite-supabase";
 
 /**
  * customers.test.ts exercises createCustomer/updateCustomer's domain gate
@@ -32,28 +31,7 @@ const EXTERNAL_VENDOR_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const INTERNAL_VENDOR_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
 beforeAll(async () => {
-	pg = new PGlite();
-
-	await pg.exec(`
-		do $$ begin
-			if not exists (select from pg_roles where rolname = 'anon') then create role anon; end if;
-			if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-			if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;
-		end $$;
-		create schema if not exists auth;
-		create table if not exists auth.users (id uuid primary key);
-		create or replace function auth.uid() returns uuid language sql stable as $$
-			select null::uuid
-		$$;
-	`);
-
-	const dir = join(process.cwd(), "supabase/migrations");
-	const files = readdirSync(dir)
-		.filter((f) => f.endsWith(".sql"))
-		.sort();
-	for (const f of files) {
-		await pg.exec(readFileSync(join(dir, f), "utf8"));
-	}
+	pg = await bootstrapPglite();
 
 	// One vendor genuinely outside the Letter Company, one that IS one of
 	// ours (its own domain is in the INTERNAL set the same way
@@ -72,73 +50,9 @@ afterAll(async () => {
 	await pg.close();
 });
 
-/**
- * A `.from(table).select(cols).eq(...).maybeSingle()` /
- * `.insert(row).select(cols).single()` / `.update(patch).eq(...).eq(...)
- * .select(cols).maybeSingle()` shim backed by the real pglite Postgres —
- * enough of the client surface for createCustomer/updateCustomer, unmodified.
- */
+/** createCustomer/updateCustomer, unmodified, against the real schema — see pglite-supabase.ts. */
 function pgliteSupabase() {
-	return {
-		from(table: string) {
-			const state: {
-				columns: string;
-				filters: [string, unknown][];
-				insertRow?: Record<string, unknown>;
-				updatePatch?: Record<string, unknown>;
-			} = { columns: "*", filters: [] };
-
-			async function execute() {
-				if (state.insertRow) {
-					const cols = Object.keys(state.insertRow);
-					const placeholders = cols.map((_, i) => `$${i + 1}`);
-					const { rows } = await pg.query(
-						`insert into ${table} (${cols.join(", ")}) values (${placeholders.join(", ")}) returning ${state.columns}`,
-						Object.values(state.insertRow),
-					);
-					return { data: rows[0] ?? null, error: null };
-				}
-				if (state.updatePatch) {
-					const cols = Object.keys(state.updatePatch);
-					const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(", ");
-					const whereClause = state.filters.map(([c], i) => `${c} = $${cols.length + i + 1}`).join(" and ");
-					const { rows } = await pg.query(
-						`update ${table} set ${setClause}${whereClause ? ` where ${whereClause}` : ""} returning ${state.columns}`,
-						[...Object.values(state.updatePatch), ...state.filters.map(([, v]) => v)],
-					);
-					return { data: rows[0] ?? null, error: null };
-				}
-				const where = state.filters.map(([c], i) => `${c} = $${i + 1}`).join(" and ");
-				const { rows } = await pg.query(
-					`select ${state.columns} from ${table}${where ? ` where ${where}` : ""} limit 1`,
-					state.filters.map(([, v]) => v),
-				);
-				return { data: rows[0] ?? null, error: null };
-			}
-
-			const builder = {
-				select(columns: string) {
-					state.columns = columns;
-					return builder;
-				},
-				eq(column: string, value: unknown) {
-					state.filters.push([column, value]);
-					return builder;
-				},
-				insert(row: Record<string, unknown>) {
-					state.insertRow = row;
-					return builder;
-				},
-				update(patch: Record<string, unknown>) {
-					state.updatePatch = patch;
-					return builder;
-				},
-				maybeSingle: execute,
-				single: execute,
-			};
-			return builder;
-		},
-	};
+	return sharedPgliteSupabase(pg);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -170,6 +84,32 @@ describe("createCustomer against a real Postgres schema", () => {
 		const row = await customerRow(EXTERNAL_VENDOR_ID, "letterbrace-e2e");
 		expect(row).not.toBeNull();
 		expect(row!.domain).toBe("letterbrace.com");
+	});
+
+	// The domain classifier itself (free_mail vs. internal vs. company) is
+	// exhaustively unit-tested in identity/domains.test.ts; what's untested
+	// anywhere is that THIS call site actually wires that check in for the
+	// free_mail branch — every existing e2e case here only exercises
+	// "internal". Same `classified.kind !== "company"` gate, but proven
+	// against the real table so a future refactor that special-cases one
+	// kind and not the other would be caught here.
+	it("refuses a consumer mailbox domain, since a person's inbox is never a customer", async () => {
+		const { createCustomer } = await import("./customers");
+		const supabase = pgliteSupabase();
+
+		const result = await createCustomer(supabase as never, EXTERNAL_VENDOR_ID, {
+			slug: "gmail-e2e",
+			name: "Some Person",
+			domain: "gmail.com",
+			since: "2024-01",
+			consent: "named",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.body).toMatchObject({ kind: "free_mail" });
+
+		const row = await customerRow(EXTERNAL_VENDOR_ID, "gmail-e2e");
+		expect(row).toBeNull();
 	});
 
 	it("refuses a Letter Company vendor claiming another Letter Company domain as its customer", async () => {
@@ -211,6 +151,26 @@ describe("updateCustomer against a real Postgres schema", () => {
 		expect(result.ok).toBe(true);
 		const row = await customerRow(EXTERNAL_VENDOR_ID, "moves-to-letterbrace");
 		expect(row!.domain).toBe("letterbrace.com");
+	});
+
+	it("refuses moving a customer onto a consumer mailbox domain", async () => {
+		const { createCustomer, updateCustomer } = await import("./customers");
+		const supabase = pgliteSupabase();
+
+		await createCustomer(supabase as never, EXTERNAL_VENDOR_ID, {
+			slug: "stays-off-gmail",
+			name: "Placeholder",
+			domain: "placeholder3.example.com",
+			since: "2024-01",
+		});
+
+		const result = await updateCustomer(supabase as never, EXTERNAL_VENDOR_ID, "stays-off-gmail", {
+			domain: "gmail.com",
+		});
+
+		expect(result.ok).toBe(false);
+		const row = await customerRow(EXTERNAL_VENDOR_ID, "stays-off-gmail");
+		expect(row!.domain).toBe("placeholder3.example.com");
 	});
 
 	it("refuses a Letter Company vendor moving a customer onto another Letter Company domain", async () => {

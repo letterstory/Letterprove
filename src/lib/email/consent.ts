@@ -20,6 +20,9 @@
 /** Sender. `letterprove.com` is verified on the shared Resend account (Supabase Auth already sends staff@ through it). */
 const FROM = process.env.LETTERPROVE_EMAIL_FROM || "Letterprove <staff@letterprove.com>";
 
+/** Where a reply actually lands. staff@ is send-only — nobody reads that inbox, so a customer who hits reply on this needs somewhere a human sees it. */
+const REPLY_TO = process.env.LETTERPROVE_EMAIL_REPLY_TO || "support@letterbrace.com";
+
 export interface ConsentRequestEmail {
 	to: string;
 	vendorName: string;
@@ -96,7 +99,7 @@ export async function sendConsentRequest(msg: ConsentRequestEmail): Promise<Send
 		const res = await fetch("https://api.resend.com/emails", {
 			method: "POST",
 			headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ from: FROM, to: [msg.to], subject, html, text }),
+			body: JSON.stringify({ from: FROM, to: [msg.to], reply_to: REPLY_TO, subject, html, text }),
 		});
 
 		if (!res.ok) {
