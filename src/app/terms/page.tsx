@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 		"The terms for using Letterprove, including what a signed attestation does and does not claim, and the obligations a vendor takes on by publishing one.",
 };
 
-const UPDATED = "August 21, 2026";
+const UPDATED = "September 24, 2026";
 
 /**
  * The clauses that carry real weight here are §4 (what a signature actually
@@ -79,6 +79,13 @@ export default function TermsPage() {
 					corroborated by a third party, to counter-signed by the customer themselves. Anyone
 					reading a proof is expected to weigh the tier rather than treat every claim as
 					equivalent.
+				</p>
+				<p>
+					One form of third-party corroboration: if you connect a Stripe account, we read your own
+					records of a named customer&apos;s active, paid subscription to raise that customer above
+					vendor-asserted. This evidence expires if it is not refreshed by a successful sync, so a
+					stale Stripe connection reads as absent corroboration, not as proof the customer stopped
+					paying.
 				</p>
 				<p>
 					You agree not to represent a Letterprove attestation as certifying more than its tier
