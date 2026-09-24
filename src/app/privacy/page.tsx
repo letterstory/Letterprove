@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     "What Letterprove collects when its script runs on a customer's site, why it is company-level rather than personal, and what is published.",
 };
 
-const UPDATED = "September 22, 2026";
+const UPDATED = "September 24, 2026";
 
 /**
  * Written against what the code actually does, not against the sibling
@@ -170,11 +170,12 @@ export default function PrivacyPage() {
 
       <Section n={5} title="Vendor account information">
         <p>
-          If you sign up as a vendor we store your email address and a password
-          hash, handled by our authentication provider — we never see your
-          password. We also store what you enter about your company and
-          customers: names, domains, categories, the date a relationship
-          started, and which features you claim.
+          Letterprove holds no vendor identity of its own — signing in and
+          organization membership are handled entirely by Letterstory, which
+          Letterprove trusts as an authenticated peer. We do not store a
+          vendor password or password hash. We do store what you enter about
+          your company and customers: names, domains, categories, the date a
+          relationship started, and which features you claim.
         </p>
         <p>
           Your publishable key is not a secret. It ships in your page&apos;s
@@ -209,10 +210,28 @@ export default function PrivacyPage() {
         <p>We keep this list short deliberately. Letterprove uses:</p>
         <ul>
           <li>
-            <strong>Supabase</strong> — database and authentication.
+            <strong>Supabase</strong> — database.
           </li>
           <li>
             <strong>Vercel</strong> — application hosting.
+          </li>
+          <li>
+            <strong>Letterstory</strong> — vendor sign-in and organization
+            membership. Letterprove holds no identity of its own; see §5.
+          </li>
+          <li>
+            <strong>Resend</strong> — delivers the consent emails described in
+            §4, when a vendor asks us to send one.
+          </li>
+          <li>
+            <strong>Stripe</strong> — reads a vendor&apos;s own connected
+            account, at their instruction, to corroborate a customer&apos;s paid
+            subscription for a higher provenance tier. We do not process
+            payments and do not receive card data.
+          </li>
+          <li>
+            <strong>Slack</strong> — internal alerting for our own team; no
+            vendor or visitor data is routed through it.
           </li>
         </ul>
         <p>
@@ -225,9 +244,12 @@ export default function PrivacyPage() {
       <Section n={8} title="Who is responsible for what">
         <p>
           A vendor decides to install our script and decides which of their
-          customers to record. For that data the vendor is the controller and
-          Letterprove is the processor, acting on their instructions. If you are
-          a visitor to a vendor&apos;s site and want to know why your company
+          customers to record. For that data, Letterprove acts on the
+          vendor&apos;s instructions rather than deciding independently what to
+          do with it. We have not yet formalized this in a signed data
+          processing agreement; if your organization requires one before you
+          can use Letterprove, contact us at the address below. If you are a
+          visitor to a vendor&apos;s site and want to know why your company
           domain was observed, the vendor is the right first contact — though
           you are welcome to reach us directly and we will help.
         </p>
