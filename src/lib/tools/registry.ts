@@ -42,6 +42,7 @@ import {
 } from "@/lib/stripe/credentials";
 import { syncVendorPayments } from "@/lib/stripe/sync";
 import { paymentEvidenceCount } from "@/lib/attest/payment-evidence";
+import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -643,6 +644,50 @@ export const TOOLS: BoundTool[] = [
 					generated_at: new Date().toISOString(),
 					vendors,
 					...(unreadable.length > 0 && { unreadable }),
+				},
+			};
+		},
+	}),
+	defineTool({
+		name: "agentic_read_billing",
+		description:
+			"What each vendor owes for agentic reads this billing period, and its Letterstory org id to bill. Args: billing_month (YYYY-MM-01, optional — defaults to the previous calendar month).",
+		capability: "billing:read",
+		inputSchema: S.agenticReadBillingInput,
+		outputSchema: S.agenticReadBillingOutput,
+		/*
+		 * Letterprove never holds a Stripe credential (Steve, 2026-09-26): this
+		 * is the read half of usage billing, called by Letterstory's own
+		 * unattended invoicing cron, which does the actual charging against the
+		 * org's existing Stripe customer. `billing:read`, NOT `staff:read` — an
+		 * unattended job is not a signed-in human, so this rides the plain
+		 * Letterstory-service identity (oauth-auth.ts) rather than borrowing or
+		 * widening staff's, which is reserved for a named acting person. Cross-
+		 * vendor because the report is fleet-wide, not because the data is
+		 * especially sensitive (it isn't: no PII, just counts and cents).
+		 */
+		handler: async (args) => {
+			const record = asRecord(args);
+			const billingMonth =
+				typeof record.billing_month === "string" && record.billing_month.trim()
+					? record.billing_month.trim()
+					: undefined;
+
+			const report = await agenticReadBillingReport({ billingMonth });
+			if (!report) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			return {
+				ok: true,
+				body: {
+					billing_month: billingMonth ?? previousBillingMonth(),
+					vendors: report.map((row) => ({
+						vendor: row.vendorSlug,
+						org_id: row.letterstoryOrgId,
+						read_count: row.charge.totalReads,
+						tier2_reads: row.charge.tier2Reads,
+						tier3_reads: row.charge.tier3Reads,
+						amount_cents: row.charge.amountCents,
+					})),
 				},
 			};
 		},

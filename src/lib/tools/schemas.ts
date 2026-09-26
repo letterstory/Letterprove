@@ -454,3 +454,26 @@ export const tierReportOutput = z.object({
 		.optional()
 		.describe("Vendors whose telemetry could not be read. Present only when non-empty — a failed read is not a zero."),
 });
+
+export const agenticReadBillingInput = z.object({
+	billing_month: z
+		.string()
+		.optional()
+		.describe("YYYY-MM-01. Defaults to the previous calendar month — the one that has stopped accumulating reads."),
+});
+export const agenticReadBillingOutput = z.object({
+	billing_month: z.string(),
+	vendors: z.array(
+		z.object({
+			vendor: z.string(),
+			org_id: z
+				.string()
+				.nullable()
+				.describe("This vendor's Letterstory org (vendors.letterstory_org_id), or null if never linked — unbillable."),
+			read_count: z.number().int(),
+			tier2_reads: z.number().int(),
+			tier3_reads: z.number().int(),
+			amount_cents: z.number().int(),
+		}),
+	),
+});

@@ -43,14 +43,14 @@ afterEach(() => {
 });
 
 describe("authenticateToolRequest — Letterstory service door", () => {
-	it("resolves org_id to a vendor-scoped principal (vendor:read+write, no staff)", async () => {
+	it("resolves org_id to a vendor-scoped principal (vendor:read+write, billing:read, no staff)", async () => {
 		findVendorByOrg.mockResolvedValue(vendor());
 		const r = await authenticateToolRequest(post({ org_id: ORG }, `Bearer ${SECRET}`), { org_id: ORG });
 		expect(r.success).toBe(true);
 		if (r.success) {
 			expect(r.principal.vendorId).toBe(VENDOR_ID);
 			expect(r.principal.orgId).toBe(ORG);
-			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write"]);
+			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write", "billing:read"]);
 			expect(r.principal.capabilities).not.toContain("staff:write");
 			expect(r.principal.userId).toBe(LETTERSTORY_SERVICE_IDENTITY);
 		}
@@ -113,7 +113,7 @@ describe("authenticateToolRequest — no OAuth fallback", () => {
 
 			expect(r.success).toBe(true);
 			if (!r.success) return;
-			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write", "staff:read", "staff:write"]);
+			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write", "billing:read", "staff:read", "staff:write"]);
 			expect(r.principal.userId).toBe(STAFF);
 		});
 
@@ -128,7 +128,7 @@ describe("authenticateToolRequest — no OAuth fallback", () => {
 
 			expect(r.success).toBe(true);
 			if (!r.success) return;
-			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write"]);
+			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write", "billing:read"]);
 		});
 
 		it("grants nothing when the deployment has named no staff at all", async () => {

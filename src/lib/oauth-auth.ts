@@ -28,11 +28,20 @@ export type OAuthAuthResult = { success: true; principal: OAuthPrincipal } | { s
 export const LETTERSTORY_SERVICE_IDENTITY = "letterstory-service";
 
 /**
- * The vendor capabilities a Letterstory-service principal carries. Role gating
- * (admin vs editor) already happened in Letterstory before the call, so this is
- * the full vendor surface.
+ * The capabilities a Letterstory-service principal carries: the full vendor
+ * surface (role gating already happened in Letterstory before the call), plus
+ * `billing:read` for the one fleet-wide report (`agentic_read_billing`) that
+ * Letterstory's own unattended invoicing cron reads.
+ *
+ * Steve's call (2026-09-26): billing:read rides the EXISTING service-to-service
+ * connection rather than a separately provisioned identity. A prior version of
+ * this introduced AGENTIC_READ_BILLING_SERVICE_ID, a second allowlist next to
+ * STAFF_USER_IDS — unnecessary complexity for a read that isn't staff-sensitive
+ * (no PII, just counts and cents) and doesn't need its own revocation lever:
+ * the shared service secret is already the thing that's revoked to cut this
+ * off, same as for vendor:read/write.
  */
-const LETTERSTORY_SERVICE_CAPABILITIES: Capability[] = ["vendor:read", "vendor:write"];
+const LETTERSTORY_SERVICE_CAPABILITIES: Capability[] = ["vendor:read", "vendor:write", "billing:read"];
 
 /**
  * Cross-vendor capabilities, added only for an acting human this deployment
