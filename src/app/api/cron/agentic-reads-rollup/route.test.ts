@@ -63,14 +63,14 @@ describe("GET /api/cron/agentic-reads-rollup", () => {
 
 	it("returns 500 and pages with the scope named when the rollup fails", async () => {
 		const { GET, rollupAgenticReads, sendAlert } = await mocks();
-		rollupAgenticReads.mockResolvedValue({ ok: false, detail: "rollup_agentic_reads_hourly: deadlock detected" });
+		rollupAgenticReads.mockResolvedValue({ ok: false, detail: "rollup_agentic_reads_daily: deadlock detected" });
 
 		const res = await GET(request("Bearer test-secret"));
 
 		expect(res.status).toBe(500);
 		expect(sendAlert).toHaveBeenCalledWith(
 			"agentic-read billing rollup failed (all vendors)",
-			"rollup_agentic_reads_hourly: deadlock detected"
+			"rollup_agentic_reads_daily: deadlock detected"
 		);
 	});
 

@@ -45,14 +45,14 @@ beforeEach(async () => {
 	for (const f of files) await db.exec(readFileSync(join(dir, f), "utf8"));
 });
 
-describe("rollup_agentic_reads_hourly", () => {
+describe("rollup_agentic_reads_daily", () => {
 	it("counts this month's reads per vendor into agentic_read_rollups", async () => {
 		await insertRead("acme", 0);
 		await insertRead("acme", 1);
 		await insertRead("acme", 2);
 		await insertRead("vantage", 0);
 
-		await db.query("select rollup_agentic_reads_hourly()");
+		await db.query("select rollup_agentic_reads_daily()");
 
 		const { rows } = await db.query<{ vendor_slug: string; read_count: number }>(
 			"select vendor_slug, read_count from agentic_read_rollups order by vendor_slug"
@@ -65,9 +65,9 @@ describe("rollup_agentic_reads_hourly", () => {
 
 	it("is idempotent: rerunning it recomputes rather than double-counting", async () => {
 		await insertRead("acme", 0);
-		await db.query("select rollup_agentic_reads_hourly()");
+		await db.query("select rollup_agentic_reads_daily()");
 		await insertRead("acme", 0);
-		await db.query("select rollup_agentic_reads_hourly()");
+		await db.query("select rollup_agentic_reads_daily()");
 
 		expect(await count("select read_count n from agentic_read_rollups where vendor_slug = 'acme'")).toBe(2);
 		expect(await count("select count(*) n from agentic_read_rollups where vendor_slug = 'acme'")).toBe(1);
@@ -80,7 +80,7 @@ describe("rollup_agentic_reads_hourly", () => {
 		await insertRead("acme", 40);
 		await insertRead("acme", 0);
 
-		await db.query("select rollup_agentic_reads_hourly()");
+		await db.query("select rollup_agentic_reads_daily()");
 
 		const { rows } = await db.query<{ billing_month: string; read_count: number }>(
 			"select billing_month, read_count from agentic_read_rollups where vendor_slug = 'acme' order by billing_month"

@@ -2,9 +2,13 @@
  * Agentic-read billing rollup — turns raw `agentic_read_events` into the
  * per-vendor, per-month `agentic_read_rollups` count that
  * src/lib/billing/agentic-reads.ts prices. The aggregation lives in the
- * `rollup_agentic_reads_hourly` SQL function (see the migration) so it runs
+ * `rollup_agentic_reads_daily` SQL function (see the migration) so it runs
  * as a single set-based upsert; this module is the thin, testable seam the
  * cron route calls, the same shape as rollup/sessions.ts and rollup/prune.ts.
+ *
+ * Daily, not hourly: see the SQL function's own comment for why a monthly
+ * bill doesn't need hourly freshness and hourly would 24x an already
+ * full-range rescan.
  */
 
 import { dbClient } from "@/lib/db/client";
@@ -19,7 +23,7 @@ export async function rollupAgenticReads(): Promise<RollupResult> {
 	const db = dbClient();
 	if (!db) return { ok: false, detail: "no datastore configured" };
 
-	const { error } = await db.rpc("rollup_agentic_reads_hourly");
+	const { error } = await db.rpc("rollup_agentic_reads_daily");
 	if (error) return { ok: false, detail: error.message };
 	return { ok: true };
 }

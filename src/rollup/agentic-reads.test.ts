@@ -17,7 +17,7 @@ describe("rollupAgenticReads", () => {
 		vi.mocked(dbClient).mockReturnValue({ rpc } as never);
 
 		await expect(rollupAgenticReads()).resolves.toEqual({ ok: true });
-		expect(rpc).toHaveBeenCalledWith("rollup_agentic_reads_hourly");
+		expect(rpc).toHaveBeenCalledWith("rollup_agentic_reads_daily");
 	});
 
 	it("surfaces an rpc error rather than throwing", async () => {

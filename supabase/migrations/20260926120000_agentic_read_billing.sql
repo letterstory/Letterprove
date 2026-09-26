@@ -56,7 +56,15 @@ comment on table agentic_read_rollups is
 -- overlapping cron invocation idempotent. Two months, not one: a read in the
 -- last hour of the month must still land in that closing month's total even
 -- if this job's next tick runs just after midnight into the new month.
-create or replace function rollup_agentic_reads_hourly()
+--
+-- Runs DAILY, not hourly (unlike rollup_hot_events_hourly, which it was
+-- otherwise modeled on): this feeds a monthly bill, not a live proof page, so
+-- there is no freshness requirement finer than a day. That matters because
+-- this query, unlike the hourly one, rescans up to two full months of raw
+-- rows every run (a monthly count can't be windowed to the last 2 hours the
+-- way a per-hour bucket can) — hourly would mean paying that full-range scan
+-- 24x more often than the number it produces is ever read.
+create or replace function rollup_agentic_reads_daily()
 returns void
 language sql
 as $$

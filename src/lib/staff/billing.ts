@@ -1,6 +1,6 @@
 /**
  * What each vendor owes this month for agentic reads — the staff read side of
- * usage billing. Reads agentic_read_rollups (updated hourly by
+ * usage billing. Reads agentic_read_rollups (updated daily by
  * /api/cron/agentic-reads-rollup) and prices it with
  * src/lib/billing/agentic-reads.ts.
  *
