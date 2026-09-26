@@ -12,7 +12,6 @@ import {
 	verificationMessage,
 } from "@/lib/vendors/verification";
 import { isStaffUser } from "@/lib/staff/allowlist";
-import { isAgenticReadBillingService } from "@/lib/billing/service-identity";
 import {
 	listCustomers,
 	createCustomer,
@@ -661,11 +660,11 @@ export const TOOLS: BoundTool[] = [
 		 * is the read half of usage billing, called by Letterstory's own
 		 * unattended invoicing cron, which does the actual charging against the
 		 * org's existing Stripe customer. `billing:read`, NOT `staff:read` — an
-		 * unattended job is not a signed-in human, so it gets its own narrow
-		 * capability (service-identity.ts) rather than borrowing or widening
-		 * staff's. Cross-vendor because the report is fleet-wide, not because
-		 * the data is especially sensitive (it isn't: no PII, just counts and
-		 * cents).
+		 * unattended job is not a signed-in human, so this rides the plain
+		 * Letterstory-service identity (oauth-auth.ts) rather than borrowing or
+		 * widening staff's, which is reserved for a named acting person. Cross-
+		 * vendor because the report is fleet-wide, not because the data is
+		 * especially sensitive (it isn't: no PII, just counts and cents).
 		 */
 		handler: async (args) => {
 			const record = asRecord(args);
@@ -1199,19 +1198,6 @@ export async function dispatchTool(
 	 * This is the only point that stops those.
 	 */
 	if (tool.capability.startsWith("staff:") && !isStaffUser(principal.userId)) {
-		return { kind: "denied", capability: tool.capability };
-	}
-
-	/**
-	 * Same re-check, for the same reason, for the billing-service identity: a
-	 * `billing:read` capability in the token is not proof the caller is still
-	 * that one designated cron. Re-verified fresh so revoking
-	 * AGENTIC_READ_BILLING_SERVICE_ID takes effect immediately, not only for
-	 * tokens minted after the change (there are no tokens here, but the
-	 * principle — never trust a capability without re-checking its source —
-	 * is the same one staff: above exists for).
-	 */
-	if (tool.capability === "billing:read" && !isAgenticReadBillingService(principal.userId)) {
 		return { kind: "denied", capability: tool.capability };
 	}
 

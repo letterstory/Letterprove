@@ -3,7 +3,6 @@ import type { Capability, OAuthPrincipal } from "@/lib/oauth/scopes";
 import { isLetterstoryCaller } from "@/lib/auth/vendor-access";
 import { findVendorByOrg } from "@/lib/fixtures/vendors";
 import { isStaffUser } from "@/lib/staff/allowlist";
-import { isAgenticReadBillingService } from "@/lib/billing/service-identity";
 
 /**
  * How a non-browser caller authenticates.
@@ -29,11 +28,20 @@ export type OAuthAuthResult = { success: true; principal: OAuthPrincipal } | { s
 export const LETTERSTORY_SERVICE_IDENTITY = "letterstory-service";
 
 /**
- * The vendor capabilities a Letterstory-service principal carries. Role gating
- * (admin vs editor) already happened in Letterstory before the call, so this is
- * the full vendor surface.
+ * The capabilities a Letterstory-service principal carries: the full vendor
+ * surface (role gating already happened in Letterstory before the call), plus
+ * `billing:read` for the one fleet-wide report (`agentic_read_billing`) that
+ * Letterstory's own unattended invoicing cron reads.
+ *
+ * Steve's call (2026-09-26): billing:read rides the EXISTING service-to-service
+ * connection rather than a separately provisioned identity. A prior version of
+ * this introduced AGENTIC_READ_BILLING_SERVICE_ID, a second allowlist next to
+ * STAFF_USER_IDS — unnecessary complexity for a read that isn't staff-sensitive
+ * (no PII, just counts and cents) and doesn't need its own revocation lever:
+ * the shared service secret is already the thing that's revoked to cut this
+ * off, same as for vendor:read/write.
  */
-const LETTERSTORY_SERVICE_CAPABILITIES: Capability[] = ["vendor:read", "vendor:write"];
+const LETTERSTORY_SERVICE_CAPABILITIES: Capability[] = ["vendor:read", "vendor:write", "billing:read"];
 
 /**
  * Cross-vendor capabilities, added only for an acting human this deployment
@@ -79,13 +87,6 @@ const LETTERSTORY_SERVICE_CAPABILITIES: Capability[] = ["vendor:read", "vendor:w
  */
 const STAFF_CAPABILITIES: Capability[] = ["staff:read", "staff:write"];
 
-/**
- * `billing:read` alone — not spread with vendor or staff capabilities. This
- * identity exists for exactly one call (`agentic_read_billing`) and should
- * never be usable for anything else, so it carries nothing else.
- */
-const BILLING_SERVICE_CAPABILITIES: Capability[] = ["billing:read"];
-
 function capabilitiesFor(userId: string): Capability[] {
 	// The sentinel means "this call named no human". It must never be
 	// allowlistable into staff, or a misconfigured STAFF_USER_IDS containing it
@@ -93,11 +94,6 @@ function capabilitiesFor(userId: string): Capability[] {
 	// user_id — the widest possible grant, attributable to nobody. `record_customer`
 	// writes to another vendor's data; that has to trace back to a person.
 	if (!userId || userId === LETTERSTORY_SERVICE_IDENTITY) return LETTERSTORY_SERVICE_CAPABILITIES;
-
-	// A different kind of non-human caller: Letterstory's own invoicing cron,
-	// not a signed-in user and not staff. See service-identity.ts for why this
-	// isn't just isStaffUser with a synthetic id.
-	if (isAgenticReadBillingService(userId)) return BILLING_SERVICE_CAPABILITIES;
 
 	return isStaffUser(userId)
 		? [...LETTERSTORY_SERVICE_CAPABILITIES, ...STAFF_CAPABILITIES]
