@@ -30,6 +30,10 @@ vi.mock("@/lib/stripe/credentials", () => ({
 }));
 vi.mock("@/lib/stripe/sync", () => ({ syncVendorPayments: vi.fn() }));
 vi.mock("@/lib/attest/payment-evidence", () => ({ paymentEvidenceCount: vi.fn() }));
+vi.mock("@/lib/staff/billing", () => ({
+	agenticReadBillingReport: vi.fn(),
+	previousBillingMonth: vi.fn(() => "2026-08-01"),
+}));
 
 /**
  * A complete customer row, as listCustomers/createCustomer really return one.
@@ -964,7 +968,7 @@ describe("staff tools require an allowlisted user, not just the scope", () => {
 		process.env.STAFF_USER_IDS = "staff-1";
 	});
 
-	it.each(["tier_report", "record_customer"] as const)(
+	it.each(["tier_report", "record_customer", "agentic_read_billing"] as const)(
 		"denies %s to a signed-in user who holds the scope but is not staff",
 		async (tool) => {
 			const { dispatchTool } = await import("./registry");
@@ -1004,6 +1008,81 @@ describe("staff tools require an allowlisted user, not just the scope", () => {
 		const { dispatchTool } = await import("./registry");
 		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
 		expect(outcome.kind).toBe("result");
+	});
+});
+
+describe("agentic_read_billing", () => {
+	beforeEach(() => {
+		process.env.STAFF_USER_IDS = "staff-1";
+	});
+
+	function staffPrincipal(): OAuthPrincipal {
+		return { tokenId: "t1", vendorId: null, userId: "staff-1", capabilities: ["staff:read"] };
+	}
+
+	it("maps the report to the wire shape, defaulting billing_month from previousBillingMonth", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { agenticReadBillingReport } = await import("@/lib/staff/billing");
+		vi.mocked(agenticReadBillingReport).mockResolvedValue([
+			{
+				vendorSlug: "acme",
+				letterstoryOrgId: "org-acme",
+				billingMonth: "2026-08-01",
+				charge: { totalReads: 1000, tier2Reads: 475, tier3Reads: 500, amountCents: 13_800 },
+				amountFormatted: "$138.00",
+			},
+			{
+				vendorSlug: "orphaned",
+				letterstoryOrgId: null,
+				billingMonth: "2026-08-01",
+				charge: { totalReads: 10, tier2Reads: 0, tier3Reads: 0, amountCents: 0 },
+				amountFormatted: "$0.00",
+			},
+		]);
+
+		const outcome = await dispatchTool("agentic_read_billing", {}, staffPrincipal());
+
+		expect(agenticReadBillingReport).toHaveBeenCalledWith({ billingMonth: undefined });
+		expect(outcome).toEqual({
+			kind: "result",
+			result: {
+				ok: true,
+				body: {
+					billing_month: "2026-08-01",
+					vendors: [
+						{ vendor: "acme", org_id: "org-acme", read_count: 1000, tier2_reads: 475, tier3_reads: 500, amount_cents: 13_800 },
+						{ vendor: "orphaned", org_id: null, read_count: 10, tier2_reads: 0, tier3_reads: 0, amount_cents: 0 },
+					],
+				},
+			},
+		});
+	});
+
+	it("passes an explicit billing_month through", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { agenticReadBillingReport } = await import("@/lib/staff/billing");
+		vi.mocked(agenticReadBillingReport).mockResolvedValue([]);
+
+		const outcome = await dispatchTool("agentic_read_billing", { billing_month: "2026-01-01" }, staffPrincipal());
+
+		expect(agenticReadBillingReport).toHaveBeenCalledWith({ billingMonth: "2026-01-01" });
+		expect(outcome).toMatchObject({ result: { ok: true, body: { billing_month: "2026-01-01", vendors: [] } } });
+	});
+
+	it("returns 503 rather than an empty report when the datastore is unavailable", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { agenticReadBillingReport } = await import("@/lib/staff/billing");
+		vi.mocked(agenticReadBillingReport).mockResolvedValue(null);
+
+		const outcome = await dispatchTool("agentic_read_billing", {}, staffPrincipal());
+		expect(outcome).toEqual({ kind: "result", result: { ok: false, status: 503, body: { error: "storage_unavailable" } } });
+	});
+
+	it("denies a non-staff caller even with the scope", async () => {
+		const { dispatchTool } = await import("./registry");
+		const p: OAuthPrincipal = { tokenId: "t1", vendorId: null, userId: "not-staff", capabilities: ["staff:read"] };
+		const outcome = await dispatchTool("agentic_read_billing", {}, p);
+		expect(outcome.kind).toBe("denied");
 	});
 });
 
