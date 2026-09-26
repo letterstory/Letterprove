@@ -3,6 +3,7 @@
 		{ "path": "/api/cron/rollup", "schedule": "0 * * * *" },
 		{ "path": "/api/cron/freeze", "schedule": "5 * * * *" },
 		{ "path": "/api/cron/collector-health", "schedule": "*/15 * * * *" },
-		{ "path": "/api/cron/stripe-sync", "schedule": "50 * * * *" }
+		{ "path": "/api/cron/stripe-sync", "schedule": "50 * * * *" },
+		{ "path": "/api/cron/agentic-reads-rollup", "schedule": "15 * * * *" }
 	]
 }
