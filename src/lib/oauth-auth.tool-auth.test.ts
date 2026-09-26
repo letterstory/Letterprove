@@ -160,4 +160,68 @@ describe("authenticateToolRequest — no OAuth fallback", () => {
 		});
 	});
 
+	describe("billing-service capability", () => {
+		const CRON_ID = "letterstory-billing-cron";
+		let savedBillingService: string | undefined;
+
+		beforeEach(() => {
+			savedBillingService = process.env.AGENTIC_READ_BILLING_SERVICE_ID;
+		});
+		afterEach(() => {
+			if (savedBillingService === undefined) delete process.env.AGENTIC_READ_BILLING_SERVICE_ID;
+			else process.env.AGENTIC_READ_BILLING_SERVICE_ID = savedBillingService;
+		});
+
+		it("grants ONLY billing:read to the configured service id — no vendor or staff capability", async () => {
+			process.env.AGENTIC_READ_BILLING_SERVICE_ID = CRON_ID;
+			findVendorByOrg.mockResolvedValue(undefined);
+
+			const body = { org_id: "system:agentic-read-billing", user_id: CRON_ID };
+			const r = await authenticateToolRequest(post(body, `Bearer ${SECRET}`), body);
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			expect(r.principal.capabilities).toEqual(["billing:read"]);
+			expect(r.principal.userId).toBe(CRON_ID);
+		});
+
+		it("withholds billing:read from a real staff user — this identity is service-only", async () => {
+			process.env.AGENTIC_READ_BILLING_SERVICE_ID = CRON_ID;
+			process.env.STAFF_USER_IDS = "22222222-2222-2222-2222-222222222222";
+			findVendorByOrg.mockResolvedValue(vendor());
+
+			const body = { org_id: ORG, user_id: "22222222-2222-2222-2222-222222222222" };
+			const r = await authenticateToolRequest(post(body, `Bearer ${SECRET}`), body);
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			expect(r.principal.capabilities).not.toContain("billing:read");
+		});
+
+		it("grants nothing when the deployment has named no billing service at all", async () => {
+			delete process.env.AGENTIC_READ_BILLING_SERVICE_ID;
+			findVendorByOrg.mockResolvedValue(undefined);
+
+			const body = { org_id: "system:agentic-read-billing", user_id: CRON_ID };
+			const r = await authenticateToolRequest(post(body, `Bearer ${SECRET}`), body);
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			expect(r.principal.capabilities).not.toContain("billing:read");
+		});
+
+		it("never grants billing:read to a call that names no acting human", async () => {
+			process.env.AGENTIC_READ_BILLING_SERVICE_ID = LETTERSTORY_SERVICE_IDENTITY;
+			findVendorByOrg.mockResolvedValue(vendor());
+
+			// The "no human named" sentinel must not double as the billing-service
+			// id even if the two strings were ever made to match by mistake.
+			const r = await authenticateToolRequest(post({ org_id: ORG }, `Bearer ${SECRET}`), { org_id: ORG });
+
+			expect(r.success).toBe(true);
+			if (!r.success) return;
+			expect(r.principal.capabilities).toEqual(["vendor:read", "vendor:write"]);
+		});
+	});
+
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OAuthPrincipal } from "@/lib/oauth/scopes";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
@@ -968,7 +968,7 @@ describe("staff tools require an allowlisted user, not just the scope", () => {
 		process.env.STAFF_USER_IDS = "staff-1";
 	});
 
-	it.each(["tier_report", "record_customer", "agentic_read_billing"] as const)(
+	it.each(["tier_report", "record_customer"] as const)(
 		"denies %s to a signed-in user who holds the scope but is not staff",
 		async (tool) => {
 			const { dispatchTool } = await import("./registry");
@@ -1012,12 +1012,19 @@ describe("staff tools require an allowlisted user, not just the scope", () => {
 });
 
 describe("agentic_read_billing", () => {
+	const savedServiceId = process.env.AGENTIC_READ_BILLING_SERVICE_ID;
+
 	beforeEach(() => {
-		process.env.STAFF_USER_IDS = "staff-1";
+		process.env.AGENTIC_READ_BILLING_SERVICE_ID = "billing-cron-1";
 	});
 
-	function staffPrincipal(): OAuthPrincipal {
-		return { tokenId: "t1", vendorId: null, userId: "staff-1", capabilities: ["staff:read"] };
+	afterEach(() => {
+		if (savedServiceId === undefined) delete process.env.AGENTIC_READ_BILLING_SERVICE_ID;
+		else process.env.AGENTIC_READ_BILLING_SERVICE_ID = savedServiceId;
+	});
+
+	function servicePrincipal(): OAuthPrincipal {
+		return { tokenId: "t1", vendorId: null, userId: "billing-cron-1", capabilities: ["billing:read"] };
 	}
 
 	it("maps the report to the wire shape, defaulting billing_month from previousBillingMonth", async () => {
@@ -1040,7 +1047,7 @@ describe("agentic_read_billing", () => {
 			},
 		]);
 
-		const outcome = await dispatchTool("agentic_read_billing", {}, staffPrincipal());
+		const outcome = await dispatchTool("agentic_read_billing", {}, servicePrincipal());
 
 		expect(agenticReadBillingReport).toHaveBeenCalledWith({ billingMonth: undefined });
 		expect(outcome).toEqual({
@@ -1063,7 +1070,7 @@ describe("agentic_read_billing", () => {
 		const { agenticReadBillingReport } = await import("@/lib/staff/billing");
 		vi.mocked(agenticReadBillingReport).mockResolvedValue([]);
 
-		const outcome = await dispatchTool("agentic_read_billing", { billing_month: "2026-01-01" }, staffPrincipal());
+		const outcome = await dispatchTool("agentic_read_billing", { billing_month: "2026-01-01" }, servicePrincipal());
 
 		expect(agenticReadBillingReport).toHaveBeenCalledWith({ billingMonth: "2026-01-01" });
 		expect(outcome).toMatchObject({ result: { ok: true, body: { billing_month: "2026-01-01", vendors: [] } } });
@@ -1074,14 +1081,22 @@ describe("agentic_read_billing", () => {
 		const { agenticReadBillingReport } = await import("@/lib/staff/billing");
 		vi.mocked(agenticReadBillingReport).mockResolvedValue(null);
 
-		const outcome = await dispatchTool("agentic_read_billing", {}, staffPrincipal());
+		const outcome = await dispatchTool("agentic_read_billing", {}, servicePrincipal());
 		expect(outcome).toEqual({ kind: "result", result: { ok: false, status: 503, body: { error: "storage_unavailable" } } });
 	});
 
-	it("denies a non-staff caller even with the scope", async () => {
+	it("denies a staff user even with the capability — this identity is service-only, not staff", async () => {
 		const { dispatchTool } = await import("./registry");
-		const p: OAuthPrincipal = { tokenId: "t1", vendorId: null, userId: "not-staff", capabilities: ["staff:read"] };
+		process.env.STAFF_USER_IDS = "some-staff-user";
+		const p: OAuthPrincipal = { tokenId: "t1", vendorId: null, userId: "some-staff-user", capabilities: ["billing:read"] };
 		const outcome = await dispatchTool("agentic_read_billing", {}, p);
+		expect(outcome.kind).toBe("denied");
+	});
+
+	it("denies any caller when AGENTIC_READ_BILLING_SERVICE_ID is unconfigured", async () => {
+		delete process.env.AGENTIC_READ_BILLING_SERVICE_ID;
+		const { dispatchTool } = await import("./registry");
+		const outcome = await dispatchTool("agentic_read_billing", {}, servicePrincipal());
 		expect(outcome.kind).toBe("denied");
 	});
 });

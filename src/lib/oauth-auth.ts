@@ -3,6 +3,7 @@ import type { Capability, OAuthPrincipal } from "@/lib/oauth/scopes";
 import { isLetterstoryCaller } from "@/lib/auth/vendor-access";
 import { findVendorByOrg } from "@/lib/fixtures/vendors";
 import { isStaffUser } from "@/lib/staff/allowlist";
+import { isAgenticReadBillingService } from "@/lib/billing/service-identity";
 
 /**
  * How a non-browser caller authenticates.
@@ -78,6 +79,13 @@ const LETTERSTORY_SERVICE_CAPABILITIES: Capability[] = ["vendor:read", "vendor:w
  */
 const STAFF_CAPABILITIES: Capability[] = ["staff:read", "staff:write"];
 
+/**
+ * `billing:read` alone — not spread with vendor or staff capabilities. This
+ * identity exists for exactly one call (`agentic_read_billing`) and should
+ * never be usable for anything else, so it carries nothing else.
+ */
+const BILLING_SERVICE_CAPABILITIES: Capability[] = ["billing:read"];
+
 function capabilitiesFor(userId: string): Capability[] {
 	// The sentinel means "this call named no human". It must never be
 	// allowlistable into staff, or a misconfigured STAFF_USER_IDS containing it
@@ -85,6 +93,11 @@ function capabilitiesFor(userId: string): Capability[] {
 	// user_id — the widest possible grant, attributable to nobody. `record_customer`
 	// writes to another vendor's data; that has to trace back to a person.
 	if (!userId || userId === LETTERSTORY_SERVICE_IDENTITY) return LETTERSTORY_SERVICE_CAPABILITIES;
+
+	// A different kind of non-human caller: Letterstory's own invoicing cron,
+	// not a signed-in user and not staff. See service-identity.ts for why this
+	// isn't just isStaffUser with a synthetic id.
+	if (isAgenticReadBillingService(userId)) return BILLING_SERVICE_CAPABILITIES;
 
 	return isStaffUser(userId)
 		? [...LETTERSTORY_SERVICE_CAPABILITIES, ...STAFF_CAPABILITIES]

@@ -20,7 +20,7 @@
  * migration says about that: a new CLI would be built on Letterstory identity,
  * not on this foundation. Treat them as history until something imports them.
  */
-export const capabilityValues = ["vendor:read", "vendor:write", "staff:read", "staff:write"] as const;
+export const capabilityValues = ["vendor:read", "vendor:write", "staff:read", "staff:write", "billing:read"] as const;
 
 export type Capability = (typeof capabilityValues)[number];
 
@@ -31,6 +31,7 @@ const CAPABILITY_DESCRIPTIONS: Record<Capability, string> = {
 	"vendor:write": "Change your vendor profile, customers, and consent settings.",
 	"staff:read": "Read tier reports and any vendor's customer records.",
 	"staff:write": "Record customers and promote domains on any vendor's behalf.",
+	"billing:read": "Read the fleet-wide agentic-read billing report. Held only by Letterstory's own invoicing cron, never by a signed-in user.",
 };
 
 // Both `isVendorScoped` and `isStaffScoped` lived here, and both were read by

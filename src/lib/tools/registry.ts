@@ -12,6 +12,7 @@ import {
 	verificationMessage,
 } from "@/lib/vendors/verification";
 import { isStaffUser } from "@/lib/staff/allowlist";
+import { isAgenticReadBillingService } from "@/lib/billing/service-identity";
 import {
 	listCustomers,
 	createCustomer,
@@ -652,16 +653,19 @@ export const TOOLS: BoundTool[] = [
 		name: "agentic_read_billing",
 		description:
 			"What each vendor owes for agentic reads this billing period, and its Letterstory org id to bill. Args: billing_month (YYYY-MM-01, optional — defaults to the previous calendar month).",
-		capability: "staff:read",
+		capability: "billing:read",
 		inputSchema: S.agenticReadBillingInput,
 		outputSchema: S.agenticReadBillingOutput,
 		/*
 		 * Letterprove never holds a Stripe credential (Steve, 2026-09-26): this
 		 * is the read half of usage billing, called by Letterstory's own
-		 * invoicing cron, which does the actual charging against the org's
-		 * existing Stripe customer. staff:read, same as vendor_roster and
-		 * collection_health, because it's cross-vendor — not because the data
-		 * is especially sensitive (it isn't: no PII, just counts and cents).
+		 * unattended invoicing cron, which does the actual charging against the
+		 * org's existing Stripe customer. `billing:read`, NOT `staff:read` — an
+		 * unattended job is not a signed-in human, so it gets its own narrow
+		 * capability (service-identity.ts) rather than borrowing or widening
+		 * staff's. Cross-vendor because the report is fleet-wide, not because
+		 * the data is especially sensitive (it isn't: no PII, just counts and
+		 * cents).
 		 */
 		handler: async (args) => {
 			const record = asRecord(args);
@@ -1195,6 +1199,19 @@ export async function dispatchTool(
 	 * This is the only point that stops those.
 	 */
 	if (tool.capability.startsWith("staff:") && !isStaffUser(principal.userId)) {
+		return { kind: "denied", capability: tool.capability };
+	}
+
+	/**
+	 * Same re-check, for the same reason, for the billing-service identity: a
+	 * `billing:read` capability in the token is not proof the caller is still
+	 * that one designated cron. Re-verified fresh so revoking
+	 * AGENTIC_READ_BILLING_SERVICE_ID takes effect immediately, not only for
+	 * tokens minted after the change (there are no tokens here, but the
+	 * principle — never trust a capability without re-checking its source —
+	 * is the same one staff: above exists for).
+	 */
+	if (tool.capability === "billing:read" && !isAgenticReadBillingService(principal.userId)) {
 		return { kind: "denied", capability: tool.capability };
 	}
 
