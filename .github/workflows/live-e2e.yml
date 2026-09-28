@@ -1,0 +1,56 @@
+# Real-Supabase, real-Stripe(test-mode) e2e — the live-network gap ci.yml
+# deliberately never closes.
+#
+# ci.yml runs NO SECRETS on purpose (see its own header) so it stays safe on
+# a fork's pull_request. This workflow is the opposite: it needs real
+# credentials for the one shared Letterprove Supabase project and a real
+# Stripe test-mode key, so it is workflow_dispatch ONLY — never
+# pull_request, never push. Triggering it is a deliberate human action, not
+# something a fork PR or a routine push can cause.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   NEXT_PUBLIC_SUPABASE_URL          — same value the Vercel project's own env uses
+#   SUPABASE_SERVICE_ROLE_KEY         — same value the Vercel project's own env uses
+#                                        (service-role: bypasses RLS, writes to the
+#                                        ONE shared dev/preview/production project)
+#   LETTERPROVE_LIVE_TEST_STRIPE_KEY  — an rk_test_... restricted key (Subscriptions:read,
+#                                        Invoices:read) from a Stripe TEST-mode account,
+#                                        minted just for this workflow — never the
+#                                        app's own runtime secret (there isn't one;
+#                                        vendor Stripe keys live per-vendor in the DB).
+#
+# The suite itself (src/lib/tools/stripe-connect.live.test.ts and any sibling
+# *.live.test.ts file) creates only disposable, UUID-suffixed fixture rows and
+# deletes them in its own afterAll, pass or fail.
+name: Live e2e (real Supabase + Stripe test-mode)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  live-e2e:
+    name: test:live
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      # The suite writes to the one shared Supabase project; never let two
+      # runs race each other's fixture rows.
+      group: live-e2e
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: test:live
+        run: npm run test:live
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LETTERPROVE_LIVE_TEST_STRIPE_KEY: ${{ secrets.LETTERPROVE_LIVE_TEST_STRIPE_KEY }}
