@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "docs:status": "node scripts/gen-readme-status.mjs",
     "keygen": "node scripts/keygen.mjs",
     "verify": "node scripts/verify.mjs"

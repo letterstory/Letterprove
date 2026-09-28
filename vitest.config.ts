@@ -19,5 +19,9 @@ export default defineConfig({
 		// collected by nothing and silently never run, which is exactly how
 		// scripts/verify.mjs went untested until 2026-08-18.
 		include: ["src/**/*.test.ts?(x)", "scripts/**/*.test.ts?(x)"],
+		// *.live.test.ts hits the real shared Supabase project and the real
+		// Stripe API (see vitest.live.config.ts) — never part of the
+		// secret-free suite ci.yml runs on every fork's pull_request.
+		exclude: ["**/node_modules/**", "src/**/*.live.test.ts"],
 	},
 });
