@@ -601,8 +601,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "vendor_roster",
-		description:
-			"Every vendor with the humans behind it, their customer counts, and what their aggregate attestation currently claims. Args: none.",
+		description: "Every vendor, their customer counts, and what their aggregate attestation currently claims. Args: none.",
 		capability: "staff:read",
 		inputSchema: S.vendorRosterInput,
 		outputSchema: S.vendorRosterOutput,
@@ -610,11 +609,12 @@ export const TOOLS: BoundTool[] = [
 		 * Same story as collection_health: the /staff/vendors page read
 		 * vendorRoster() directly and lost its home in #124.
 		 *
-		 * Note this returns member EMAIL ADDRESSES, which nothing else in the
-		 * tool surface does. That is deliberate and is exactly why it is
-		 * staff:read and not vendor:read — it is the support view for "who do
-		 * I talk to about this vendor", and a vendor must never be able to
-		 * enumerate the humans behind another one.
+		 * staff:read rather than vendor:read because this is cross-vendor: a
+		 * vendor must never be able to enumerate every other vendor on the
+		 * platform, whatever fields the response carries. It used to also
+		 * return member email addresses (via vendor_members, dropped by
+		 * 20260828130000) — membership lives in Letterstory's
+		 * organization_users now, which this deployment cannot read.
 		 */
 		handler: async () => {
 			const roster = await vendorRoster();

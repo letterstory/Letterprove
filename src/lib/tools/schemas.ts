@@ -404,9 +404,6 @@ export const vendorRosterOutput = z.object({
 			domain: z.string(),
 			category: z.string(),
 			key: z.string(),
-			members: z
-				.array(z.object({ email: z.string(), role: z.string() }))
-				.describe("Addresses. Nothing else in the tool surface returns these — hence staff:read."),
 			customers: z.object({ total: z.number().int(), named: z.number().int() }),
 			published_at: z
 				.string()
