@@ -6,10 +6,9 @@
  * and vendors.letterstory_org_id (migration 20260825060000: a vendor IS a
  * Letterstory org, 1:1), prices the count with
  * src/lib/billing/agentic-reads.ts, and joins the two in application code —
- * two tables, one query each, joined by vendor_slug in JS, the same shape
- * staff/vendors.ts's membersByVendor() already uses for vendor_members. No
- * real SQL join exists across these because letterstory_org_id is a soft
- * reference (organizations lives in Letterstory's own database).
+ * two tables, one query each, joined by vendor_slug in JS. No real SQL join
+ * exists across these because letterstory_org_id is a soft reference
+ * (organizations lives in Letterstory's own database).
  *
  * No Stripe wiring here, deliberately: per Steve's 2026-09-26 call, Letterprove
  * never holds a Stripe credential — Letterstory does the actual charging

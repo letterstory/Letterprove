@@ -1,36 +1,26 @@
 /**
  * Who counts as staff.
  *
- * This existed nowhere until now, and its absence was a live disclosure. The
- * staff wall in proxy.ts only asked whether a request carried *a* session:
+ * Letterprove holds no identity of its own — #124 retired its dashboard,
+ * login, and OAuth server, and Letterstory is the sole identity authority
+ * (see proxy.ts, oauth-auth.ts). The one door left in is the tool dispatcher,
+ * reached with the shared LETTERSTORY_API_SECRET; every call already proves
+ * "this is Letterstory's backend", not "this human is staff".
  *
- *   - /staff/login offers self-service signup,
- *   - Supabase has `disable_signup: false` and `mailer_autoconfirm: true`, so
- *     registering returns a usable session immediately with no email
- *     confirmation,
- *   - staff and vendor share one user pool (see proxy.ts),
+ * STAFF_USER_IDS is how staff:read/staff:write get granted anyway, without
+ * trusting Letterstory to assert it: Letterstory forwards the acting human's
+ * (Letterstory) user id with the call, and oauth-auth.ts checks it against
+ * this allowlist before adding the staff capabilities — see the longer
+ * rationale on STAFF_CAPABILITIES there. So this list now holds LETTERSTORY
+ * user ids, not ids from a Letterprove user pool that no longer exists.
  *
- * so anyone on the internet could register and read /staff/tiers, which lists
- * every vendor's withheld customer domains — the exact data the consent model
- * exists to protect. tiers/report.ts says of its own output: "this output is
- * staff-only and must never be served unauthenticated." It was authenticated,
- * by anyone.
+ * USER IDS, NOT EMAILS. An email allowlist would depend on this deployment
+ * verifying address ownership, which it has no way to do for an identity it
+ * doesn't hold.
  *
- * The vendor wall never had this problem because it demands a `vendor_members`
- * row, on the stated grounds that "signing in alone only proves *a* user, not
- * *which* vendor". Staff needed the same sentence applied to it.
- *
- * USER IDS, NOT EMAILS. An email allowlist is not a gate while signup is open:
- * anyone able to register an allowlisted address inherits staff, and address
- * ownership is not something this app verifies. The sibling product settled on
- * the same answer for the same reason.
- *
- * FAILS CLOSED. An unset or empty list means nobody is staff, not everybody.
- * The consequence is deliberate: a deployment that has not been told who its
- * staff are serves no staff surfaces at all, which is the safe direction for
- * an internal area — proxy.ts already argues exactly this for missing auth
- * config. A self-hosted install therefore gets no staff surface until its
- * operator names one.
+ * FAILS CLOSED. An unset or empty list means nobody is staff, not everybody —
+ * the safe direction for a surface that lists every vendor's withheld
+ * customer domains.
  */
 
 /** Comma- or whitespace-separated Supabase auth user ids. */
