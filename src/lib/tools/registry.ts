@@ -1202,35 +1202,15 @@ export async function dispatchTool(
 	}
 
 	/**
-	 * A vendor capability in a token is not proof of current membership,
-	 * for the same reason staff isn't, above: consent no longer verifies
-	 * vendor_members before minting the grant (see the consent route), so a
-	 * token can carry vendor:* for a vendor_id the user doesn't actually
-	 * belong to, or belonged to and was later removed from. Checked here,
-	 * fresh, on every call — membership can change after a token is minted
-	 * and tokens keep their scope until they expire.
+	 * A vendor capability in a token used to need a fresh membership recheck
+	 * here, against `vendor_members` — dropped by
+	 * 20260828130000_unify_auth_drop_local_identity.sql. Gone with the table:
+	 * every principal now comes from authenticateToolRequest
+	 * (src/lib/oauth-auth.ts), which always sets `orgId` — membership was
+	 * already verified in Letterstory (organization_users) before the call, and
+	 * Letterprove holds no membership of its own to recheck in the unified
+	 * model. Trusting the service secret + the org it named is the whole point.
 	 */
-	//
-	// Skipped for a Letterstory-service principal (principal.orgId set): its
-	// membership was already verified in Letterstory (organization_users) before
-	// the call, and the acting user has no vendor_members row here by design —
-	// Letterprove holds no membership of its own in the unified model. Trusting
-	// the service secret + the org it named is the whole point of that model.
-	if (tool.capability.startsWith("vendor:") && principal.orgId == null) {
-		const db = dbClient();
-		// A null db means unconfigured, not unauthorized — let the handler's own
-		// dbClient() check produce its usual storage_unavailable rather than
-		// this turning into a denial that has nothing to do with membership.
-		if (db) {
-			const { data: membership } = await db
-				.from("vendor_members")
-				.select("vendor_id")
-				.eq("vendor_id", principal.vendorId ?? "")
-				.eq("user_id", principal.userId)
-				.maybeSingle();
-			if (!membership) return { kind: "denied", capability: tool.capability };
-		}
-	}
 
 	const result = await tool.handler(args, principal, context);
 	assertOutputMatchesSchema(tool, result);

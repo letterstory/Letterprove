@@ -8,23 +8,13 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
 
 /**
- * registry.test.ts exercises dispatchTool's membership/capability gate
- * against an in-memory fake `.from().eq().eq().maybeSingle()` chain — it
- * proves the code issues the right query, not what that query resolves to
- * against real Postgres. This file runs the same `dispatchTool`, unmodified,
- * against a real (embedded, WASM) Postgres with the actual migrations
- * applied — same technique as
- * src/app/api/vendor/onboarding/route.schema.test.ts — so a schema drift
- * fails here instead of at the first live bearer-token call.
- *
- * 20260828130000_unify_auth_drop_local_identity.sql drops `vendor_members`
- * entirely — membership now lives only in Letterstory. The gate in
- * registry.ts that queries it (only reachable when `principal.orgId` is
- * unset, i.e. a bearer token minted before the retirement, or any future
- * non-service caller) is kept as a defensive fallback rather than deleted, so
- * this now proves what it actually does against the real schema: the query
- * against a table that doesn't exist errors, and the gate treats that as "no
- * membership" and denies — not what it did before, but still fails safe.
+ * registry.test.ts exercises dispatchTool's capability gate against an
+ * in-memory fake `.from().eq().maybeSingle()` chain — it proves the code
+ * issues the right query, not what that query resolves to against real
+ * Postgres. This file runs the same `dispatchTool`, unmodified, against a
+ * real (embedded, WASM) Postgres with the actual migrations applied — same
+ * technique as src/app/api/vendor/onboarding/route.schema.test.ts — so a
+ * schema drift fails here instead of at the first live bearer-token call.
  *
  * Two boundaries stay faked, both non-Postgres: the Supabase Auth Admin API
  * (`auth.admin.getUserById` is a GoTrue REST call, not a SQL query) and the
@@ -33,8 +23,6 @@ vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
  */
 
 const VENDOR_ID = "22222222-2222-2222-2222-222222222222";
-const MEMBER_USER_ID = "11111111-1111-1111-1111-111111111111";
-const OUTSIDER_USER_ID = "33333333-3333-3333-3333-333333333333";
 
 let pg: PGlite;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -42,14 +30,10 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeAll(async () => {
 	pg = await bootstrapPglite();
 
-	await pg.query("insert into auth.users (id) values ($1), ($2)", [MEMBER_USER_ID, OUTSIDER_USER_ID]);
 	await pg.query(
 		"insert into vendors (id, slug, name, domain, category, key, letterstory_org_id) values ($1, 'e2e-acme', 'E2E Acme', 'e2e-acme.example', 'test', 'lp_live_e2e_acme', gen_random_uuid())",
 		[VENDOR_ID],
 	);
-	// No vendor_members insert: the table doesn't exist post-unification.
-	// Both user ids below are just real, distinct auth.users rows now — neither
-	// can be "a member" of anything, which is exactly the point.
 });
 
 afterAll(async () => {
@@ -71,16 +55,9 @@ afterEach(() => {
 	delete process.env.SUPPORT_SLACK_WEBHOOK_URL;
 });
 
-function principal(userId: string): OAuthPrincipal {
-	return { tokenId: "t1", vendorId: VENDOR_ID, userId, capabilities: ["vendor:write"] };
-}
-
 // Mirrors authenticateToolRequest's real, post-unification shape: a
-// Letterstory-service call carries BOTH orgId (so dispatchTool skips the now
-// -dead vendor_members gate) and vendorId (already resolved via
-// findVendorByOrg). principal() above is deliberately the pre-unification
-// shape — vendorId with no orgId — because that's what registry.e2e's own
-// tests are proving still fails safe now that vendor_members is gone.
+// Letterstory-service call carries orgId and vendorId (already resolved via
+// findVendorByOrg) — the only shape dispatchTool constructs in production.
 function serviceCallerFor(vendorId: string): OAuthPrincipal {
 	return {
 		tokenId: "letterstory-service",
@@ -162,22 +139,3 @@ describe("request_consent's rollback-on-email-failure, against a real Postgres s
 	});
 });
 
-describe("submit_support_request against a real Postgres schema", () => {
-	// The generic vendor:* membership gate lives in dispatchTool and is shared
-	// by every vendor:write tool. Before the unification, this proved it let a
-	// real vendor_members row through and rejected a real user who wasn't one.
-	// Now the table is gone, so both users are denied identically — the case
-	// worth pinning is that the gate errors safe against real Postgres rather
-	// than throwing an uncaught error up through dispatchTool.
-	it.each([
-		["a user who would have been a member before the unification", MEMBER_USER_ID],
-		["a user who was never a member", OUTSIDER_USER_ID],
-	])("denies %s, because vendor_members no longer exists to check", async (_label, userId) => {
-		const { dispatchTool } = await import("./registry");
-
-		const outcome = await dispatchTool("submit_support_request", { message: "help please" }, principal(userId));
-
-		expect(outcome).toEqual({ kind: "denied", capability: "vendor:write" });
-		expect(fetchMock).not.toHaveBeenCalled();
-	});
-});
