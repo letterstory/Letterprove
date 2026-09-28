@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { OAuthPrincipal } from "@/lib/oauth/scopes";
 
 /**
@@ -25,6 +25,15 @@ import type { OAuthPrincipal } from "@/lib/oauth/scopes";
  * instead), so this test proves the real request/response contract — auth
  * header, pagination, invoice status_transitions shape — without ever
  * producing a claim that would need to be retracted.
+ *
+ * Each test gets its OWN fresh vendor (beforeEach/afterEach, not
+ * beforeAll/afterAll) — a shared fixture meant one test's failed assertion
+ * (which stops that test's body, skipping its own explicit disconnect) left
+ * a real credential row behind for the NEXT test to trip over, which is
+ * exactly what happened the first time this ran live (2026-09-28, run
+ * 36378578532): "refuses an sk_ key... writes nothing" failed because the
+ * prior test's row was still there. afterEach now deletes unconditionally,
+ * so one test's failure can never pollute another's.
  *
  * Skips itself (not failing CI) when the required credentials aren't
  * present, so this file is safe to leave in the default `npm test`
@@ -64,16 +73,17 @@ if (!HAVE_CREDS) {
 	);
 }
 
-const VENDOR_ID = randomUUID();
-const VENDOR_SLUG = `stripe-live-e2e-${VENDOR_ID.slice(0, 8)}`;
-
 let admin: SupabaseClient;
+let VENDOR_ID: string;
+let VENDOR_SLUG: string;
 
-beforeAll(async () => {
+beforeEach(async () => {
 	if (!HAVE_CREDS) return;
 	admin = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
 		auth: { persistSession: false },
 	});
+	VENDOR_ID = randomUUID();
+	VENDOR_SLUG = `stripe-live-e2e-${VENDOR_ID.slice(0, 8)}`;
 	const { error } = await admin.from("vendors").insert({
 		id: VENDOR_ID,
 		slug: VENDOR_SLUG,
@@ -84,12 +94,17 @@ beforeAll(async () => {
 		letterstory_org_id: randomUUID(),
 	});
 	if (error) throw new Error(`fixture vendor insert failed: ${error.message}`);
+	process.env.LETTERPROVE_STRIPE_ENCRYPTION_KEY = randomBytes(32).toString("base64");
 });
 
-afterAll(async () => {
+afterEach(async () => {
+	delete process.env.LETTERPROVE_STRIPE_ENCRYPTION_KEY;
 	if (!HAVE_CREDS) return;
 	// Cascades vendor_stripe_credentials via its FK; evidence/unmatched tables
 	// are keyed on vendor_id without a cascade, so clear them explicitly too.
+	// Unconditional — runs whether the test passed or threw, so a failed
+	// assertion mid-test (which skips that test's own explicit disconnect)
+	// can never leave a row for the next test to trip over.
 	await admin.from("vendor_payment_evidence").delete().eq("vendor_id", VENDOR_ID);
 	await admin.from("vendor_payment_unmatched").delete().eq("vendor_id", VENDOR_ID);
 	await admin.from("vendor_stripe_credentials").delete().eq("vendor_id", VENDOR_ID);
@@ -108,79 +123,72 @@ function serviceCallerFor(vendorId: string): OAuthPrincipal {
 
 describe.skipIf(!HAVE_CREDS)("stripe connect/sync/disconnect, against the real Supabase project + real Stripe API", () => {
 	it("connects a real rk_test_ key, syncs against the real Stripe API, and never stores test-mode evidence", async () => {
-		process.env.LETTERPROVE_STRIPE_ENCRYPTION_KEY = randomBytes(32).toString("base64");
-		try {
-			const { dispatchTool } = await import("./registry");
-			const caller = serviceCallerFor(VENDOR_ID);
+		const { dispatchTool } = await import("./registry");
+		const caller = serviceCallerFor(VENDOR_ID);
 
-			const connectOutcome = await dispatchTool("connect_stripe", { restricted_key: STRIPE_TEST_KEY }, caller);
-			expect(connectOutcome.kind).toBe("result");
-			expect((connectOutcome as { result: { ok: boolean } }).result.ok).toBe(true);
-			expect(JSON.stringify(connectOutcome)).not.toContain(STRIPE_TEST_KEY as string);
+		const connectOutcome = await dispatchTool("connect_stripe", { restricted_key: STRIPE_TEST_KEY }, caller);
+		expect(connectOutcome.kind).toBe("result");
+		expect((connectOutcome as { result: { ok: boolean } }).result.ok, JSON.stringify(connectOutcome)).toBe(true);
+		expect(JSON.stringify(connectOutcome)).not.toContain(STRIPE_TEST_KEY as string);
 
-			const { data: credRow } = await admin
-				.from("vendor_stripe_credentials")
-				.select("encrypted_key, livemode")
-				.eq("vendor_id", VENDOR_ID)
-				.maybeSingle();
-			expect(credRow).toBeTruthy();
-			expect(credRow?.encrypted_key).not.toContain(STRIPE_TEST_KEY as string);
-			expect(credRow?.livemode).toBe(false);
+		const { data: credRow } = await admin
+			.from("vendor_stripe_credentials")
+			.select("encrypted_key, livemode")
+			.eq("vendor_id", VENDOR_ID)
+			.maybeSingle();
+		expect(credRow).toBeTruthy();
+		expect(credRow?.encrypted_key).not.toContain(STRIPE_TEST_KEY as string);
+		expect(credRow?.livemode).toBe(false);
 
-			const readOutcome = await dispatchTool("get_stripe_connection", {}, caller);
-			expect((readOutcome as { result: { body: { connected: boolean } } }).result.body.connected).toBe(true);
+		const readOutcome = await dispatchTool("get_stripe_connection", {}, caller);
+		expect((readOutcome as { result: { body: { connected: boolean } } }).result.body.connected).toBe(true);
 
-			// The real network call: fetchSubscriptions + fetchPaidInvoices hit
-			// api.stripe.com for real, over the pinned Stripe-Version header this
-			// key must actually authenticate against.
-			const syncOutcome = await dispatchTool("sync_stripe_payments", {}, caller);
-			expect(syncOutcome.kind).toBe("result");
-			const syncResult = syncOutcome as {
-				result: { ok: boolean; body: { test_mode?: boolean; matched?: number; scope_warning?: string } };
-			};
-			expect(syncResult.result.ok).toBe(true);
-			// A test-mode key must never leave money-shaped evidence behind,
-			// whatever it read — this is sync.ts's own load-bearing rule, proven
-			// here against the real request/response shape rather than a mock.
-			expect(syncResult.result.body.test_mode).toBe(true);
+		// The real network call: fetchSubscriptions + fetchPaidInvoices hit
+		// api.stripe.com for real, over the pinned Stripe-Version header this
+		// key must actually authenticate against.
+		const syncOutcome = await dispatchTool("sync_stripe_payments", {}, caller);
+		expect(syncOutcome.kind).toBe("result");
+		const syncResult = syncOutcome as {
+			result: { ok: boolean; status?: number; body: { error?: string; detail?: string; test_mode?: boolean; matched?: number; scope_warning?: string } };
+		};
+		// Body included in the failure message on purpose: sync.ts relays
+		// Stripe's own error text (a bad/scoped key, a 401) into body.detail,
+		// and a bare boolean mismatch here previously hid it entirely.
+		expect(syncResult.result.ok, JSON.stringify(syncResult.result)).toBe(true);
+		// A test-mode key must never leave money-shaped evidence behind,
+		// whatever it read — this is sync.ts's own load-bearing rule, proven
+		// here against the real request/response shape rather than a mock.
+		expect(syncResult.result.body.test_mode).toBe(true);
 
-			const { data: evidenceRows } = await admin
-				.from("vendor_payment_evidence")
-				.select("id")
-				.eq("vendor_id", VENDOR_ID);
-			expect(evidenceRows ?? []).toHaveLength(0);
+		const { data: evidenceRows } = await admin
+			.from("vendor_payment_evidence")
+			.select("id")
+			.eq("vendor_id", VENDOR_ID);
+		expect(evidenceRows ?? []).toHaveLength(0);
 
-			const disconnectOutcome = await dispatchTool("disconnect_stripe", {}, caller);
-			expect((disconnectOutcome as { result: { body: { disconnected: boolean } } }).result.body.disconnected).toBe(
-				true,
-			);
+		const disconnectOutcome = await dispatchTool("disconnect_stripe", {}, caller);
+		expect((disconnectOutcome as { result: { body: { disconnected: boolean } } }).result.body.disconnected).toBe(
+			true,
+		);
 
-			const { data: afterDisconnect } = await admin
-				.from("vendor_stripe_credentials")
-				.select("vendor_id")
-				.eq("vendor_id", VENDOR_ID)
-				.maybeSingle();
-			expect(afterDisconnect).toBeNull();
-		} finally {
-			delete process.env.LETTERPROVE_STRIPE_ENCRYPTION_KEY;
-		}
+		const { data: afterDisconnect } = await admin
+			.from("vendor_stripe_credentials")
+			.select("vendor_id")
+			.eq("vendor_id", VENDOR_ID)
+			.maybeSingle();
+		expect(afterDisconnect).toBeNull();
 	}, 30_000);
 
 	it("refuses an unrestricted sk_ key against the real schema and writes nothing", async () => {
-		process.env.LETTERPROVE_STRIPE_ENCRYPTION_KEY = randomBytes(32).toString("base64");
-		try {
-			const { dispatchTool } = await import("./registry");
-			const outcome = await dispatchTool(
-				"connect_stripe",
-				{ restricted_key: "sk_test_unrestrictedDanger1" },
-				serviceCallerFor(VENDOR_ID),
-			);
-			expect((outcome as { result: { ok: boolean } }).result.ok).toBe(false);
+		const { dispatchTool } = await import("./registry");
+		const outcome = await dispatchTool(
+			"connect_stripe",
+			{ restricted_key: "sk_test_unrestrictedDanger1" },
+			serviceCallerFor(VENDOR_ID),
+		);
+		expect((outcome as { result: { ok: boolean } }).result.ok).toBe(false);
 
-			const { data } = await admin.from("vendor_stripe_credentials").select("vendor_id").eq("vendor_id", VENDOR_ID);
-			expect(data ?? []).toHaveLength(0);
-		} finally {
-			delete process.env.LETTERPROVE_STRIPE_ENCRYPTION_KEY;
-		}
+		const { data } = await admin.from("vendor_stripe_credentials").select("vendor_id").eq("vendor_id", VENDOR_ID);
+		expect(data ?? []).toHaveLength(0);
 	});
 });
