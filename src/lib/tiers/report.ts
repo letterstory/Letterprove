@@ -39,7 +39,7 @@ export type TierStatus =
 	| "no-customer-record"
 	/** Record exists, but consent to be named has not been given. */
 	| "consent-withheld"
-	/** Record exists and is publishable, but nothing was observed to earn a tier. */
+	/** Record exists and is publishable, but nothing was observed AND it isn't countersigned. */
 	| "no-observation"
 	/** Published, at the tier the evidence earned. */
 	| "published";
@@ -180,7 +180,11 @@ export function classifyRow(
 			detail: "record exists; contributes to the aggregate but is not named",
 		};
 	}
-	if (!observed) {
+	// Countersignature is tier-4 evidence in its own right (earned()'s own
+	// first, unconditional check) — a named customer who countersigned is
+	// published regardless of observation, or this status would contradict
+	// the earnedTier computed two lines above from the same fact.
+	if (!observed && !customer.countersignedAt) {
 		return { ...base, status: "no-observation", detail: "named, but nothing observed to earn a tier" };
 	}
 	return {
