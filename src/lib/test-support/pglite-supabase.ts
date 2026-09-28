@@ -51,7 +51,7 @@ export async function bootstrapPglite(): Promise<PGlite> {
 	return pg;
 }
 
-type Op = "=" | ">" | ">=" | "<" | "<=";
+type Op = "=" | ">" | ">=" | "<" | "<=" | "= any";
 type Where = { col: string; op: Op; val: unknown };
 type PgError = { code?: string; message: string };
 
@@ -63,11 +63,32 @@ function pgError(e: unknown): PgError {
 }
 
 /**
+ * PostgREST answers in JSON, so a timestamptz reaches every real Supabase
+ * caller as a STRING. The pg driver underneath pglite hands back a JS `Date`
+ * instead — a shim that left this unconverted would be kinder than
+ * production wherever a caller's own zod schema or string comparison
+ * expects a string (first caught 2026-09-28: connect_stripe's outputSchema
+ * rejected a real `Date` for `connected_at`, a shape the real client never
+ * produces). Same fix already applied ad hoc in paged-reads.schema.test.ts
+ * and publish.schema.test.ts before this shared harness existed; centralised
+ * here so every current and future e2e test gets it for free.
+ */
+function isoTimestamps<T>(row: T): T {
+	if (row === null || typeof row !== "object") return row;
+	if (Array.isArray(row)) return row.map(isoTimestamps) as T;
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
+		out[key] = value instanceof Date ? value.toISOString() : value;
+	}
+	return out as T;
+}
+
+/**
  * A `.from(table)` query-builder shim backed by a real pglite Postgres
  * instance, covering enough of the Supabase client surface for every
  * service function this repo's e2e suite drives unmodified:
  *
- *   select / eq / gt / gte / order / range -> maybeSingle | single | (awaited list)
+ *   select / eq / gt / gte / in / order / range / limit -> maybeSingle | single | (awaited list)
  *   insert(row | row[]) -> maybeSingle | single | (awaited)
  *   update(patch).eq()... .select(returning) -> maybeSingle | single
  *   upsert(row, { onConflict }) -> (awaited)
@@ -91,9 +112,12 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 			let upsertConflict = "id";
 			let rangeFrom: number | undefined;
 			let rangeTo: number | undefined;
+			let limitCount: number | undefined;
 
 			function whereClause(offset = 0) {
-				return wheres.map((w, i) => `${w.col} ${w.op} $${offset + i + 1}`).join(" and ");
+				return wheres
+					.map((w, i) => (w.op === "= any" ? `${w.col} = any($${offset + i + 1})` : `${w.col} ${w.op} $${offset + i + 1}`))
+					.join(" and ");
 			}
 
 			async function runSelect(limitOne: boolean) {
@@ -105,13 +129,15 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 					? " limit 1"
 					: rangeFrom !== undefined
 						? ` limit ${rangeTo! - rangeFrom + 1} offset ${rangeFrom}`
-						: "";
+						: limitCount !== undefined
+							? ` limit ${limitCount}`
+							: "";
 				try {
 					const { rows } = await pg.query(
 						`select ${selectCols} from ${table}${clause ? ` where ${clause}` : ""}${order}${limit}`,
 						wheres.map((w) => w.val),
 					);
-					return { data: limitOne ? (rows[0] ?? null) : rows, error: null };
+					return { data: isoTimestamps(limitOne ? (rows[0] ?? null) : rows), error: null };
 				} catch (e) {
 					return { data: null, error: e instanceof Error ? e : new Error(String(e)) };
 				}
@@ -129,7 +155,7 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 						`insert into ${table} (${cols.join(", ")}) values ${values} returning ${selectCols}`,
 						params,
 					);
-					return { data: limitOne ? (returned[0] ?? null) : returned, error: null };
+					return { data: isoTimestamps(limitOne ? (returned[0] ?? null) : returned), error: null };
 				} catch (e) {
 					return { data: null, error: pgError(e) };
 				}
@@ -144,7 +170,7 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 						`update ${table} set ${setClause}${clause ? ` where ${clause}` : ""} returning ${returningCols}`,
 						[...cols.map((c) => updatePatch![c]), ...wheres.map((w) => w.val)],
 					);
-					return { data: rows[0] ?? null, error: null };
+					return { data: isoTimestamps(rows[0] ?? null), error: null };
 				} catch (e) {
 					return { data: null, error: pgError(e) };
 				}
@@ -228,6 +254,10 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 					wheres.push({ col, op: ">=", val });
 					return builder;
 				},
+				in(col: string, vals: unknown[]) {
+					wheres.push({ col, op: "= any", val: vals });
+					return builder;
+				},
 				order(col: string, orderOpts?: { ascending?: boolean }) {
 					orderBys.push({ col, ascending: orderOpts?.ascending !== false });
 					return builder;
@@ -235,6 +265,10 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 				range(from: number, to: number) {
 					rangeFrom = from;
 					rangeTo = to;
+					return builder;
+				},
+				limit(n: number) {
+					limitCount = n;
 					return builder;
 				},
 				maybeSingle: () => terminal(true),

@@ -184,6 +184,16 @@ describe("classifyRow", () => {
 		expect(r.earnedTier).toBe(0);
 	});
 
+	// Regression: classifyRow used to report "no-observation" here purely off
+	// the observation gate, contradicting the earnedTier 4 computed two lines
+	// above from the exact same countersignedAt fact — the report telling its
+	// reader two different things about one customer.
+	it("publishes a countersigned customer even with zero observation, matching its own earnedTier", () => {
+		const r = classifyRow("acme.com", none, { ...customer, countersignedAt: "2026-09-01T00:00:00Z" }, true);
+		expect(r.status).toBe("published");
+		expect(r.earnedTier).toBe(4);
+	});
+
 	it("reports a withheld customer as consent-blocked, not as missing evidence", () => {
 		const r = classifyRow("acme.com", busy, { ...customer, consent: "anonymous" }, true);
 		expect(r.status).toBe("consent-withheld");
