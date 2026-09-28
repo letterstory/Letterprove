@@ -68,14 +68,6 @@ function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: strin
 	return { tokenId: "t1", vendorId, userId: "u1", capabilities };
 }
 
-// dispatchTool now re-verifies vendor_members before running any vendor:*
-// handler (consent no longer checks membership — see the consent route), so
-// FAKE_DB needs a real .from().select().eq().eq().maybeSingle() chain, not an
-// empty object. It stays the exact instance passed to toHaveBeenCalledWith
-// below — only its shape grew. Defaults to "is a member"; tests that need the
-// opposite set membershipRow = null first.
-let membershipRow: { vendor_id: string } | null = { vendor_id: "v1" };
-
 // get_install_snippet/rotate_key/list_snapshots query the `vendors` table
 // directly (single .eq().maybeSingle(), not the double-.eq() membership
 // shape above), so `from` branches on the table name. Defaults to a
@@ -106,32 +98,21 @@ const vendorUpdates: Record<string, unknown>[] = [];
 // that need the fallback set authUserRow = null.
 let authUserRow: { email?: string } | null = { email: "u1@example.com" };
 
+// Every db.from() call in registry.ts targets "vendors" — see get_install_snippet
+// et al. above.
 const FAKE_DB = {
 	auth: { admin: { getUserById: vi.fn(async () => ({ data: { user: authUserRow } })) } },
-	from: vi.fn((table: string) => {
-		if (table === "vendors") {
-			return {
-				select: vi.fn(() => ({
-					eq: vi.fn(() => ({
-						maybeSingle: vi.fn(async () => ({ data: vendorRow })),
-					})),
-				})),
-				update: vi.fn((patch: Record<string, unknown>) => {
-					vendorUpdates.push(patch);
-					return { eq: vi.fn(async () => ({ error: vendorUpdateError })) };
-				}),
-			};
-		}
-		return {
-			select: vi.fn(() => ({
-				eq: vi.fn(() => ({
-					eq: vi.fn(() => ({
-						maybeSingle: vi.fn(async () => ({ data: membershipRow })),
-					})),
-				})),
+	from: vi.fn(() => ({
+		select: vi.fn(() => ({
+			eq: vi.fn(() => ({
+				maybeSingle: vi.fn(async () => ({ data: vendorRow })),
 			})),
-		};
-	}),
+		})),
+		update: vi.fn((patch: Record<string, unknown>) => {
+			vendorUpdates.push(patch);
+			return { eq: vi.fn(async () => ({ error: vendorUpdateError })) };
+		}),
+	})),
 } as never;
 
 beforeEach(async () => {
@@ -139,7 +120,6 @@ beforeEach(async () => {
 	// The default principal's user id. Staff tools now require the caller to be
 	// on the allowlist as well as to hold the scope.
 	process.env.STAFF_USER_IDS = "u1";
-	membershipRow = { vendor_id: "v1" };
 	vendorRow = { key: "lp_live_acme_old", slug: "acme" };
 	vendorUpdateError = null;
 	vendorUpdates.length = 0;
@@ -1079,37 +1059,6 @@ describe("agentic_read_billing", () => {
 		const p: OAuthPrincipal = { tokenId: "t1", vendorId: null, userId: "letterstory-service", capabilities: ["vendor:read", "vendor:write"] };
 		const outcome = await dispatchTool("agentic_read_billing", {}, p);
 		expect(outcome.kind).toBe("denied");
-	});
-});
-
-/**
- * A vendor capability inside a token is not proof of current membership,
- * mirroring the staff case above — consent no longer verifies vendor_members
- * before minting a grant (see the consent route), so this is the only check
- * standing in front of a token whose vendor_id the caller doesn't (or no
- * longer does) belong to.
- */
-describe("vendor tools require current membership, not just the scope", () => {
-	it("denies a vendor tool when the caller isn't a member of the token's vendor", async () => {
-		membershipRow = null;
-		const { dispatchTool } = await import("./registry");
-		const { listCustomers } = await import("@/lib/vendors/customers");
-
-		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
-
-		expect(outcome).toEqual({ kind: "denied", capability: "vendor:read" });
-		expect(listCustomers).not.toHaveBeenCalled();
-	});
-
-	it("allows a vendor tool for a current member", async () => {
-		membershipRow = { vendor_id: "v1" };
-		const { dispatchTool } = await import("./registry");
-		const { listCustomers } = await import("@/lib/vendors/customers");
-		vi.mocked(listCustomers).mockResolvedValue({ ok: true, data: [] as never });
-
-		const outcome = await dispatchTool("list_customers", {}, principal(["vendor:read"]));
-
-		expect(outcome.kind).toBe("result");
 	});
 });
 

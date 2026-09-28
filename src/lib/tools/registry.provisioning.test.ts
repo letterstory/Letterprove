@@ -14,8 +14,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 });
 
 const maybeSingle = vi.fn<() => Promise<{ data: Record<string, unknown> | null }>>();
-// `.eq()` returns a node that supports BOTH a further `.eq()` (dispatchTool's
-// two-key vendor_members membership check) and a terminal `.maybeSingle()`
+// `.eq()` returns a node that chains to a terminal `.maybeSingle()`
 // (record_observed's single-key slug lookup).
 vi.mock("@/lib/db/client", () => {
 	// maybeSingle is referenced lazily (behind an arrow) because vi.mock is
