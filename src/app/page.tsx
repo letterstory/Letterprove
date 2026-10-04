@@ -13,5 +13,5 @@ import { permanentRedirect } from "next/navigation";
  * still reachable at its own URL.
  */
 export default function Home(): never {
-  permanentRedirect("https://letterprove.com");
+	permanentRedirect("https://letterprove.com");
 }
