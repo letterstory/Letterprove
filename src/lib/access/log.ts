@@ -25,6 +25,7 @@
 
 import { after } from "next/server";
 import { classify } from "./classify";
+import { clientIp, isVerifiedAgent } from "./verify-agent";
 import { dbClient } from "@/lib/db/client";
 
 const PREFIX = "[letterprove:access]";
@@ -48,7 +49,7 @@ export function logProofAccess(request: Request, subject: string): void {
 		/* ignore */
 	}
 
-	if (kind === "ai_agent") recordAgenticRead(subject, name);
+	if (kind === "ai_agent") recordAgenticRead(subject, name, clientIp(request.headers));
 }
 
 /**
@@ -56,16 +57,20 @@ export function logProofAccess(request: Request, subject: string): void {
  * ("vendor", "vendor/customer", "vendor/aggregate/chain", ...) — see the
  * route files under src/app/attest and src/app/api/proofs.
  */
-function recordAgenticRead(subject: string, agentName: string): void {
+function recordAgenticRead(subject: string, agentName: string, ip: string | null): void {
 	const db = dbClient();
 	if (!db) return;
 
 	const vendorSlug = subject.split("/")[0];
 	const record = async () => {
 		try {
+			// Billed only when the request came from the claimed operator's own
+			// published addresses (verify-agent.ts). The address itself is used
+			// for that check and dropped; only the outcome is stored.
+			const verified = await isVerifiedAgent(agentName, ip);
 			const { error } = await db
 				.from("agentic_read_events")
-				.insert({ vendor_slug: vendorSlug, subject, agent_name: agentName });
+				.insert({ vendor_slug: vendorSlug, subject, agent_name: agentName, verified });
 			if (error) console.error(`${PREFIX} agentic read record failed`, error.message);
 		} catch (error) {
 			console.error(`${PREFIX} agentic read record failed`, error instanceof Error ? error.message : String(error));

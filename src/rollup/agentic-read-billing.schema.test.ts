@@ -17,11 +17,11 @@ const files = readdirSync(dir)
 	.filter((f) => f.endsWith(".sql"))
 	.sort();
 
-async function insertRead(vendorSlug: string, ageDays: number) {
+async function insertRead(vendorSlug: string, ageDays: number, verified = true) {
 	await db.query(
-		`insert into agentic_read_events (vendor_slug, subject, agent_name, receipt_ts)
-		 values ($1, $1, 'chatgpt', now() - make_interval(secs => $2::double precision * 86400))`,
-		[vendorSlug, ageDays]
+		`insert into agentic_read_events (vendor_slug, subject, agent_name, receipt_ts, verified)
+		 values ($1, $1, 'chatgpt', now() - make_interval(secs => $2::double precision * 86400), $3)`,
+		[vendorSlug, ageDays, verified]
 	);
 }
 
@@ -61,6 +61,29 @@ describe("rollup_agentic_reads_daily", () => {
 			{ vendor_slug: "acme", read_count: 3 },
 			{ vendor_slug: "vantage", read_count: 1 },
 		]);
+	});
+
+	it("bills only verified reads — a spoofed agent claim is recorded but never counted", async () => {
+		await insertRead("acme", 0);
+		await insertRead("acme", 0, false);
+		await insertRead("acme", 1, false);
+
+		await db.query("select rollup_agentic_reads_daily()");
+
+		expect(await count("select read_count n from agentic_read_rollups where vendor_slug = 'acme'")).toBe(1);
+		expect(await count("select count(*) n from agentic_read_events where vendor_slug = 'acme'")).toBe(3);
+	});
+
+	it("zeroes a month whose reads all turn out unverified, rather than keeping a stale count", async () => {
+		await db.query(
+			`insert into agentic_read_rollups (vendor_slug, billing_month, read_count)
+			 values ('acme', date_trunc('month', now())::date, 40)`
+		);
+		await insertRead("acme", 0, false);
+
+		await db.query("select rollup_agentic_reads_daily()");
+
+		expect(await count("select read_count n from agentic_read_rollups where vendor_slug = 'acme'")).toBe(0);
 	});
 
 	it("is idempotent: rerunning it recomputes rather than double-counting", async () => {
