@@ -36,22 +36,22 @@ describe("vendorReadUsage", () => {
 		];
 		rows.error = null;
 		const usage = await vendorReadUsage("acme", NOW);
-		// 40 reads: 25 free, 15 × $0.08.
+		// 40 reads: 25 free, 15 × $0.20.
 		expect(usage?.current).toEqual({
 			billing_month: "2026-10-01",
 			reads: 40,
 			tier2_reads: 15,
 			tier3_reads: 0,
-			amount_cents: 120,
+			amount_cents: 300,
 			counted_at: "2026-10-14T03:15:00Z",
 		});
-		// 620 reads: 475 × $0.08 + 120 × $0.20.
-		expect(usage?.previous.amount_cents).toBe(475 * 8 + 120 * 20);
+		// 620 reads: 475 × $0.20 + 120 × $0.08 — the rate steps DOWN with volume.
+		expect(usage?.previous.amount_cents).toBe(475 * 20 + 120 * 8);
 		expect(usage?.pricing).toEqual({
 			free_reads: 25,
 			tier2_ceiling: 500,
-			tier2_rate_cents: 8,
-			tier3_rate_cents: 20,
+			tier2_rate_cents: 20,
+			tier3_rate_cents: 8,
 		});
 	});
 

@@ -20,7 +20,7 @@ describe("computeAgenticReadCharge", () => {
 			totalReads: 26,
 			tier2Reads: 1,
 			tier3Reads: 0,
-			amountCents: 8,
+			amountCents: 20,
 		});
 	});
 
@@ -29,7 +29,7 @@ describe("computeAgenticReadCharge", () => {
 			totalReads: 500,
 			tier2Reads: 475,
 			tier3Reads: 0,
-			amountCents: 3800,
+			amountCents: 9500,
 		});
 	});
 
@@ -38,7 +38,7 @@ describe("computeAgenticReadCharge", () => {
 			totalReads: 501,
 			tier2Reads: 475,
 			tier3Reads: 1,
-			amountCents: 3820,
+			amountCents: 9508,
 		});
 	});
 
@@ -47,7 +47,7 @@ describe("computeAgenticReadCharge", () => {
 			totalReads: 1000,
 			tier2Reads: 475,
 			tier3Reads: 500,
-			amountCents: 13_800,
+			amountCents: 13_500,
 		});
 	});
 

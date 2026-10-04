@@ -104,7 +104,7 @@ describe("agentic_read_billing, driven through the real rollup_agentic_reads_dai
 		};
 		expect(priorBody.billing_month).toBe(LAST_MONTH_YYYY_MM);
 		const acmePrior = priorBody.vendors.find((v) => v.vendor === VENDOR_SLUG);
-		expect(acmePrior).toMatchObject({ org_id: ORG_ID, read_count: 600, tier2_reads: 475, tier3_reads: 100, amount_cents: 475 * 8 + 100 * 20 });
+		expect(acmePrior).toMatchObject({ org_id: ORG_ID, read_count: 600, tier2_reads: 475, tier3_reads: 100, amount_cents: 475 * 20 + 100 * 8 });
 
 		const thisMonth = await dispatchTool("agentic_read_billing", { billing_month: THIS_MONTH_YYYY_MM }, serviceCaller());
 		if (thisMonth.kind !== "result" || !thisMonth.result.ok) throw new Error("expected ok result");

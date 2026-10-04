@@ -2,13 +2,14 @@
  * Usage-based pricing for agentic proof/attest reads — how many cents a
  * vendor owes for one billing month's count of AI-agent reads.
  *
- * Bands, per vendor per month (Steve, 2026-09-26, after comparing against
- * the sibling metered products in the ls repo — shreds/writes/ledes charge
- * $2-5/unit for AI-compute work; a proof-page read is a signed DB row with no
- * inference behind it, priced accordingly lower):
- *   0–25 reads    free
- *   26–500 reads  $0.08/read
- *   500+ reads    $0.20/read, marginal — only the reads above 500
+ * Bands, per vendor per month. Set by Steve 2026-09-26 (priced well under
+ * the $2-5/unit sibling metered products — a proof-page read is a signed DB
+ * row with no inference behind it), then turned into a volume discount by
+ * Matthew 2026-10-03: "it should step down … 20 cents per read, then 8 cents
+ * … but it's free at first to validate". So the rate FALLS with volume:
+ *   0–25 reads    free — enough to validate that agents read your proof
+ *   26–500 reads  $0.20/read
+ *   500+ reads    $0.08/read, marginal — only the reads above 500
  *
  * Pure and pricing-table-driven so the numbers can move without touching the
  * shape of the calculation. Cents, not dollars, throughout — the unit every
@@ -18,8 +19,8 @@
 export const AGENTIC_READ_PRICING = {
 	freeReads: 25,
 	tier2Ceiling: 500,
-	tier2RateCents: 8,
-	tier3RateCents: 20,
+	tier2RateCents: 20,
+	tier3RateCents: 8,
 } as const;
 
 export interface AgenticReadCharge {
