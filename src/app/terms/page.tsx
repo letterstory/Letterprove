@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 		"The terms for using Letterprove, including what a signed attestation does and does not claim, and the obligations a vendor takes on by publishing one.",
 };
 
-const UPDATED = "September 24, 2026";
+const UPDATED = "October 4, 2026";
 
 /**
  * The clauses that carry real weight here are §4 (what a signature actually
@@ -147,7 +147,28 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={8} title="Availability">
+			<Section n={8} title="Fees">
+				<p>
+					Letterprove is billed by usage. A <strong>read</strong> is one AI agent fetching one of
+					your signed proof pages or attestations. Each billing month, the first 25 reads are free;
+					reads 26 to 500 cost $0.08 each; reads above 500 cost $0.20 each. Current prices are
+					published at <a href="https://letterprove.com/pricing">letterprove.com/pricing</a>.
+				</p>
+				<p>
+					We count reads by the requester&apos;s declared identity, and your Proofs dashboard in
+					Letterstory shows the month so far. At the start of each month we bill the month just
+					ended to your Letterstory organization: we charge the card on file if there is one, and
+					otherwise email an invoice due within 14 days. Nothing is charged for a month under the
+					free allowance.
+				</p>
+				<p>
+					We will give at least 30 days&apos; notice before changing prices. If you believe reads
+					were counted that should not have been, tell us within 30 days of the invoice and we
+					will review them.
+				</p>
+			</Section>
+
+			<Section n={9} title="Availability">
 				<p>
 					We aim to keep the service running but do not promise uninterrupted availability. We may
 					change, suspend, or discontinue parts of it. Where a change would materially affect
@@ -155,7 +176,7 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={9} title="Disclaimer">
+			<Section n={10} title="Disclaimer">
 				<p>
 					The service is provided &ldquo;as is&rdquo;, without warranties of any kind to the
 					maximum extent permitted by law. We do not warrant that the service will be error-free,
@@ -163,7 +184,7 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={10} title="Limitation of liability">
+			<Section n={11} title="Limitation of liability">
 				<p>
 					To the maximum extent permitted by law, The Letter Company is not liable for any
 					indirect, incidental, special, consequential, or punitive damages, or for lost profits,
@@ -184,7 +205,7 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={11} title="Indemnification">
+			<Section n={12} title="Indemnification">
 				<p>
 					You agree to indemnify The Letter Company against claims, losses, and reasonable legal
 					costs arising from your use of the service, from attestations you publish, or from your
@@ -193,7 +214,7 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={12} title="Termination">
+			<Section n={13} title="Termination">
 				<p>
 					You may stop using Letterprove at any time. We may suspend or terminate access if you
 					breach these terms, or if we reasonably believe your use puts the service or its
@@ -202,7 +223,7 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={13} title="Changes to these terms">
+			<Section n={14} title="Changes to these terms">
 				<p>
 					We may update these terms as the service changes. We will update the date at the top,
 					and for material changes we will make a reasonable effort to notify you. Continuing to
@@ -210,7 +231,7 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={14} title="Contact">
+			<Section n={15} title="Contact">
 				<p>
 					Questions about these terms:{" "}
 					<a href="mailto:support@letterbrace.com">support@letterbrace.com</a>
