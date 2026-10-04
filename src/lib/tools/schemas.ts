@@ -474,3 +474,27 @@ export const agenticReadBillingOutput = z.object({
 		}),
 	),
 });
+
+export const getReadUsageInput = empty;
+const monthUsage = z.object({
+	billing_month: z.string().describe("First of the month, YYYY-MM-DD (UTC)."),
+	reads: z.number().int().describe("AI-agent reads of this vendor's signed proofs in the month."),
+	tier2_reads: z.number().int(),
+	tier3_reads: z.number().int(),
+	amount_cents: z.number().int().describe("What the month comes to under `pricing`. Billed monthly by Letterstory."),
+});
+export const getReadUsageOutput = z.object({
+	current: monthUsage.extend({
+		counted_at: z
+			.string()
+			.nullable()
+			.describe("When the month-to-date count was last computed (daily). Null if no read has been counted yet."),
+	}),
+	previous: monthUsage,
+	pricing: z.object({
+		free_reads: z.number().int(),
+		tier2_ceiling: z.number().int(),
+		tier2_rate_cents: z.number().int(),
+		tier3_rate_cents: z.number().int(),
+	}),
+});

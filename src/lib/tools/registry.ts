@@ -43,6 +43,7 @@ import {
 import { syncVendorPayments } from "@/lib/stripe/sync";
 import { paymentEvidenceCount } from "@/lib/attest/payment-evidence";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
+import { vendorReadUsage } from "@/lib/billing/vendor-usage";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -296,6 +297,31 @@ export const TOOLS: BoundTool[] = [
 					last_attested: summary.last_attested || null,
 				},
 			};
+		},
+	}),
+	defineTool({
+		// The vendor-scoped half of usage billing: the caller's own agentic reads,
+		// month to date and last month, priced by the same function the fleet
+		// report (`agentic_read_billing`) bills from. Without it the first a vendor
+		// hears of usage pricing is the invoice.
+		name: "get_read_usage",
+		description:
+			"The caller's own AI-agent proof reads: this month so far and last month, what each comes to, and the pricing bands.",
+		capability: "vendor:read",
+		inputSchema: S.getReadUsageInput,
+		outputSchema: S.getReadUsageOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle<{ slug: string }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			const usage = await vendorReadUsage(vendor.slug);
+			if (!usage) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: usage };
 		},
 	}),
 	defineTool({
