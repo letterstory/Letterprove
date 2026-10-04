@@ -155,8 +155,9 @@ export default function TermsPage() {
 					published at <a href="https://letterprove.com/pricing">letterprove.com/pricing</a>.
 				</p>
 				<p>
-					We count reads by the requester&apos;s declared identity, and your Proofs dashboard in
-					Letterstory shows the month so far. At the start of each month we bill the month just
+					We count a read only when the request comes from an address the agent&apos;s operator
+					publishes for it, so a request merely claiming to be an AI agent is never billed. Your
+					Proofs dashboard in Letterstory shows the month so far. At the start of each month we bill the month just
 					ended to your Letterstory organization: we charge the card on file if there is one, and
 					otherwise email an invoice due within 14 days. Nothing is charged for a month under the
 					free allowance.
