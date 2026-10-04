@@ -212,7 +212,10 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 			sessions_30d: attested.reduce((n, c) => n + c.proof.current.sessions_30d, 0),
 			last_attested: all.map((c) => c.proof.current.published_at).sort().at(-1) ?? "",
 			tier: attested.length ? (Math.max(...attested.map((c) => c.proof.current.tier)) as Tier) : 0,
-			companies_observed: tiers?.observed ?? 0,
+			// Companies only — the same count the signed aggregate publishes. `observed`
+			// is every domain seen, mailboxes and our own staff included, and printed
+			// here it disagreed with /attest/{vendor}.json about the same window.
+			companies_observed: tiers?.attributable ?? 0,
 		},
 	};
 }

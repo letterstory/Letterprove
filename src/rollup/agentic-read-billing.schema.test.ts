@@ -74,10 +74,11 @@ describe("rollup_agentic_reads_daily", () => {
 	});
 
 	it("still buckets a read from last month into last month's row, not this month's", async () => {
-		// 40 days ago is always in the prior calendar month relative to now,
-		// which is what "current AND previous month" in the migration's
-		// comment means to cover.
-		await insertRead("acme", 40);
+		// Today's day-of-month plus one is always the previous calendar month —
+		// what "current AND previous month" in the migration's comment covers.
+		// (This was 40 days, which on the 1st–9th of a month is TWO months back,
+		// outside the window, and failed the test on those days.)
+		await insertRead("acme", new Date().getUTCDate() + 1);
 		await insertRead("acme", 0);
 
 		await db.query("select rollup_agentic_reads_daily()");

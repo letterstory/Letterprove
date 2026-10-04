@@ -44,10 +44,13 @@ function escapeHtml(value: string): string {
 }
 
 function body(msg: ConsentRequestEmail): { subject: string; html: string; text: string } {
+	// UTC, stated: the expiry is a UTC instant, and formatting it in the server's
+	// local zone printed the day before for a link expiring at UTC midnight.
 	const expires = new Date(msg.expiresAt).toLocaleDateString("en-US", {
 		month: "long",
 		day: "numeric",
 		year: "numeric",
+		timeZone: "UTC",
 	});
 
 	// Named plainly: the recipient has no Letterprove account and no reason to
