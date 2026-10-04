@@ -29,10 +29,11 @@ export function SiteHeader() {
 	return (
 		<header className="border-b border-edge">
 			<div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
-				<Link href="/" className="flex items-center gap-3">
+				{/* The product's home is letterprove.com; this host's bare root only redirects there. */}
+				<a href="https://letterprove.com" className="flex items-center gap-3">
 					{/* eslint-disable-next-line @next/next/no-img-element */}
 					<img src="/logo.svg" alt="Letterprove" className="h-6 w-auto" />
-				</Link>
+				</a>
 				{/* Uppercase with letter-spacing: these are labels, not prose, and they
 				    sit beside a wordmark rather than in a sentence. */}
 				<nav className="flex items-center gap-5 text-xs tracking-widest text-fog uppercase">
