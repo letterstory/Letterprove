@@ -23,31 +23,32 @@
  * applies to the console line above.
  */
 
+import { after } from "next/server";
 import { classify } from "./classify";
 import { dbClient } from "@/lib/db/client";
 
 const PREFIX = "[letterprove:access]";
 
 export function logProofAccess(request: Request, subject: string): void {
-	const { kind, name } = classify(request.headers.get("user-agent"));
+  const { kind, name } = classify(request.headers.get("user-agent"));
 
-	// Never let telemetry break a proof response.
-	try {
-		console.log(
-			`${PREFIX} ${JSON.stringify({
-				subject,
-				kind,
-				name,
-				// Which answer engine sent a person here, when one did. Host only —
-				// a full referrer can carry a conversation id or a search query.
-				from: refererHost(request.headers.get("referer")),
-			})}`
-		);
-	} catch {
-		/* ignore */
-	}
+  // Never let telemetry break a proof response.
+  try {
+    console.log(
+      `${PREFIX} ${JSON.stringify({
+        subject,
+        kind,
+        name,
+        // Which answer engine sent a person here, when one did. Host only —
+        // a full referrer can carry a conversation id or a search query.
+        from: refererHost(request.headers.get("referer")),
+      })}`,
+    );
+  } catch {
+    /* ignore */
+  }
 
-	if (kind === "ai_agent") recordAgenticRead(subject, name);
+  if (kind === "ai_agent") recordAgenticRead(subject, name);
 }
 
 /**
@@ -56,27 +57,42 @@ export function logProofAccess(request: Request, subject: string): void {
  * route files under src/app/attest and src/app/api/proofs.
  */
 function recordAgenticRead(subject: string, agentName: string): void {
-	const db = dbClient();
-	if (!db) return;
+  const db = dbClient();
+  if (!db) return;
 
-	const vendorSlug = subject.split("/")[0];
-	void (async () => {
-		try {
-			const { error } = await db
-				.from("agentic_read_events")
-				.insert({ vendor_slug: vendorSlug, subject, agent_name: agentName });
-			if (error) console.error(`${PREFIX} agentic read record failed`, error.message);
-		} catch (error) {
-			console.error(`${PREFIX} agentic read record failed`, error instanceof Error ? error.message : String(error));
-		}
-	})();
+  const vendorSlug = subject.split("/")[0];
+  const record = async () => {
+    try {
+      const { error } = await db
+        .from("agentic_read_events")
+        .insert({ vendor_slug: vendorSlug, subject, agent_name: agentName });
+      if (error)
+        console.error(`${PREFIX} agentic read record failed`, error.message);
+    } catch (error) {
+      console.error(
+        `${PREFIX} agentic read record failed`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  };
+  // `after`, not a bare fire-and-forget promise. On Vercel the function can be
+  // frozen the moment the response is sent, and an un-awaited insert started
+  // before that point could be silently dropped (2026-10-04: three GPTBot
+  // fetches of /attest/letterstory.json, all cache MISSes, recorded zero rows). `after` runs the write once the response is out (so the
+  // proof is never slowed) and keeps the function alive until it lands.
+  // Outside a request scope (scripts, unit tests) `after` throws; run inline.
+  try {
+    after(record);
+  } catch {
+    void record();
+  }
 }
 
 function refererHost(referer: string | null): string {
-	if (!referer) return "";
-	try {
-		return new URL(referer).hostname.toLowerCase();
-	} catch {
-		return "";
-	}
+  if (!referer) return "";
+  try {
+    return new URL(referer).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
 }
