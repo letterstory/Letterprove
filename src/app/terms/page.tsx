@@ -151,7 +151,7 @@ export default function TermsPage() {
 				<p>
 					Letterprove is billed by usage. A <strong>read</strong> is one AI agent fetching one of
 					your signed proof pages or attestations. Each billing month, the first 25 reads are free;
-					reads 26 to 500 cost $0.08 each; reads above 500 cost $0.20 each. Current prices are
+					reads 26 to 500 cost $0.20 each; reads above 500 cost $0.08 each. Current prices are
 					published at <a href="https://letterprove.com/pricing">letterprove.com/pricing</a>.
 				</p>
 				<p>
