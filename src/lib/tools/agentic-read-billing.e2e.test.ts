@@ -44,9 +44,9 @@ const LAST_MONTH_YYYY_MM = LAST_MONTH.toISOString().slice(0, 10);
 
 async function seedReads(vendorSlug: string, month: Date, count: number) {
 	if (count === 0) return;
-	const rows = Array.from({ length: count }, (_, i) => `('${vendorSlug}', 'reader', 'test-agent', '${isoDaysInto(month, 2 + (i % 20))}')`);
+	const rows = Array.from({ length: count }, (_, i) => `('${vendorSlug}', 'reader', 'test-agent', '${isoDaysInto(month, 2 + (i % 20))}', true)`);
 	await pg.query(
-		`insert into agentic_read_events (vendor_slug, subject, agent_name, receipt_ts) values ${rows.join(", ")}`,
+		`insert into agentic_read_events (vendor_slug, subject, agent_name, receipt_ts, verified) values ${rows.join(", ")}`,
 	);
 }
 
