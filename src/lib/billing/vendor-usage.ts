@@ -1,8 +1,8 @@
 import { dbClient } from "@/lib/db/client";
 import { currentBillingMonth, previousBillingMonth } from "@/lib/staff/billing";
 import {
-  AGENTIC_READ_PRICING,
-  computeAgenticReadCharge,
+	AGENTIC_READ_PRICING,
+	computeAgenticReadCharge,
 } from "@/lib/billing/agentic-reads";
 
 /**
@@ -18,76 +18,76 @@ import {
  * live: the rollup recomputes the current and previous month on each run.
  */
 export interface VendorMonthUsage {
-  billing_month: string;
-  reads: number;
-  tier2_reads: number;
-  tier3_reads: number;
-  amount_cents: number;
+	billing_month: string;
+	reads: number;
+	tier2_reads: number;
+	tier3_reads: number;
+	amount_cents: number;
 }
 
 export interface VendorReadUsage {
-  current: VendorMonthUsage & { counted_at: string | null };
-  previous: VendorMonthUsage;
-  pricing: {
-    free_reads: number;
-    tier2_ceiling: number;
-    tier2_rate_cents: number;
-    tier3_rate_cents: number;
-  };
+	current: VendorMonthUsage & { counted_at: string | null };
+	previous: VendorMonthUsage;
+	pricing: {
+		free_reads: number;
+		tier2_ceiling: number;
+		tier2_rate_cents: number;
+		tier3_rate_cents: number;
+	};
 }
 
 function month(billingMonth: string, reads: number): VendorMonthUsage {
-  const charge = computeAgenticReadCharge(reads);
-  return {
-    billing_month: billingMonth,
-    reads: charge.totalReads,
-    tier2_reads: charge.tier2Reads,
-    tier3_reads: charge.tier3Reads,
-    amount_cents: charge.amountCents,
-  };
+	const charge = computeAgenticReadCharge(reads);
+	return {
+		billing_month: billingMonth,
+		reads: charge.totalReads,
+		tier2_reads: charge.tier2Reads,
+		tier3_reads: charge.tier3Reads,
+		amount_cents: charge.amountCents,
+	};
 }
 
 /** Null when storage is unreachable — never a zeroed usage, which would read as "nothing owed". */
 export async function vendorReadUsage(
-  vendorSlug: string,
-  now: Date = new Date(),
+	vendorSlug: string,
+	now: Date = new Date(),
 ): Promise<VendorReadUsage | null> {
-  const db = dbClient();
-  if (!db) return null;
+	const db = dbClient();
+	if (!db) return null;
 
-  const current = currentBillingMonth(now);
-  const previous = previousBillingMonth(now);
-  const { data, error } = await db
-    .from("agentic_read_rollups")
-    .select("billing_month, read_count, computed_at")
-    .eq("vendor_slug", vendorSlug)
-    .in("billing_month", [current, previous]);
-  if (error) {
-    console.error(
-      "[letterprove:billing] vendor usage read failed",
-      error.message,
-    );
-    return null;
-  }
+	const current = currentBillingMonth(now);
+	const previous = previousBillingMonth(now);
+	const { data, error } = await db
+		.from("agentic_read_rollups")
+		.select("billing_month, read_count, computed_at")
+		.eq("vendor_slug", vendorSlug)
+		.in("billing_month", [current, previous]);
+	if (error) {
+		console.error(
+			"[letterprove:billing] vendor usage read failed",
+			error.message,
+		);
+		return null;
+	}
 
-  const rows = (data ?? []) as {
-    billing_month: string;
-    read_count: number;
-    computed_at: string;
-  }[];
-  const at = (m: string) => rows.find((r) => r.billing_month === m);
+	const rows = (data ?? []) as {
+		billing_month: string;
+		read_count: number;
+		computed_at: string;
+	}[];
+	const at = (m: string) => rows.find((r) => r.billing_month === m);
 
-  return {
-    current: {
-      ...month(current, at(current)?.read_count ?? 0),
-      counted_at: at(current)?.computed_at ?? null,
-    },
-    previous: month(previous, at(previous)?.read_count ?? 0),
-    pricing: {
-      free_reads: AGENTIC_READ_PRICING.freeReads,
-      tier2_ceiling: AGENTIC_READ_PRICING.tier2Ceiling,
-      tier2_rate_cents: AGENTIC_READ_PRICING.tier2RateCents,
-      tier3_rate_cents: AGENTIC_READ_PRICING.tier3RateCents,
-    },
-  };
+	return {
+		current: {
+			...month(current, at(current)?.read_count ?? 0),
+			counted_at: at(current)?.computed_at ?? null,
+		},
+		previous: month(previous, at(previous)?.read_count ?? 0),
+		pricing: {
+			free_reads: AGENTIC_READ_PRICING.freeReads,
+			tier2_ceiling: AGENTIC_READ_PRICING.tier2Ceiling,
+			tier2_rate_cents: AGENTIC_READ_PRICING.tier2RateCents,
+			tier3_rate_cents: AGENTIC_READ_PRICING.tier3RateCents,
+		},
+	};
 }

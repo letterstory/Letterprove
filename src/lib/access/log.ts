@@ -23,6 +23,7 @@
  * applies to the console line above.
  */
 
+import { after } from "next/server";
 import { classify } from "./classify";
 import { dbClient } from "@/lib/db/client";
 
@@ -60,7 +61,7 @@ function recordAgenticRead(subject: string, agentName: string): void {
 	if (!db) return;
 
 	const vendorSlug = subject.split("/")[0];
-	void (async () => {
+	const record = async () => {
 		try {
 			const { error } = await db
 				.from("agentic_read_events")
@@ -69,7 +70,19 @@ function recordAgenticRead(subject: string, agentName: string): void {
 		} catch (error) {
 			console.error(`${PREFIX} agentic read record failed`, error instanceof Error ? error.message : String(error));
 		}
-	})();
+	};
+	// `after`, not a bare fire-and-forget promise. On Vercel the function can be
+	// frozen the moment the response is sent, and an un-awaited insert started
+	// before that point could be silently dropped (2026-10-04: three GPTBot
+	// fetches of /attest/letterstory.json, all cache MISSes, recorded zero
+	// rows). `after` runs the write once the response is out (so the proof is
+	// never slowed) and keeps the function alive until it lands. Outside a
+	// request scope (scripts, unit tests) `after` throws; run inline.
+	try {
+		after(record);
+	} catch {
+		void record();
+	}
 }
 
 function refererHost(referer: string | null): string {
