@@ -146,3 +146,30 @@ describe("partitionDomains", () => {
 		expect(partitionDomains([])).toEqual({ attributable: [], excluded: [] });
 	});
 });
+
+describe("our domains at any depth, and the regional mailbox tail", () => {
+	it("treats a product host as ours, for the vendor and for the observed domain", () => {
+		// The Letterstory vendor registers app.letterstory.com; its staff sign in as
+		// letterstory.com and letterbrace.com. Neither is a customer.
+		expect(classifyDomain("letterstory.com", "app.letterstory.com").kind).toBe("internal");
+		expect(classifyDomain("letterbrace.com", "app.letterstory.com").kind).toBe("internal");
+		expect(classifyDomain("mail.letterstory.com", "lettertrace.com").kind).toBe("internal");
+	});
+
+	it("covers the newer Letter products", () => {
+		for (const d of ["letter.dev", "lettershred.com", "letterwrite.com", "letterlede.com", "letterho.me"]) {
+			expect(classifyDomain(d, "lettertrace.com").kind).toBe("internal");
+		}
+	});
+
+	it("still lets a real company that merely resembles ours through", () => {
+		expect(classifyDomain("notletterstory.com", "app.letterstory.com").kind).toBe("company");
+		expect(classifyDomain("caseymillstein.com", "app.letterstory.com").kind).toBe("company");
+	});
+
+	it("refuses the regional mailboxes real traffic surfaced", () => {
+		for (const d of ["hotmail.fr", "orange.fr", "yahoo.co.jp", "comcast.net", "t-online.de"]) {
+			expect(classifyDomain(d).kind).toBe("free_mail");
+		}
+	});
+});

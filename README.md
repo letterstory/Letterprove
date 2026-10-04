@@ -1157,13 +1157,9 @@ signing](#what-is-actually-signing--decided-08-13).
 | 20 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
 | 21 | **A vendor may counter-sign a domain they control; they may not do it invisibly.** The attestation publishes `customer_domain`, and changing a customer's name or domain discards the counter-signature and any live consent link | ✅ **Decided (09-10)** — see [Making the accepted case visible](#making-the-accepted-case-visible--built-09-10) |
 | 22 | **A vendor is private until someone publishes them.** Collection, rollup, freeze, signing and countersigning all run while private; only publication is gated, and an unpublished vendor 404s exactly as an unknown one does | ✅ **Decided (09-14)** — see [A vendor is private until someone publishes them](#a-vendor-is-private-until-someone-publishes-them--decided-09-14) |
+| 23 | **Legal terms** — the MSA-clause question is closed by using the same privacy policy and terms as every other Letter Company site, applied to Letterprove | ✅ **Decided (10-03)**, Casey |
 
 ### Open
-
-- **Does a standard MSA marketing/reference clause cover a continuously
-  updating, machine-readable usage attestation, or is that a new grant?** The
-  narrow legal question worth asking. Not *"is GDPR ok with this"* — that's a
-  month; this is twenty minutes.
 
 - **Tier 3 has never run against a live-mode Stripe key.** The publish half is
   proven against the real schema (`src/lib/stripe/publish.schema.test.ts`, which
@@ -1227,14 +1223,6 @@ signing](#what-is-actually-signing--decided-08-13).
   narrowed once for exactly this class of mistake: its first draft deleted every
   org-less vendor, which on that date was all of them, `lettertrace` and its
   nine real customer rows included.
-
-- **`dispatchTool` still queries a table that no longer exists.** Its `vendor:*`
-  branch re-reads `vendor_members` when `principal.orgId` is null, which cannot
-  happen in production — `authenticateToolRequest` rejects a call carrying no
-  `org_id` before a principal is built. So the branch is unreachable outside
-  tests, and where it *is* reachable it fails closed against a dropped table
-  rather than throwing. Harmless today, and misleading to read: it is the last
-  piece of the retired membership model still sitting in live code.
 
 ---
 

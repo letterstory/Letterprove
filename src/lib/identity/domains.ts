@@ -93,6 +93,64 @@ const FREE_MAIL = new Set([
 	"tutanota.com",
 	"tuta.io",
 	"duck.com",
+	// Regional and ISP mailboxes. Lettertrace's own traffic surfaced hotmail.fr as
+	// a "company" — the long tail is regional, so the common ones are listed here.
+	"hotmail.fr",
+	"hotmail.de",
+	"hotmail.it",
+	"hotmail.es",
+	"outlook.fr",
+	"outlook.de",
+	"outlook.es",
+	"live.fr",
+	"live.co.uk",
+	"live.ca",
+	"yahoo.fr",
+	"yahoo.de",
+	"yahoo.es",
+	"yahoo.it",
+	"yahoo.ca",
+	"yahoo.com.au",
+	"yahoo.co.in",
+	"yahoo.co.jp",
+	"rocketmail.com",
+	"orange.fr",
+	"wanadoo.fr",
+	"free.fr",
+	"sfr.fr",
+	"laposte.net",
+	"btinternet.com",
+	"sky.com",
+	"comcast.net",
+	"verizon.net",
+	"att.net",
+	"sbcglobal.net",
+	"cox.net",
+	"bigpond.com",
+	"optusnet.com.au",
+	"shaw.ca",
+	"rogers.com",
+	"gmx.net",
+	"gmx.at",
+	"gmx.fr",
+	"t-online.de",
+	"libero.it",
+	"virgilio.it",
+	"seznam.cz",
+	"wp.pl",
+	"o2.pl",
+	"interia.pl",
+	"mail.ru",
+	"inbox.ru",
+	"list.ru",
+	"bk.ru",
+	"yandex.com",
+	"rediffmail.com",
+	"foxmail.com",
+	"sina.com",
+	"139.com",
+	"hanmail.net",
+	"daum.net",
 ]);
 
 /**
@@ -113,7 +171,23 @@ const INTERNAL = new Set([
 	"letterchange.com",
 	"letterpose.com",
 	"phantomstory.com",
+	"letter.dev",
+	"lettershred.com",
+	"letterwrite.com",
+	"letterlede.com",
+	"letterho.me",
 ]);
+
+/**
+ * Ours, at any depth. Vendors register a product host (`app.letterstory.com`),
+ * not the bare domain, so an exact-match check let the Letterstory vendor count
+ * letterstory.com and letterbrace.com — our own staff — as customer companies,
+ * and most of its published sessions were us.
+ */
+function isInternal(domain: string): boolean {
+	for (const root of INTERNAL) if (domain === root || domain.endsWith(`.${root}`)) return true;
+	return false;
+}
 
 /**
  * TLDs reserved by RFC 2606 / RFC 6761 for documentation and testing. Real
@@ -157,12 +231,12 @@ export function classifyDomain(domain: string, vendorDomain?: string): DomainCla
 		return { kind: "unknown", reason: `reserved tld ".${tld}" — fixture or probe, not a real identity` };
 	}
 
-	if (INTERNAL.has(d)) {
+	if (isInternal(d)) {
 		// Self-dealing only exists when the vendor asking is also ours. No
 		// vendorDomain (an unmigrated call site, or a passive read with no
 		// vendor in scope) fails closed to the original, always-internal
 		// behavior — an unknown asker is never treated as "safe".
-		if (!vendorDomain || INTERNAL.has(normalise(vendorDomain))) {
+		if (!vendorDomain || isInternal(normalise(vendorDomain))) {
 			return {
 				kind: "internal",
 				reason: "The Letter Company's own domain — attesting our own usage is self-dealing",
