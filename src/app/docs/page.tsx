@@ -659,13 +659,13 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
 							document, in the key id, and in the verifier&apos;s own output.
 						</p>
 						<p className="pt-1">
-							<a href="/verify" className="text-mint hover:underline">
+							<Link href="/verify" className="text-mint hover:underline">
 								The verify page
-							</a>{" "}
+							</Link>{" "}
 							renders the live discovery document, and{" "}
-							<a href="/keys" className="text-mint hover:underline">
+							<Link href="/keys" className="text-mint hover:underline">
 								the keys page
-							</a>{" "}
+							</Link>{" "}
 							renders the current JWKS, if you would rather read either in prose first.
 						</p>
 					</Section>
