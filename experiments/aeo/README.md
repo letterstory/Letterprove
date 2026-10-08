@@ -291,11 +291,84 @@ unverifiable competitor's is large. **What it still does not support:** a
 number for how much proof is worth against competitors with real
 corroboration.
 
+### Run 4 — 2026-10-08, `stress.mjs`, 448 cells + 36 discovery cells, four engines
+
+**The launch stress test.** Lettertrace's live production-countersigned
+aggregate (55 companies, 179 sessions, key `lp-d157ef400e`) against invented
+competitors, on Claude (`claude-opus-5-5`), ChatGPT (`gpt-6.1-sol`), Gemini
+(`gemini-pro-latest` → 3.1 Pro) and Perplexity (`sonar-pro`). Seven arms ×
+prompts 0 and 3 × 8 rounds = 16 cells per engine × arm. Candidate order
+shuffled once per round, shared across arms and engines. Blind judge
+(`claude-opus-5-5`, low effort) on every answer.
+
+Mean rank (unranked counted as 6), and paired Δ vs control with a bootstrap
+95% interval. Negative is better for the target.
+
+| engine | proof_inline | proof_linked | claim_only | tampered | forged | stale |
+|---|---|---|---|---|---|---|
+| Claude | **−0.50** [−0.75, −0.25] | **−0.50** [−1.06, −0.06] | +0.31 [−0.06, +0.69] | **+0.50** [+0.12, +0.94] | **+1.19** [+0.50, +1.94] | −0.25 [−0.56, +0.06] |
+| ChatGPT | 0.00 [−0.19, +0.19] | 0.00 [−0.19, +0.19] | +0.06 | +0.06 | 0.00 | +0.12 |
+| Gemini | −0.31 [−0.75, +0.12] | −0.25 [−0.62, +0.19] | −0.25 [−0.62, +0.12] | +0.50 [−0.25, +1.38] | **+1.31** [+0.75, +1.88] | −0.06 |
+| Perplexity | +0.19 | −0.62 [−1.38, +0.12] | 0.00 | −0.50 | −0.25 | +0.50 |
+
+**Claude passes every condition.** Real proof lifts it (#1 in 50% of cells vs
+25% for control). It caught the tampered document 16/16 and the forged one
+16/16 and ranked both below control. It flagged the stale snapshot 16/16 but
+did not penalise genuine old data.
+
+**Gemini catches forgeries but is fooled by tampering and by the word.** The
+forged key was flagged 16/16. On the tampered document it claimed the
+signature checked out in 7/16 cells — *"irrefutable, verifiable proof that
+550 companies actually use the product"* — after fetching the JWKS and
+running code. On claim_only (no document, just "cryptographically signed and
+independently verified") it credited the evidence in 7/16 cells against 1/16
+for control, and judged a signature "valid" that did not exist in 3. The
+pass condition fails here: a competitor's bare claim does about as well on
+Gemini as real proof.
+
+**ChatGPT verifies and is unmoved.** It reported a valid signature on real
+proof in 13/16 cells and flagged the forged key in 13/16, and its ranking did
+not move in either direction. Its reading: *"a signed claim of 55 company
+domains observed and 179 sessions, not 55 enterprise deployments."* It also
+read the document's `ttl: 3600` as expiry in 13/16 cells — the snapshot was
+an hour old by the time most cells ran.
+
+**Perplexity cannot see proof at all.** Sonar has no fetch and no code tool;
+it reads only its own index, and `/attest/*` is not in it.
+
+**Discovery (Tier 3, API side): 0/36.** Asked cold — "best AI brand
+monitoring tools", "which have independently verifiable usage evidence" —
+no engine mentioned Lettertrace or Letterprove in any cell. Profound and
+Peec AI led everywhere. Asked for verifiable adoption evidence, ChatGPT
+cited Ramp's transaction-based adoption records.
+
+**Confounds this run surfaced, in order of how much they matter:**
+
+1. **The attestor and the target share a name and an org.** Claude, reading
+   the linked proof: *"the vendor's sister project is vouching for the
+   vendor."* Testing Letterprove on a Letterstory product understates what an
+   arm's-length customer would get, and the next run should use one.
+2. **The "fictional" competitors collide with real companies** (Promptwatch,
+   Brandlens, Mentionscope, an Echelon AI agency). Engines found mismatched
+   real vendors and penalised them, which pushed Lettertrace to #1 on prompt 0
+   in every arm. Prompt 3 was added mid-run for headroom.
+3. **Small numbers** were flagged in most Claude and Perplexity cells
+   regardless of arm.
+
+**Tier 3, access log.** `access-baseline.mjs` found 25 organic agent reads in
+retained history (10 visits: ChatGPT 3, Meta 2, Claude 5; none from
+Perplexity or Gemini). Every count is a lower bound: Vercel's CDN cached
+proof responses for an hour and a HIT never reached the logger, which is
+why none of this run's hundreds of fetches appear. Fixed in #162.
+
 ## Files
 
 | | |
 |---|---|
 | `scenarios.json` | Vantage — fictional target and competitors (runs 1–2) |
 | `scenarios.lettertrace.json` | Lettertrace — real target, real attestation, invented competitors (run 3) |
-| `run.mjs` | Runner — builds briefs, calls the API, extracts signals, prints the summary |
-| `results.jsonl` | Output, git-ignored |
+| `run.mjs` | Runner — builds briefs, calls the API, extracts signals, prints the summary (runs 1–3) |
+| `stress.mjs` | Launch stress test — four engines, seven arms including tampered/forged/stale proof, blind judge, `--mode discovery`, `--resume` (run 4) |
+| `providers.mjs` | One adapter per engine (Claude, ChatGPT, Gemini, Perplexity), one return shape |
+| `access-baseline.mjs` | Tier 3 — organic AI-agent reads from production `agentic_read_events`, experiment windows excluded |
+| `results*.jsonl`, `access-baseline-*.json` | Output, git-ignored |

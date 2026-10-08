@@ -3,13 +3,12 @@
   "target": "Lettertrace",
   "proof_path": "/attest/lettertrace.json",
   "note": "The TARGET is real — Lettertrace is our own product and the attestation carries its genuine observed usage, which is currently small. Every COMPETITOR is fictional, deliberately: naming real companies in a ranked public comparison they never agreed to be part of is a hazard with no experimental upside, and a model's existing opinions about a real vendor would confound the one variable under test. The remaining validity caveat is that no candidate has model priors — stated in README rather than hidden.",
-
   "prompts": [
     "I'm choosing an AI brand monitoring tool for a 200-person B2B software company. We want to track how AI assistants describe us versus competitors. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning.",
     "Which of these AI brand monitoring tools has the strongest evidence that real companies actually use it in production? Rank them and explain exactly what evidence you relied on.",
-    "My CTO does not trust vendor marketing numbers. Of the tools below, which usage claims can you actually verify, and which are you taking on faith? Rank them and be explicit about your confidence in each."
+    "My CTO does not trust vendor marketing numbers. Of the tools below, which usage claims can you actually verify, and which are you taking on faith? Rank them and be explicit about your confidence in each.",
+    "We're a 3,000-person company with no engineers to spare for setup or hosting. We want a fully managed AI brand monitoring tool that companies like ours demonstrably use. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning."
   ],
-
   "candidates": [
     {
       "name": "Lettertrace",
@@ -38,5 +37,11 @@
       "claims": "AI brand analytics for regulated industries. Audit logs, data residency, SLA-backed support.",
       "control": "Homepage states \"trusted by leading brands worldwide\" with no named customers."
     }
-  ]
+  ],
+  "prompt_notes": {
+    "0": "Neutral — never mentions evidence. The headline cell.",
+    "1": "Invites scrutiny of production-use evidence; stacks the deck toward proof.",
+    "2": "Invites scrutiny of verifiability; stacks the deck toward proof.",
+    "3": "Hard fit (added 2026-10-07 for stress.mjs). Lettertrace is open-source/BYOK, so a buyer wanting a fully managed tool should NOT rank it first on fit alone — this leaves proof room to move the rank, where prompt 0 ceilinged at #1 on Claude and Gemini."
+  }
 }
