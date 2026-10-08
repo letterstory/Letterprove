@@ -23,4 +23,11 @@ describe("cache policy", () => {
 		// A proof nobody can fetch cross-origin is not proof.
 		expect(namedProofJson({}).headers.get("access-control-allow-origin")).toBe("*");
 	});
+
+	it("never lets Vercel's edge answer a proof read, so every read reaches the access log", () => {
+		// An edge HIT skips the route and with it logProofAccess — the read is
+		// invisible to the log and to agentic-read billing.
+		expect(proofJson({}).headers.get("vercel-cdn-cache-control")).toBe("no-store");
+		expect(namedProofJson({}).headers.get("vercel-cdn-cache-control")).toBe("no-store");
+	});
 });
