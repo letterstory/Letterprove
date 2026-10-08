@@ -1,6 +1,22 @@
 import { NextResponse } from "next/server";
 
 /**
+ * Keep Vercel's edge from answering proof reads on the function's behalf.
+ *
+ * `cache-control` stays as it is for the agent, browser or proxy downstream:
+ * they may keep a proof for its ttl. But an edge HIT never runs the route, so
+ * it never reaches `logProofAccess` — the read is invisible to the access log
+ * AND to agentic-read billing. Measured 2026-10-07: back-to-back fetches of
+ * /attest/lettertrace.json came back MISS then HIT, and a day of Claude,
+ * ChatGPT and Gemini fetches recorded zero agentic_read_events rows. Every
+ * read after the first in each hour was going unseen.
+ *
+ * `Vercel-CDN-Cache-Control` governs only Vercel's own cache and is stripped
+ * before the response leaves, so downstream caching is unchanged.
+ */
+const NO_EDGE_CACHE = { "vercel-cdn-cache-control": "no-store" } as const;
+
+/**
  * Every proof response an agent reads.
  *
  * Cached for the attestation's own `ttl` and CORS-open, because a proof nobody
@@ -18,6 +34,7 @@ export function proofJson(body: unknown, ttl = 3600): NextResponse {
 			// names are company names. Being explicit costs nothing.
 			"content-type": "application/json; charset=utf-8",
 			"cache-control": `public, max-age=${ttl}, stale-while-revalidate=86400`,
+			...NO_EDGE_CACHE,
 			"access-control-allow-origin": "*",
 			// Diagnostics across a distributed install: one curl answers "is this
 			// deploy serving proofs at all", without parsing the body.
@@ -48,6 +65,7 @@ export function namedProofJson(body: unknown): NextResponse {
 		headers: {
 			"content-type": "application/json; charset=utf-8",
 			"cache-control": "public, max-age=60, must-revalidate",
+			...NO_EDGE_CACHE,
 			"access-control-allow-origin": "*",
 			"x-letterprove": "on",
 		},
