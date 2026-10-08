@@ -93,12 +93,12 @@ function experimentWindows() {
 	return windows;
 }
 
-/** "vendor", "vendor/aggregate", "vendor/aggregate/chain", "vendor/customer", "vendor/customer/chain". */
+/** "vendor", "vendor/aggregate", "vendor/aggregate/chain|verify", "vendor/customer", "vendor/customer/chain|verify". */
 function surface(subject) {
 	const parts = subject.split("/");
 	if (parts.length === 1) return "proofs page";
-	if (parts[1] === "aggregate") return parts[2] === "chain" ? "aggregate chain" : "aggregate";
-	return parts[2] === "chain" ? "customer chain" : "customer";
+	if (parts[1] === "aggregate") return parts[2] === "chain" ? "aggregate chain" : parts[2] === "verify" ? "aggregate verify" : "aggregate";
+	return parts[2] === "chain" ? "customer chain" : parts[2] === "verify" ? "customer verify" : "customer";
 }
 
 const isoWeek = (ts) => {

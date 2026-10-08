@@ -642,6 +642,7 @@ response says so.
 | `/attest/{vendor}/chain`, `/attest/{vendor}/{customer}/chain` | The full signed history behind either |
 | `/.well-known/letterprove.json` | Discovery |
 | `/.well-known/letterprove-jwks.json` | Public signing keys |
+| `/verify/{vendor}[/{customer}]/{stamp}` | One snapshot's plain-language check — the figures signed, and whether the signature verifies. Every attestation since 2026-10-08 links to its own in a signed `verify` field |
 
 The aggregate sits one segment above the per-customer route on purpose: it is a
 claim about the vendor rather than about any customer of theirs, it names
@@ -1168,6 +1169,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 22 | **A vendor is private until someone publishes them.** Collection, rollup, freeze, signing and countersigning all run while private; only publication is gated, and an unpublished vendor 404s exactly as an unknown one does | ✅ **Decided (09-14)** — see [A vendor is private until someone publishes them](#a-vendor-is-private-until-someone-publishes-them--decided-09-14) |
 | 23 | **Legal terms** — the MSA-clause question is closed by using the same privacy policy and terms as every other Letter Company site, applied to Letterprove | ✅ **Decided (10-03)**, Casey |
 | 24 | **A snapshot never expires; the body says when the next one is due.** New snapshots carry `next_snapshot_at` and no `ttl` — cache lifetime is `Cache-Control`'s job — and the discovery document says so in a `freshness` note | ✅ **Decided (10-08)**, Casey — see [Freshness](#freshness) |
+| 25 | **Verification is a fetch, not a computation.** Every attestation signs a `verify` link to its own snapshot on `app.letterprove.com`, which answers in plain language with the signed figures. Engines cannot POST and their fetch tools only open URLs already in the conversation, so the link has to travel inside the document; Gemini certified a tampered signature in 7/16 stress-test answers when left to run Ed25519 itself | ✅ **Decided (10-08)**, Casey — see `src/lib/attest/verify-link.ts` |
 
 ### Open
 

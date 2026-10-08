@@ -93,6 +93,7 @@ describe("customerProof", () => {
 		// Signed into the body, so verification covers it — and no `ttl`.
 		expect(proof!.current.next_snapshot_at).toBe("2026-08-01T00:05:00.000Z");
 		expect(proof!.current).not.toHaveProperty("ttl");
+		expect(proof!.current.verify).toBe("https://app.letterprove.com/verify/vantage/acme-corp/20260801T000000000Z");
 		expect(verifyAttestation(proof!.current, jwks())).toEqual({ ok: true });
 		expect(currentSnapshot).toHaveBeenCalledWith("vantage", "acme-corp.example");
 	});

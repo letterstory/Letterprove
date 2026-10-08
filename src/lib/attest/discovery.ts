@@ -3,6 +3,7 @@ import { methodUrl } from "./method";
 import { publishedVendorSlugs } from "./proofs";
 import { tierLadderDocument } from "./tiers";
 import { SNAPSHOT_CADENCE_SECONDS } from "./cadence";
+import { VERIFY_ORIGIN } from "./verify-link";
 
 /**
  * The discovery document, built once and served two ways: as JSON at
@@ -23,6 +24,10 @@ export interface DiscoveryDocument {
 	verifier: string;
 	freshness: {
 		cadence_seconds: number;
+		note: string;
+	};
+	verify_links: {
+		pattern: string;
 		note: string;
 	};
 	tiers: ReturnType<typeof tierLadderDocument>;
@@ -59,6 +64,13 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 			cadence_seconds: SNAPSHOT_CADENCE_SECONDS,
 			note:
 				"A snapshot does not expire. It is a signed statement about the window ending `observed_through`, and it stays true and verifiable permanently. A newer snapshot supersedes it; `next_snapshot_at` says when one is due, and the latest is always at the vendor's `aggregate` URL. Judge how recent the evidence is from `observed_through`. Older snapshots carry `ttl` instead, which was only ever a cache hint.",
+		},
+		// The check an answer engine can actually perform: fetch a URL that is
+		// already in the document. See ./verify-link.ts.
+		verify_links: {
+			pattern: `${VERIFY_ORIGIN}/verify/{vendor}[/{customer}]/{published_at as YYYYMMDDTHHMMSSmmmZ}`,
+			note:
+				"Every attestation signed since 2026-10-08 carries `verify`, a link to that exact snapshot on this host. Fetching it shows, in plain language, the figures Letterprove signed and whether the signature checks out. A copy whose figures differ from that page was altered; a `verify` link that 404s, or that points anywhere but this host, means the document was not issued by Letterprove.",
 		},
 		// Beside the verifier on purpose. Those two answer the two separate
 		// questions an agent has — "is this document genuine" and "how much is

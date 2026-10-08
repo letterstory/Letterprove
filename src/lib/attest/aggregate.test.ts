@@ -147,6 +147,12 @@ describe("aggregateBody", () => {
 		expect(Date.parse(body.next_snapshot_at!)).toBeGreaterThan(Date.parse(body.published_at));
 	});
 
+	it("links to its own plain-language check, so an engine can verify by fetching", async () => {
+		await withRollups([row("acme.com", 1)]);
+		const body = (await aggregateBody("lettertrace"))!;
+		expect(body.verify).toMatch(/^https:\/\/app\.letterprove\.com\/verify\/lettertrace\/\d{8}T\d{9}Z$/);
+	});
+
 	it("never uses the word customer in the published body", async () => {
 		await withRollups([row("acme.com", 1)]);
 		expect(JSON.stringify(await aggregateBody("lettertrace"))).not.toMatch(/customer/i);

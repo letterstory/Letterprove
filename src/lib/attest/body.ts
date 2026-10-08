@@ -11,6 +11,7 @@ import { currentSnapshot, type CustomerSnapshot } from "@/rollup/snapshots";
 import type { AttestationBody, Tier } from "./types";
 import { paymentEvidenceFor, type PaymentEvidence } from "./payment-evidence";
 import { nextSnapshotAt } from "./cadence";
+import { verifyLink } from "./verify-link";
 
 const METHOD_PATH = "src/lib/attest/proofs.ts";
 
@@ -137,6 +138,7 @@ export async function attestationBody(
 		observed_through: snapshot.observed_through,
 		published_at: snapshot.published_at,
 		next_snapshot_at: nextSnapshotAt(snapshot.published_at),
+		verify: verifyLink(vendor.slug, customer.slug, snapshot.published_at),
 		method: methodUrl(METHOD_PATH),
 	};
 	return { body, snapshot };

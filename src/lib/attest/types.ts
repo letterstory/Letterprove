@@ -93,6 +93,12 @@ export interface AttestationBody {
 	/** Legacy cache hint on snapshots signed before 2026-10-08. Never written now. */
 	ttl?: number;
 	/**
+	 * A URL that shows, in plain language, the figures Letterprove signed for
+	 * this snapshot — so a reader can check a copy by fetching, not by running
+	 * cryptography. Absent before 2026-10-08. See ../attest/verify-link.ts.
+	 */
+	verify?: string;
+	/**
 	 * SHA-256 of the previous signed snapshot for this customer, hex. The
 	 * genesis snapshot uses 64 zeroes. This is what makes history auditable
 	 * rather than merely signed.
