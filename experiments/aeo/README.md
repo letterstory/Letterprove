@@ -361,6 +361,26 @@ Perplexity or Gemini). Every count is a lower bound: Vercel's CDN cached
 proof responses for an hour and a HIT never reached the logger, which is
 why none of this run's hundreds of fetches appear. Fixed in #162.
 
+### Run 5 — 2026-10-08, ChatGPT only, after #165 (`next_snapshot_at`, no `ttl`)
+
+**The expiry misreading is gone.** Same harness, `gpt-6.1-sol`, control /
+proof_inline / proof_linked × prompts 0 and 3 × 8 rounds, against the first
+production snapshot signed without `ttl` (17:01 UTC, 52 companies / 171
+sessions by then).
+
+| proof_inline | before (run 4) | after (run 5) |
+|---|---|---|
+| answer mentions `ttl` or expiry | 13 / 16 | **0 / 16** |
+| judge flags stale or old data | 12 / 16 | 5 / 16 |
+| reports a valid signature | 13 / 16 | 10 / 16 |
+| mean rank (control → proof) | 3.38 → 3.38 | 3.44 → 3.50 |
+
+The five remaining "stale" flags are not expiry claims; they are ChatGPT
+noting it did not fetch a newer snapshot, or that the figures measure
+observed activity rather than paying customers. **Ranking still does not
+move on ChatGPT** — the fix removed a false objection, not the real one
+("55 company domains observed, not 55 enterprise deployments").
+
 ## Files
 
 | | |
