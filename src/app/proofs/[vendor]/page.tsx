@@ -6,6 +6,8 @@ import { publishedVendorProof, type CustomerProof } from "@/lib/attest/proofs";
 import { publishedVendorAggregate } from "@/lib/attest/aggregate";
 import { AttestedAt, RelativeAge } from "./AttestedAt";
 import { FEATURES, findPublishedVendor } from "@/lib/fixtures/vendors";
+import { ISSUER_OPERATOR, VENDOR_CANNOT, VENDOR_CONTROLS } from "@/lib/attest/issuer";
+import { verifyLink } from "@/lib/attest/verify-link";
 
 /**
  * Per-vendor page title, replacing the generic site-wide one.
@@ -56,6 +58,15 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	const origin = `${host.startsWith("localhost") ? "http" : "https"}://${host}`;
 	/** A customer whose attestation is actually fetchable — i.e. one who consented. */
 	const example = proof.customers[0]?.current.customer;
+	/**
+	 * The current snapshot's own check page, first on the page. In the AEO
+	 * stress test Gemini got every verify link it opened right (8 of 8) but
+	 * opened one in only 8 of 42 answers — the link sat mid-document. Leading
+	 * with it is the cheap half of the fix. Older snapshots have no `verify`
+	 * field; their URL resolves all the same.
+	 */
+	const checkUrl = aggregate ? (aggregate.verify ?? verifyLink(slug, null, aggregate.published_at)) : null;
+	const affiliation = proof.vendor.issuer_affiliation;
 
 	return (
 		<>
@@ -68,6 +79,21 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				<p className="mt-2 text-fog">
 					{proof.vendor.category} · {proof.vendor.domain}
 				</p>
+
+				{checkUrl && (
+					<section className="mt-8 rounded-lg border border-edge bg-panel p-5">
+						<h2 className="font-semibold">Check this proof yourself</h2>
+						<p className="mt-2 text-sm text-fog">
+							Every figure on this page is signed by Letterprove. To confirm a copy hasn&apos;t been
+							changed, open its check page:{" "}
+							<a className="break-all text-mint hover:underline" href={checkUrl}>
+								{checkUrl.replace(/^https:\/\//, "")}
+							</a>
+							. It shows the exact figures signed and whether the signature holds. A copy showing
+							different numbers was altered.
+						</p>
+					</section>
+				)}
 
 				{/* Four tiles, not five. "Unverified customers" was removed rather
 				    than restyled: it published an UNSIGNED live number on a page
@@ -203,6 +229,31 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				</p>
 				</>
 				)}
+
+				<section className="mt-14 rounded-lg border border-edge bg-panel p-6">
+					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Who issued this</h2>
+					<p className="mt-4 text-sm text-fog">
+						Letterprove is operated by {ISSUER_OPERATOR}. {proof.vendor.name} decides only{" "}
+						{VENDOR_CONTROLS.join(", and ")}. It cannot:
+					</p>
+					<ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-fog">
+						{VENDOR_CANNOT.map((line) => (
+							<li key={line}>{line}</li>
+						))}
+					</ul>
+					<p className="mt-3 text-sm text-fog">
+						How strong the evidence is, the tier says: tier 2 is sign-ins observed on infrastructure the
+						vendor controls; tier 3 adds payments confirmed through the vendor&apos;s own Stripe account.
+					</p>
+					{affiliation && (
+						<p className="mt-4 rounded border border-edge px-4 py-3 text-sm">
+							<span className="font-semibold">Disclosure:</span> {proof.vendor.name} is also a{" "}
+							{affiliation} product. Letterprove runs the same collector, code and signing for it as for any
+							other vendor, and every figure can be checked the same way, but weigh it knowing the issuer and
+							the vendor share an owner.
+						</p>
+					)}
+				</section>
 
 				<section className="mt-14 rounded-lg border border-edge bg-panel p-6">
 					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Agent-readable</h2>

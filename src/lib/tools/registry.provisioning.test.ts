@@ -41,7 +41,7 @@ function service(over: Partial<OAuthPrincipal> = {}): OAuthPrincipal {
 	return { tokenId: "letterstory-service", vendorId: null, userId: "letterstory-service", capabilities: ["vendor:read", "vendor:write"], orgId: ORG, ...over };
 }
 function vendor(): VendorFixture {
-	return { id: "v1", slug: "acme", name: "Acme", domain: "acme.com", category: "software", key: "k", domainVerified: false, proofsPublishedAt: null, customers: [] };
+	return { id: "v1", slug: "acme", name: "Acme", domain: "acme.com", category: "software", key: "k", domainVerified: false, proofsPublishedAt: null, issuerAffiliation: null, customers: [] };
 }
 
 beforeEach(() => {

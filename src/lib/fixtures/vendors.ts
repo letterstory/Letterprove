@@ -107,6 +107,12 @@ export interface VendorFixture {
 	 * reads both in the same function.
 	 */
 	proofsPublishedAt: string | null;
+	/**
+	 * The owner this vendor shares with Letterprove's operator, or null when
+	 * independent. Non-null signs a disclosure into every attestation — see
+	 * lib/attest/issuer.ts.
+	 */
+	issuerAffiliation: string | null;
 	customers: CustomerFixture[];
 }
 
@@ -120,7 +126,8 @@ export const FEATURES = ["sso", "audit_log", "api", "analytics", "sla"] as const
  * except that a missing publication flag reads as "private" and takes a live
  * vendor's proofs dark instead.
  */
-const VENDOR_COLUMNS = "id, slug, name, domain, category, key, domain_verified_at, proofs_published_at";
+const VENDOR_COLUMNS =
+	"id, slug, name, domain, category, key, domain_verified_at, proofs_published_at, issuer_affiliation";
 
 /**
  * The columns every vendor_customers read here selects, for the same reason.
@@ -137,6 +144,7 @@ interface VendorRow {
 	domain: string;
 	domain_verified_at?: string | null;
 	proofs_published_at?: string | null;
+	issuer_affiliation?: string | null;
 	category: string;
 	key: string;
 }
@@ -164,6 +172,7 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 		key: row.key,
 		domainVerified: Boolean(row.domain_verified_at),
 		proofsPublishedAt: row.proofs_published_at ?? null,
+		issuerAffiliation: row.issuer_affiliation ?? null,
 		customers: customers.map((c) => ({
 			slug: c.slug,
 			name: c.name,

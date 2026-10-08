@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./proofs", () => ({ publishedVendorSlugs: vi.fn() }));
+vi.mock("../fixtures/vendors", () => ({ publishedVendors: vi.fn() }));
 
 import { publishedVendorSlugs } from "./proofs";
+import { publishedVendors } from "../fixtures/vendors";
 import { discoveryDocument } from "./discovery";
 
 /**
@@ -18,6 +20,24 @@ import { discoveryDocument } from "./discovery";
 beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(publishedVendorSlugs).mockResolvedValue(["acme", "globex"]);
+	vi.mocked(publishedVendors).mockResolvedValue([
+		{ slug: "acme", issuerAffiliation: null },
+		{ slug: "lettertrace", issuerAffiliation: "Letter Company" },
+	] as never);
+});
+
+describe("discoveryDocument — issuer", () => {
+	it("names the operator and lists the published vendors that share its owner", async () => {
+		const doc = await discoveryDocument("https://app.letterprove.com");
+		expect(doc.issuer.operator).toBe("Letter Company");
+		expect(doc.issuer.affiliated_vendors).toEqual([{ vendor: "lettertrace", shared_owner: "Letter Company" }]);
+		expect(doc.issuer.vendor_cannot.length).toBeGreaterThan(0);
+	});
+
+	it("reads the publication gate, so a private affiliated vendor is never named", async () => {
+		await discoveryDocument("https://app.letterprove.com");
+		expect(publishedVendors).toHaveBeenCalled();
+	});
 });
 
 describe("discoveryDocument", () => {

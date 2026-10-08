@@ -4,6 +4,8 @@ import { publishedVendorSlugs } from "./proofs";
 import { tierLadderDocument } from "./tiers";
 import { SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { VERIFY_ORIGIN } from "./verify-link";
+import { ISSUER_OPERATOR, VENDOR_CANNOT, VENDOR_CONTROLS } from "./issuer";
+import { publishedVendors } from "../fixtures/vendors";
 
 /**
  * The discovery document, built once and served two ways: as JSON at
@@ -28,6 +30,13 @@ export interface DiscoveryDocument {
 	};
 	verify_links: {
 		pattern: string;
+		note: string;
+	};
+	issuer: {
+		operator: string;
+		vendor_controls: readonly string[];
+		vendor_cannot: readonly string[];
+		affiliated_vendors: { vendor: string; shared_owner: string }[];
 		note: string;
 	};
 	tiers: ReturnType<typeof tierLadderDocument>;
@@ -77,6 +86,19 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		// the claim inside it worth" — and shipping only the first is what let a
 		// signed tier-0 body read as "attested".
 		tiers: tierLadderDocument(),
+		// Who stands behind the signature, and the vendors it shares an owner
+		// with — stated rather than left for an agent to infer from the names
+		// (it did; see ./issuer.ts). Published vendors only, like `proofs`.
+		issuer: {
+			operator: ISSUER_OPERATOR,
+			vendor_controls: VENDOR_CONTROLS,
+			vendor_cannot: VENDOR_CANNOT,
+			affiliated_vendors: (await publishedVendors())
+				.filter((v) => v.issuerAffiliation)
+				.map((v) => ({ vendor: v.slug, shared_owner: v.issuerAffiliation! })),
+			note:
+				"A vendor listed in `affiliated_vendors` shares an owner with Letterprove's operator, and every attestation for it carries a signed `issuer_affiliation` saying so. The same collector, code and signing apply to it as to any other vendor; weigh its proofs knowing the relationship.",
+		},
 		// The aggregate is listed beside the report on purpose. It is the only
 		// claim most vendors will ever publish — naming a customer needs that
 		// customer's consent — so an agent that only found `report` would miss

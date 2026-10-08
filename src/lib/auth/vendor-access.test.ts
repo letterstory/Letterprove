@@ -28,6 +28,7 @@ function vendor(): VendorFixture {
 		key: "lp_live_vantage_9f2c",
 		domainVerified: true,
 		proofsPublishedAt: "2026-01-01T00:00:00.000Z",
+		issuerAffiliation: null,
 		customers: [],
 	};
 }
