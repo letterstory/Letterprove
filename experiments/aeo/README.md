@@ -381,6 +381,31 @@ observed activity rather than paying customers. **Ranking still does not
 move on ChatGPT** — the fix removed a false objection, not the real one
 ("55 company domains observed, not 55 enterprise deployments").
 
+### Run 6 — 2026-10-08, Gemini only, after #167 (signed `verify` links)
+
+Control, claim_only, proof_inline, tampered and forged × prompts 0 and 3 × 8
+rounds on `gemini-pro-latest`, against the first snapshot carrying `verify`
+(18:00 UTC). Gemini's prepaid credits ran out mid-run: 9 of 80 cells errored,
+leaving 14–15 per arm.
+
+**When Gemini opens the link, it is right every time — 8 of 8.** Tampered
+4/4 caught (*"the true cryptographically signed numbers are 52 … Lettertrace
+tampered with the JSON payload"*), forged 2/2 caught, real proof 2/2 credited
+and ranked #1. **But it opened the link in only 8 of 42 proof cells.** The
+rest of the time it behaved as before:
+
+| arm | signature called valid, before → after | rejected, before → after |
+|---|---|---|
+| tampered | 7/16 → 3/14 | 7/16 → 8/14 |
+| forged | 0/16 → 0/14 | 16/16 → 13/14 |
+| proof_inline | 12/16 → 13/14 | — |
+
+The mechanism works; getting engines to use it is the open problem. The
+link sits mid-document among a dozen fields. Next lever: make it the first
+thing a reader sees — vendors quoting proof should lead with "check this
+proof: <verify link>", and the attestation page and install snippet should
+say the same.
+
 ## Files
 
 | | |
