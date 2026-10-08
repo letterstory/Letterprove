@@ -84,8 +84,14 @@ export interface AttestationBody {
 	observed_through: string;
 	/** When this snapshot was cut. Distinct from observed_through on purpose. */
 	published_at: string;
-	/** Seconds an agent may cache this before re-fetching. */
-	ttl: number;
+	/**
+	 * When a newer snapshot of this subject is due. A snapshot never expires;
+	 * this says only when it will be superseded. Absent on snapshots signed
+	 * before 2026-10-08, which carry `ttl` instead — see ../attest/cadence.ts.
+	 */
+	next_snapshot_at?: string;
+	/** Legacy cache hint on snapshots signed before 2026-10-08. Never written now. */
+	ttl?: number;
 	/**
 	 * SHA-256 of the previous signed snapshot for this customer, hex. The
 	 * genesis snapshot uses 64 zeroes. This is what makes history auditable

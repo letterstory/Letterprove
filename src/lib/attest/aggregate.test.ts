@@ -138,6 +138,15 @@ describe("aggregateBody", () => {
 	// "Companies observed" is what the evidence supports. "Customers" is a
 	// commercial fact we do not hold, and the gap between those two sentences
 	// is the reason this product exists.
+	it("says when the next snapshot is due, and carries no ttl an engine could read as expiry", async () => {
+		// AEO stress test, 2026-10-08: with `ttl: 3600` in the body, ChatGPT
+		// called a live proof "expired" in 13 of 16 answers once the hour passed.
+		await withRollups([row("acme.com", 1)]);
+		const body = (await aggregateBody("lettertrace"))!;
+		expect(body).not.toHaveProperty("ttl");
+		expect(Date.parse(body.next_snapshot_at!)).toBeGreaterThan(Date.parse(body.published_at));
+	});
+
 	it("never uses the word customer in the published body", async () => {
 		await withRollups([row("acme.com", 1)]);
 		expect(JSON.stringify(await aggregateBody("lettertrace"))).not.toMatch(/customer/i);

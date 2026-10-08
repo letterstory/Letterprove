@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { Mono } from "@/components/ui";
-import { TTL_SECONDS } from "@/lib/attest/body";
+import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 import { tierLadderDocument } from "@/lib/attest/tiers";
 import { CONSENT_REASK_COOLDOWN_MS } from "@/lib/vendors/consent-cooldown";
 import { ATTEST_SCRIPT_PATH, installSnippet, originFromHeaders } from "@/lib/vendors/install";
@@ -355,8 +355,12 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 						<p>
 							Signing runs on a cadence, not per request. Rollups are written hourly on the hour,
 							and the freeze that signs, chains and countersigns them runs five minutes later.
-							Published documents carry a <code>ttl</code> of {TTL_SECONDS / 60} minutes, which
-							matches that cadence.
+							A new snapshot is cut every {SNAPSHOT_CADENCE_SECONDS / 60} minutes, and each one
+							says when the next is due in <code>next_snapshot_at</code>. A snapshot does not
+							expire: it is a signed statement about the window ending{" "}
+							<code>observed_through</code>, and it stays true and verifiable permanently. A newer
+							one supersedes it. Snapshots signed before 2026-10-08 carry a <code>ttl</code>{" "}
+							instead, which was only ever a cache hint.
 						</p>
 					</Section>
 

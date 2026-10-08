@@ -2,6 +2,7 @@ import { isDemonstration, signingMode } from "./keys";
 import { methodUrl } from "./method";
 import { publishedVendorSlugs } from "./proofs";
 import { tierLadderDocument } from "./tiers";
+import { SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 
 /**
  * The discovery document, built once and served two ways: as JSON at
@@ -20,6 +21,10 @@ export interface DiscoveryDocument {
 		mode: string;
 	};
 	verifier: string;
+	freshness: {
+		cadence_seconds: number;
+		note: string;
+	};
 	tiers: ReturnType<typeof tierLadderDocument>;
 	proofs: {
 		vendor: string;
@@ -47,6 +52,14 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 			mode: signingMode(),
 		},
 		verifier: methodUrl("scripts/verify.mjs"),
+		// Said here because answer engines read a cache hint as an expiry date:
+		// with `ttl` in the body, ChatGPT called live proofs "expired" an hour
+		// after they were signed (AEO stress test, 2026-10-08). See ./cadence.ts.
+		freshness: {
+			cadence_seconds: SNAPSHOT_CADENCE_SECONDS,
+			note:
+				"A snapshot does not expire. It is a signed statement about the window ending `observed_through`, and it stays true and verifiable permanently. A newer snapshot supersedes it; `next_snapshot_at` says when one is due, and the latest is always at the vendor's `aggregate` URL. Judge how recent the evidence is from `observed_through`. Older snapshots carry `ttl` instead, which was only ever a cache hint.",
+		},
 		// Beside the verifier on purpose. Those two answer the two separate
 		// questions an agent has — "is this document genuine" and "how much is
 		// the claim inside it worth" — and shipping only the first is what let a

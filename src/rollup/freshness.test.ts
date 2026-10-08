@@ -62,8 +62,8 @@ describe("checkPublicationFreshness", () => {
 	});
 
 	// Two consecutive missed freezes. Every served attestation is now carrying
-	// a published_at this old under a one hour ttl, which is the product making
-	// a freshness claim it cannot back.
+	// a published_at this old and a next_snapshot_at that has already passed —
+	// a freshness promise the product did not keep.
 	it("reports stale once the newest row falls past the threshold", async () => {
 		await useDb(
 			mockDb({

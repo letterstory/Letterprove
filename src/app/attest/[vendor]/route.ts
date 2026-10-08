@@ -1,6 +1,7 @@
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorAggregate } from "@/lib/attest/aggregate";
 import { notFound, proofJson } from "@/lib/http";
+import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 
 /**
  * A vendor's aggregate attestation — `/attest/{vendor}.json`.
@@ -35,5 +36,7 @@ export async function GET(
 	// from the first, or guessing slugs confirms who has installed us.
 	if (!aggregate) return notFound(`no aggregate attestation for "${slug}"`);
 
-	return proofJson(aggregate, aggregate.ttl);
+	// Cached for the publishing cadence, not for a field in the body: the body
+	// no longer carries a cache hint (see src/lib/attest/cadence.ts).
+	return proofJson(aggregate, SNAPSHOT_CADENCE_SECONDS);
 }

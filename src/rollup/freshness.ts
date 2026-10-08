@@ -5,8 +5,9 @@
  * The freeze at :05 is what signs and publishes. If it stops being invoked at
  * all, or keeps returning ok while freezing nothing hour after hour, no route
  * 500s and no exception is logged, yet every served attestation keeps its
- * `published_at` and its one hour `ttl` (src/lib/http.ts) as though it were
- * current. That is the product making a freshness claim it can no longer
+ * `published_at` as though it were current. (Its `next_snapshot_at` now sits
+ * in the past when that happens, so a careful reader can see it — but nobody
+ * on the team is reading.) That is the product making a freshness claim it can no longer
  * back, which is worse than an outage: an outage is honest.
  *
  * So freshness is measured from the durable record itself rather than from
@@ -31,7 +32,7 @@ const HOUR_SECONDS = 3600;
  *
  * 3 is the first value that cannot be a single blip: it means two consecutive
  * hourly freezes did not land. A human hears about it roughly two hours after
- * the served `ttl` first started overstating freshness, which is slow enough
+ * the served `next_snapshot_at` first went by unmet, which is slow enough
  * to be quiet and fast enough that the record has not yet been wrong for a
  * working day.
  */
@@ -97,7 +98,7 @@ async function checkTable(
 		detail:
 			`newest frozen hour is ${behind}h behind (threshold ${STALE_AFTER_HOURS}h), so the freeze has missed at ` +
 			`least ${behind - 1} consecutive runs. Every vendor is affected: each is still served a published_at ` +
-			`that old under a 1h ttl.`,
+			`that old, with a next_snapshot_at already in the past.`,
 	};
 }
 
