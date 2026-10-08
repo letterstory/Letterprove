@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 
 /**
  * Keep Vercel's edge from answering proof reads on the function's behalf.
@@ -65,6 +66,26 @@ export function namedProofJson(body: unknown): NextResponse {
 		headers: {
 			"content-type": "application/json; charset=utf-8",
 			"cache-control": "public, max-age=60, must-revalidate",
+			...NO_EDGE_CACHE,
+			"access-control-allow-origin": "*",
+			"x-letterprove": "on",
+		},
+	});
+}
+
+/**
+ * A plain-language proof page — what /verify/{vendor}/{stamp} serves to a
+ * browser or an answer engine's fetch tool. Same cache policy as the JSON it
+ * describes: an hour for an aggregate, a minute and no SWR for anything that
+ * names a customer, and never answered from Vercel's edge (see NO_EDGE_CACHE).
+ */
+export function proofHtml(html: string, { names: namesCustomer }: { names: boolean }): NextResponse {
+	return new NextResponse(html, {
+		headers: {
+			"content-type": "text/html; charset=utf-8",
+			"cache-control": namesCustomer
+				? "public, max-age=60, must-revalidate"
+				: `public, max-age=${SNAPSHOT_CADENCE_SECONDS}, stale-while-revalidate=86400`,
 			...NO_EDGE_CACHE,
 			"access-control-allow-origin": "*",
 			"x-letterprove": "on",

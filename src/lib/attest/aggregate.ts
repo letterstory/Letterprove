@@ -45,6 +45,7 @@ import { dbClient } from "@/lib/db/client";
 import { loadAggregateHistory } from "@/rollup/aggregate-history";
 import type { Tier } from "./types";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
+import { verifyLink } from "./verify-link";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
 const WINDOW_DAYS = 30;
@@ -68,6 +69,8 @@ export interface AggregateBody {
 	next_snapshot_at?: string;
 	/** Legacy: the cache hint those earlier snapshots carry instead. Never written now. */
 	ttl?: number;
+	/** This snapshot's own plain-language check. Absent before 2026-10-08 — see ./verify-link.ts. */
+	verify?: string;
 	prev_hash: string;
 	method: string;
 }
@@ -173,6 +176,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		observed_through: now,
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),
+		verify: verifyLink(vendor.slug, null, now),
 		method: methodUrl(METHOD_PATH),
 	};
 }
