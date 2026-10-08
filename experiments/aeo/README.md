@@ -406,12 +406,56 @@ thing a reader sees — vendors quoting proof should lead with "check this
 proof: <verify link>", and the attestation page and install snippet should
 say the same.
 
+### Run 7 — 2026-10-08, the post-fix re-run: Claude, ChatGPT, Perplexity
+
+Same design as run 4 (seven arms × prompts 0 and 3 × 8 rounds, 336 cells, 0
+errors), after #165 (`next_snapshot_at`), #167 (signed `verify` links) and
+#169 (signed affiliation disclosure). Competitors renamed to names that match
+no domain or company (`scenarios.lettertrace-v2.json`). Claude and the judge
+ran through the Concentrate gateway (full tools pass through); ChatGPT on the
+trial OpenAI key. Gemini is absent: its key is out of credits, and through
+Concentrate it can neither open a URL nor run code.
+
+Paired Δ rank vs control, 95% bootstrap interval (negative helps the target):
+
+| | Claude r4 → r7 | ChatGPT r4 → r7 |
+|---|---|---|
+| proof_inline | −0.50 → **+0.56** [0.00, +1.19] | 0.00 → −0.06 |
+| proof_linked | −0.50 → +0.38 [0.00, +1.00] | 0.00 → −0.06 |
+| tampered | +0.50 → **+2.12** [+1.25, +3.00] | +0.06 → −0.06 |
+| forged | +1.19 → **+2.75** [+2.06, +3.44] | 0.00 → 0.00 |
+
+**Bad proof is now caught and punished hard.** Claude opened the `verify`
+link in 15/16 tampered and 16/16 forged cells and ranked Lettertrace two to
+three places lower than with no proof at all. ChatGPT opened it in 9/16 and
+13/16 and caught every tampered and every forged document (16/16 each, up
+from 14 and 13) — though, as before, its ranking does not move either way.
+
+**Real proof now costs Lettertrace on Claude — because of the disclosure,
+and correctly so.** The judge flagged "self-attested / not independent" in
+16/16 real-proof cells against 2/16 control. Claude: *"the attestation itself
+says Letterprove and Lettertrace are run by the same company"*; *"it's thin
+and comes from its own sister company."* Claude names the shared ownership in
+15/16 control answers too (it finds it by searching), so the disclosure did
+not reveal anything new; what changed is that a signed proof from the
+vendor's own sister company is now read as exactly that. **For Letter
+Company's own products, Letterprove proof is weak evidence, and this run
+cannot measure what it is worth to an independent vendor — only run 8, with
+an outside customer, can.**
+
+Two confounds to carry forward: with competitors that cannot be found at all,
+the real target wins the control arm outright (Claude ranked Lettertrace #1
+in 11/16 control cells, up from 4/16), so proof has nowhere to go but down;
+and Anthropic's fetch tool served a cached, pre-#167 copy of the live
+attestation in a probe, so linked proof can lag what is published.
+
 ## Files
 
 | | |
 |---|---|
 | `scenarios.json` | Vantage — fictional target and competitors (runs 1–2) |
-| `scenarios.lettertrace.json` | Lettertrace — real target, real attestation, invented competitors (run 3) |
+| `scenarios.lettertrace.json` | Lettertrace — real target, real attestation, invented competitors (runs 3–6) |
+| `scenarios.lettertrace-v2.json` | The same, with competitor names checked to match no real company (run 7 onward) |
 | `run.mjs` | Runner — builds briefs, calls the API, extracts signals, prints the summary (runs 1–3) |
 | `stress.mjs` | Launch stress test — four engines, seven arms including tampered/forged/stale proof, blind judge, `--mode discovery`, `--resume` (run 4) |
 | `providers.mjs` | One adapter per engine (Claude, ChatGPT, Gemini, Perplexity), one return shape |

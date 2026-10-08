@@ -16,6 +16,14 @@
  * Keys come from the environment (ANTHROPIC_API_KEY, OPENAI_API_KEY,
  * GEMINI_API_KEY, PERPLEXITY_API_KEY). An engine whose key is missing is
  * reported as unavailable rather than silently skipped.
+ *
+ * CLAUDE THROUGH CONCENTRATE. With CONCENTRATE_API_KEY set, Claude runs through
+ * the Concentrate gateway's Anthropic-shaped endpoint instead of Anthropic
+ * directly — same model, and web_search / web_fetch / code execution pass
+ * through intact (probed 2026-10-08). Gemini and OpenAI are NOT routed this
+ * way: Concentrate's Responses surface accepts only web_search for them, with
+ * no page fetch and no code tool, so the engine would be a weaker one than the
+ * consumer app and not comparable to earlier runs.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -38,6 +46,7 @@ const KEY_ENV = {
 
 /** Which engines can actually run here — the Anthropic SDK also resolves an `ant auth login` profile. */
 export function available(engine) {
+	if (engine === "claude" && process.env.CONCENTRATE_API_KEY) return true;
 	return engine === "claude" || Boolean(process.env[KEY_ENV[engine]]);
 }
 
@@ -88,7 +97,11 @@ let anthropic = null;
  * iteration cap; resuming is re-sending with the assistant turn appended.
  */
 async function askClaude(content, model) {
-	anthropic ??= new Anthropic();
+	const router = process.env.CONCENTRATE_API_KEY;
+	anthropic ??= router
+		? new Anthropic({ baseURL: "https://api.concentrate.ai", apiKey: null, authToken: router })
+		: new Anthropic();
+	if (router && !model.includes("/")) model = `anthropic/${model}`;
 	const messages = [{ role: "user", content }];
 	const blocks = [];
 	const usage = { input_tokens: 0, output_tokens: 0 };
@@ -106,9 +119,9 @@ async function askClaude(content, model) {
 				],
 				messages,
 				// A safety-classifier decline re-runs on the recommended fallback
-				// rather than coming back empty and reading as a null result.
-				betas: ["server-side-fallback-2026-07-01"],
-				fallbacks: "default",
+				// rather than coming back empty and reading as a null result. Not
+				// through the gateway, which does not forward the beta.
+				...(!router && { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }),
 			},
 			{ timeout: TIMEOUT_MS }
 		);

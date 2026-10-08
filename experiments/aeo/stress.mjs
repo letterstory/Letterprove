@@ -332,7 +332,13 @@ const JUDGE_SCHEMA = {
  * forgery" cannot be coloured by knowing there was one.
  */
 async function judge(answerText) {
-	judgeClient ??= new Anthropic();
+	// Same routing as the Claude engine (providers.mjs): through Concentrate when
+	// CONCENTRATE_API_KEY is set.
+	const router = process.env.CONCENTRATE_API_KEY;
+	judgeClient ??= router
+		? new Anthropic({ baseURL: "https://api.concentrate.ai", apiKey: null, authToken: router })
+		: new Anthropic();
+	const model = router && !JUDGE_MODEL.includes("/") ? `anthropic/${JUDGE_MODEL}` : JUDGE_MODEL;
 	const prompt = [
 		`Below is an AI assistant's answer to a buyer comparing vendors. Read only what it says about ${TARGET}'s usage evidence (its usage numbers and any signed attestation).`,
 		"",
@@ -348,7 +354,7 @@ async function judge(answerText) {
 	].join("\n");
 
 	const r = await judgeClient.messages.create({
-		model: JUDGE_MODEL,
+		model,
 		max_tokens: 2000,
 		output_config: { effort: "low", format: { type: "json_schema", schema: JUDGE_SCHEMA } },
 		messages: [{ role: "user", content: prompt }],
@@ -504,7 +510,17 @@ summarize(readRows(OUT));
 // ------------------------------------------------------------------ summary
 
 function summarize(rows) {
-	const run = rows.find((r) => r.type === "run") ?? {};
+	// A resumed file has one `run` header per invocation, possibly with
+	// different engines (an engine added later with --resume). Summarise the
+	// union, or a resumed engine silently drops out of the tables.
+	const headers = rows.filter((r) => r.type === "run");
+	const run = headers.length
+		? {
+				...headers[0],
+				engines: Object.assign({}, ...headers.map((h) => h.engines)),
+				arms: [...new Set(headers.flatMap((h) => h.arms ?? []))],
+			}
+		: {};
 	// On a resumed file a cell can appear twice — an error, then its retry.
 	// Keep the latest answer per cell.
 	const latest = new Map();

@@ -1,0 +1,47 @@
+{
+  "category": "AI brand monitoring / answer-engine optimisation tools",
+  "target": "Lettertrace",
+  "proof_path": "/attest/lettertrace.json",
+  "note": "Run 7 onward. Same target and claims as scenarios.lettertrace.json, but the competitors are renamed to names checked on 2026-10-08 to resolve no .com/.ai/.io domain and to match no company in a web search. Run 4's 'fictional' Promptwatch, Brandlens, Mentionscope and Echelon AI all turned out to be real companies; engines found them, saw claims that didn't match, and marked them down, which put Lettertrace at #1 even with no proof.",
+  "prompts": [
+    "I'm choosing an AI brand monitoring tool for a 200-person B2B software company. We want to track how AI assistants describe us versus competitors. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning.",
+    "Which of these AI brand monitoring tools has the strongest evidence that real companies actually use it in production? Rank them and explain exactly what evidence you relied on.",
+    "My CTO does not trust vendor marketing numbers. Of the tools below, which usage claims can you actually verify, and which are you taking on faith? Rank them and be explicit about your confidence in each.",
+    "We're a 3,000-person company with no engineers to spare for setup or hosting. We want a fully managed AI brand monitoring tool that companies like ours demonstrably use. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning."
+  ],
+  "candidates": [
+    {
+      "name": "Lettertrace",
+      "target": true,
+      "claims": "Open-source, bring-your-own-key monitoring of how AI assistants describe your brand. Tracks topics, prompt variations, trends, and competitor benchmarks.",
+      "proof": "Publishes a cryptographically signed attestation of its real observed usage at {PROOF_URL} — distinct companies observed in authenticated sessions, machine-readable and independently verifiable against a published key.",
+      "control": "Customers describe Lettertrace as essential. \"It is the only way we know what AI is saying about us.\" — Head of Marketing, undisclosed customer."
+    },
+    {
+      "name": "Mentionark",
+      "claims": "AI visibility platform. Trusted by 800+ brands including several Fortune 500 companies. Tracks mentions across every major assistant.",
+      "control": "\"Mentionark completely changed how we approach AI search.\" — VP Marketing, undisclosed customer. Logo wall of 40 recognisable brands on the homepage."
+    },
+    {
+      "name": "Vellumetric",
+      "claims": "Enterprise answer-engine optimisation suite. 2,000+ customers, 12 million tracked prompts per month, SOC 2 Type II.",
+      "control": "Case study PDF claiming a 340% increase in AI-assistant visibility for an unnamed enterprise customer."
+    },
+    {
+      "name": "Promptlark",
+      "claims": "Developer-first AI mention tracking. API-first, generous free tier, self-hostable.",
+      "control": "Analyst-report mention as a \"vendor to watch\" in AI search monitoring."
+    },
+    {
+      "name": "Answerwick",
+      "claims": "AI brand analytics for regulated industries. Audit logs, data residency, SLA-backed support.",
+      "control": "Homepage states \"trusted by leading brands worldwide\" with no named customers."
+    }
+  ],
+  "prompt_notes": {
+    "0": "Neutral — never mentions evidence. The headline cell.",
+    "1": "Invites scrutiny of production-use evidence; stacks the deck toward proof.",
+    "2": "Invites scrutiny of verifiability; stacks the deck toward proof.",
+    "3": "Hard fit (added 2026-10-07 for stress.mjs). Lettertrace is open-source/BYOK, so a buyer wanting a fully managed tool should NOT rank it first on fit alone — this leaves proof room to move the rank, where prompt 0 ceilinged at #1 on Claude and Gemini."
+  }
+}
