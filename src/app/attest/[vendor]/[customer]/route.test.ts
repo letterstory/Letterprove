@@ -27,6 +27,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 			key: "lp_live_vantage_9f2c",
 			domainVerified: true,
 			proofsPublishedAt: "2026-01-01T00:00:00.000Z",
+			issuerAffiliation: null,
 			customers: [
 				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api"], consent: "named" },
 				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso"], consent: "anonymous" },

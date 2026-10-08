@@ -153,6 +153,24 @@ describe("aggregateBody", () => {
 		expect(body.verify).toMatch(/^https:\/\/app\.letterprove\.com\/verify\/lettertrace\/\d{8}T\d{9}Z$/);
 	});
 
+	it("signs a disclosure into an affiliated vendor's aggregate, and only theirs", async () => {
+		// AEO stress test: Claude inferred the Letterprove/Lettertrace link from
+		// the names and discounted the proof. Say it inside the document.
+		await withRollups([row("acme.com", 1)]);
+		expect(await aggregateBody("lettertrace")).not.toHaveProperty("issuer_affiliation");
+
+		const { findVendor } = await import("@/lib/fixtures/vendors");
+		vi.mocked(findVendor).mockResolvedValue({
+			slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "x", key: "k", customers: [],
+			issuerAffiliation: "Letter Company",
+		} as never);
+		const body = (await aggregateBody("lettertrace"))!;
+		expect(body.issuer_affiliation).toContain("Letterprove and Lettertrace are both operated by Letter Company");
+
+		const signed = (await vendorAggregate("lettertrace"))!;
+		expect(verifyAttestation(signed as unknown as SignedAttestation, jwks())).toEqual({ ok: true });
+	});
+
 	it("never uses the word customer in the published body", async () => {
 		await withRollups([row("acme.com", 1)]);
 		expect(JSON.stringify(await aggregateBody("lettertrace"))).not.toMatch(/customer/i);

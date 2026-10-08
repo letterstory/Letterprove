@@ -98,6 +98,8 @@ export interface AttestationBody {
 	 * cryptography. Absent before 2026-10-08. See ../attest/verify-link.ts.
 	 */
 	verify?: string;
+	/** Signed disclosure when the vendor shares an owner with Letterprove. See ../attest/issuer.ts. */
+	issuer_affiliation?: string;
 	/**
 	 * SHA-256 of the previous signed snapshot for this customer, hex. The
 	 * genesis snapshot uses 64 zeroes. This is what makes history auditable

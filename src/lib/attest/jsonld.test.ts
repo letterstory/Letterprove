@@ -14,7 +14,7 @@ import type { VendorProof } from "./proofs";
  */
 
 const PROOF: VendorProof = {
-	vendor: { slug: "vantage", name: "Vantage", domain: "vantage.example", category: "customer data platforms" },
+	vendor: { slug: "vantage", name: "Vantage", domain: "vantage.example", category: "customer data platforms", issuer_affiliation: null },
 	customers: [],
 	summary: {
 		attested_customers: 12,

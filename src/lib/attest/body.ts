@@ -12,6 +12,7 @@ import type { AttestationBody, Tier } from "./types";
 import { paymentEvidenceFor, type PaymentEvidence } from "./payment-evidence";
 import { nextSnapshotAt } from "./cadence";
 import { verifyLink } from "./verify-link";
+import { withDisclosure } from "./issuer";
 
 const METHOD_PATH = "src/lib/attest/proofs.ts";
 
@@ -139,6 +140,7 @@ export async function attestationBody(
 		published_at: snapshot.published_at,
 		next_snapshot_at: nextSnapshotAt(snapshot.published_at),
 		verify: verifyLink(vendor.slug, customer.slug, snapshot.published_at),
+		...withDisclosure(vendor.name, vendor.issuerAffiliation),
 		method: methodUrl(METHOD_PATH),
 	};
 	return { body, snapshot };

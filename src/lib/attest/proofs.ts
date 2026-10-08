@@ -38,7 +38,14 @@ export interface CustomerProof {
 }
 
 export interface VendorProof {
-	vendor: { slug: string; name: string; domain: string; category: string };
+	vendor: {
+		slug: string;
+		name: string;
+		domain: string;
+		category: string;
+		/** The owner this vendor shares with Letterprove's operator, or null — see ./issuer.ts. */
+		issuer_affiliation: string | null;
+	};
 	customers: CustomerProof[];
 	summary: {
 		attested_customers: number;
@@ -199,7 +206,13 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 	const tiers = await tierReport(vendor.slug);
 
 	return {
-		vendor: { slug: vendor.slug, name: vendor.name, domain: vendor.domain, category: vendor.category },
+		vendor: {
+			slug: vendor.slug,
+			name: vendor.name,
+			domain: vendor.domain,
+			category: vendor.category,
+			issuer_affiliation: vendor.issuerAffiliation,
+		},
 		customers: all.filter((c) => c.named).map((c) => c.proof),
 		summary: {
 			attested_customers: attested.length,

@@ -46,6 +46,7 @@ import { loadAggregateHistory } from "@/rollup/aggregate-history";
 import type { Tier } from "./types";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
+import { withDisclosure } from "./issuer";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
 const WINDOW_DAYS = 30;
@@ -71,6 +72,8 @@ export interface AggregateBody {
 	ttl?: number;
 	/** This snapshot's own plain-language check. Absent before 2026-10-08 — see ./verify-link.ts. */
 	verify?: string;
+	/** Signed disclosure when the vendor shares an owner with Letterprove — see ./issuer.ts. */
+	issuer_affiliation?: string;
 	prev_hash: string;
 	method: string;
 }
@@ -177,6 +180,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),
 		verify: verifyLink(vendor.slug, null, now),
+		...withDisclosure(vendor.name, vendor.issuerAffiliation),
 		method: methodUrl(METHOD_PATH),
 	};
 }
