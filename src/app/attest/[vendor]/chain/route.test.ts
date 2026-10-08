@@ -30,7 +30,7 @@ function entry(overrides: Partial<SignedAggregate>): SignedAggregate {
 		tier: 2,
 		observed_through: "2026-08-01T00:00:00.000Z",
 		published_at: "2026-08-01T00:00:00.000Z",
-		ttl: 3600,
+		next_snapshot_at: "2026-08-01T00:05:00.000Z",
 		prev_hash: GENESIS_HASH,
 		method: "src/lib/attest/aggregate.ts",
 		key_id: "dev-insecure-0000",
@@ -138,13 +138,10 @@ describe("GET /attest/[vendor]/chain — chain integrity as served", () => {
 });
 
 describe("GET /attest/[vendor]/chain — cache headers", () => {
-	// PINNED AS-IS. This route calls proofJson() with no ttl argument, so the
-	// header is the 3600 default rather than the ttl signed into the entries.
-	// They happen to agree today because aggregates are published hourly; if
-	// the aggregate ttl ever changes, this header will NOT follow it the way
-	// /attest/{vendor} does. Documented rather than changed, since nothing
-	// signs the header itself.
-	it("uses the proofJson default of one hour, not the entries' own ttl", async () => {
+	// One hour, the publishing cadence — the same as /attest/{vendor}. Entries
+	// signed before 2026-10-08 carry a `ttl`; it is history now, not a cache
+	// instruction (src/lib/attest/cadence.ts).
+	it("caches for one hour regardless of any legacy ttl in the entries", async () => {
 		vi.mocked(publishedVendorAggregateChain).mockResolvedValue(linkedPair().map((e) => ({ ...e, ttl: 900 })));
 
 		const res = await get("vantage");

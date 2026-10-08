@@ -682,7 +682,7 @@ future, not a shipped one.
   "seats_active": 148,
   "observed_through": "2026-08-10T00:00:00Z",
   "published_at": "2026-08-10T00:07:00Z",
-  "ttl": 3600,
+  "next_snapshot_at": "2026-08-10T01:05:00Z",
   "key_id": "lp-2026-08",
   "prev_hash": "…",
   "method": "https://github.com/letterstory/Letterprove/blob/a1b2c3d/src/rollup/sessions.ts",
@@ -718,7 +718,16 @@ Signing happens on a cadence, not per request. Three tiers of data:
 - **Hot** — raw events, minutes old, unsigned. What the team sees internally.
 - **Rolled up** — hourly aggregates per account × feature. What the charts read.
 - **Published** — immutable signed snapshots carrying `observed_through`,
-  `published_at`, and `ttl`.
+  `published_at`, and `next_snapshot_at`.
+
+A snapshot does not expire. It is a signed statement about the window ending
+`observed_through`, true and verifiable permanently; a newer one supersedes it,
+and `next_snapshot_at` says when that is due. Until 2026-10-08 the body carried
+`ttl: 3600` instead, and answer engines read it as an expiry date — ChatGPT
+called live proofs "expired" in 13 of 16 answers in the AEO stress test
+(`experiments/aeo/README.md`, run 4). Cache lifetime is HTTP's job and lives in
+`Cache-Control`; snapshots signed before the change keep their `ttl` and still
+verify. See `src/lib/attest/cadence.ts`.
 
 *"Last attested 2m ago"* comes from publishing frequently, not from signing
 on the fly.
@@ -1158,6 +1167,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 21 | **A vendor may counter-sign a domain they control; they may not do it invisibly.** The attestation publishes `customer_domain`, and changing a customer's name or domain discards the counter-signature and any live consent link | ✅ **Decided (09-10)** — see [Making the accepted case visible](#making-the-accepted-case-visible--built-09-10) |
 | 22 | **A vendor is private until someone publishes them.** Collection, rollup, freeze, signing and countersigning all run while private; only publication is gated, and an unpublished vendor 404s exactly as an unknown one does | ✅ **Decided (09-14)** — see [A vendor is private until someone publishes them](#a-vendor-is-private-until-someone-publishes-them--decided-09-14) |
 | 23 | **Legal terms** — the MSA-clause question is closed by using the same privacy policy and terms as every other Letter Company site, applied to Letterprove | ✅ **Decided (10-03)**, Casey |
+| 24 | **A snapshot never expires; the body says when the next one is due.** New snapshots carry `next_snapshot_at` and no `ttl` — cache lifetime is `Cache-Control`'s job — and the discovery document says so in a `freshness` note | ✅ **Decided (10-08)**, Casey — see [Freshness](#freshness) |
 
 ### Open
 

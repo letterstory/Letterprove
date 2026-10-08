@@ -10,11 +10,9 @@ import type { CustomerFixture, VendorFixture } from "../fixtures/vendors";
 import { currentSnapshot, type CustomerSnapshot } from "@/rollup/snapshots";
 import type { AttestationBody, Tier } from "./types";
 import { paymentEvidenceFor, type PaymentEvidence } from "./payment-evidence";
+import { nextSnapshotAt } from "./cadence";
 
 const METHOD_PATH = "src/lib/attest/proofs.ts";
-
-/** How long an agent may cache a proof. One hour matches the publish cadence. */
-export const TTL_SECONDS = 3600;
 
 /**
  * What the evidence supports, which is not always what the vendor asserts.
@@ -138,7 +136,7 @@ export async function attestationBody(
 		seats_active: snapshot.seats_active,
 		observed_through: snapshot.observed_through,
 		published_at: snapshot.published_at,
-		ttl: TTL_SECONDS,
+		next_snapshot_at: nextSnapshotAt(snapshot.published_at),
 		method: methodUrl(METHOD_PATH),
 	};
 	return { body, snapshot };

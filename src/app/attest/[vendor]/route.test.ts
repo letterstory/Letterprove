@@ -31,7 +31,7 @@ const AGGREGATE = {
 	tier: 2 as const,
 	observed_through: "2026-08-01T00:00:00.000Z",
 	published_at: "2026-08-01T00:00:00.000Z",
-	ttl: 3600,
+	next_snapshot_at: "2026-08-01T00:05:00.000Z",
 	prev_hash: "00".repeat(32),
 	method: "https://github.com/letterstory/Letterprove/blob/main/src/lib/attest/aggregate.ts",
 	key_id: "dev-insecure-0000",
@@ -98,15 +98,15 @@ describe("GET /attest/[vendor]", () => {
 });
 
 describe("GET /attest/[vendor] — cache headers", () => {
-	it("caches for the document's OWN ttl, not a constant", async () => {
-		// The ttl is signed into the body. If the header and the body disagreed,
-		// a verifier reading `ttl` would be told one staleness bound while the
-		// edge enforced another.
+	it("caches for the publishing cadence, whatever the body carries", async () => {
+		// The body no longer carries a cache hint — `ttl` read to answer engines
+		// as an expiry date (src/lib/attest/cadence.ts). A legacy snapshot that
+		// still has one must not steer the header either.
 		vi.mocked(publishedVendorAggregate).mockResolvedValue({ ...AGGREGATE, ttl: 900 } as never);
 
 		const res = await get("vantage");
 
-		expect(res.headers.get("cache-control")).toBe("public, max-age=900, stale-while-revalidate=86400");
+		expect(res.headers.get("cache-control")).toBe("public, max-age=3600, stale-while-revalidate=86400");
 	});
 
 	it("allows stale-while-revalidate, which the named routes must not", async () => {

@@ -6,7 +6,8 @@
  * repo an evaluating agent is most likely to actually read. Keep it legible.
  */
 
-import { attestationBody, earned, TTL_SECONDS } from "./body";
+import { attestationBody, earned } from "./body";
+import { SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { buildChain, head } from "./chain";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import {
@@ -78,7 +79,7 @@ export interface VendorProof {
  * between deploy and the first cron tick either.
  *
  * Memoising the composed result still matters for cost, and keying by hour
- * bounds staleness to TTL_SECONDS: a mismatch between the proof page and the
+ * bounds staleness to SNAPSHOT_CADENCE_SECONDS: a mismatch between the proof page and the
  * JSON endpoints within that hour would look to a verifier exactly like
  * tampering, so both must read the same cached chain, not a fresh query
  * each time.
@@ -86,7 +87,7 @@ export interface VendorProof {
 const chains = new Map<string, Promise<SignedAttestation[]>>();
 
 function hourBucket(): number {
-	return Math.floor(Date.now() / (TTL_SECONDS * 1000));
+	return Math.floor(Date.now() / (SNAPSHOT_CADENCE_SECONDS * 1000));
 }
 
 async function loadChain(vendor: VendorFixture, customer: CustomerFixture): Promise<SignedAttestation[]> {

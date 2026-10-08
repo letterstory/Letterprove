@@ -44,9 +44,9 @@ import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { loadAggregateHistory } from "@/rollup/aggregate-history";
 import type { Tier } from "./types";
+import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
-const TTL_SECONDS = 3600;
 const WINDOW_DAYS = 30;
 
 export interface AggregateBody {
@@ -64,7 +64,10 @@ export interface AggregateBody {
 	tier: Tier;
 	observed_through: string;
 	published_at: string;
-	ttl: number;
+	/** When a newer snapshot is due. Absent on snapshots signed before 2026-10-08 — see ./cadence.ts. */
+	next_snapshot_at?: string;
+	/** Legacy: the cache hint those earlier snapshots carry instead. Never written now. */
+	ttl?: number;
 	prev_hash: string;
 	method: string;
 }
@@ -169,7 +172,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		tier: earnedTier(attributable.length > 0),
 		observed_through: now,
 		published_at: now,
-		ttl: TTL_SECONDS,
+		next_snapshot_at: nextSnapshotAt(now),
 		method: methodUrl(METHOD_PATH),
 	};
 }
@@ -182,7 +185,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 const chainCache = new Map<string, Promise<SignedAggregate[] | null>>();
 
 function hourBucket(): number {
-	return Math.floor(Date.now() / (TTL_SECONDS * 1000));
+	return Math.floor(Date.now() / (SNAPSHOT_CADENCE_SECONDS * 1000));
 }
 
 /**

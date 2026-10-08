@@ -90,6 +90,9 @@ describe("customerProof", () => {
 		expect(proof!.current.sessions_30d).toBe(42);
 		expect(proof!.current.seats_active).toBe(0);
 		expect(proof!.current.prev_hash).toBe(GENESIS_HASH);
+		// Signed into the body, so verification covers it — and no `ttl`.
+		expect(proof!.current.next_snapshot_at).toBe("2026-08-01T00:05:00.000Z");
+		expect(proof!.current).not.toHaveProperty("ttl");
 		expect(verifyAttestation(proof!.current, jwks())).toEqual({ ok: true });
 		expect(currentSnapshot).toHaveBeenCalledWith("vantage", "acme-corp.example");
 	});
