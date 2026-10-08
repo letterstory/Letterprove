@@ -32,7 +32,9 @@
  *      fetching. An engine can cite proof it read weeks ago; this logs fetches,
  *      not citations.
  *   3. Requests with no recognisable AI user-agent (only `kind === "ai_agent"`
- *      is recorded durably). Gemini's url_context fetcher is one of these.
+ *      is recorded durably). Whether Gemini's url_context fetcher sends one is
+ *      unconfirmed: during the 2026-10-08 stress run every read was an edge
+ *      HIT, so none of the engines' fetches could be attributed.
  *
  * Writes a snapshot to access-baseline-<date>.json (git-ignored): the table is
  * pruned at 65 days, so the snapshot is the baseline that survives.
