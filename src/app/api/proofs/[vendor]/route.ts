@@ -1,5 +1,6 @@
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorProof } from "@/lib/attest/proofs";
+import { readingOrder } from "@/lib/attest/reading-order";
 import { tierLadderDocument } from "@/lib/attest/tiers";
 import { notFound, namedProofJson } from "@/lib/http";
 
@@ -24,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 		// The full chain is one fetch away per customer rather than inlined —
 		// a vendor with 200 customers would otherwise ship a megabyte to an
 		// agent that wanted one number.
-		customers: proof.customers.map((c) => c.current),
+		customers: proof.customers.map((c) => readingOrder(c.current)),
 		// Repeated from the discovery document rather than linked. Every entry
 		// above carries a bare `tier` integer, and an agent that landed here
 		// directly — which is what the proof URL is for — would otherwise have
