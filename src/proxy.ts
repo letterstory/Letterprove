@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isOwnHost, slugForCustomDomain } from "@/lib/vendors/custom-domain";
 
 /**
  * NOTE THE FILE NAME. Next 16 deprecated `middleware.ts` in favour of
@@ -14,12 +15,26 @@ import { NextResponse, type NextRequest } from "next/server";
  *   rewritten to the machine endpoint at /api/proofs/{vendor}. Agents fetch
  *   exactly what they always did.
  *
+ * And one more: a vendor's custom proof domain (proof.acme.com) serves that
+ * vendor's proof page at `/`.
+ *
  * Everything else — /v1/observe, /v1/config, /proofs/*, /attest/*,
  * /.well-known/*, /api/cron/* — is the product's public collection/proof API
  * and stays reachable with no session; this does not gate anything.
  */
 export async function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
+
+	// A vendor's own proof domain (proof.acme.com): its root IS its proof page.
+	// An unknown or unpublished host answers 404 rather than our home page, so a
+	// hostname can't confirm who has installed us. See lib/vendors/custom-domain.ts.
+	const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
+	if (pathname === "/" && host && !isOwnHost(host)) {
+		const slug = await slugForCustomDomain(host.split(":")[0]);
+		if (!slug) return new NextResponse("Not found", { status: 404 });
+		const target = prefersJson(request.headers.get("accept")) ? `/api/proofs/${slug}` : `/proofs/${slug}`;
+		return NextResponse.rewrite(new URL(target, request.url));
+	}
 
 	const match = pathname.match(/^\/proofs\/([^/]+)$/);
 	if (!match) return;
@@ -44,4 +59,4 @@ function prefersJson(accept: string | null): boolean {
 	return lower.includes("application/json") && !lower.includes("text/html");
 }
 
-export const config = { matcher: ["/proofs/:path*"] };
+export const config = { matcher: ["/", "/proofs/:path*"] };

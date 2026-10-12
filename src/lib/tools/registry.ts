@@ -31,6 +31,15 @@ import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installSnippet } from "@/lib/vendors/install";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
+import {
+	attachDomain,
+	checkCustomDomain,
+	customDomainStatus,
+	customDomainsConfigured,
+	detachDomain,
+	getDomainState,
+	type CustomDomainRow,
+} from "@/lib/vendors/custom-domain";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
 import { sendConsentRequest } from "@/lib/email/consent";
@@ -1195,6 +1204,133 @@ export const TOOLS: BoundTool[] = [
 			// success, so a caller retrying after a network blip is not told the
 			// disconnect failed.
 			return { ok: true, body: { disconnected: true } };
+		},
+	}),
+	defineTool({
+		// Serve the proof page on the vendor's own domain (proof.acme.com). See
+		// src/lib/vendors/custom-domain.ts for why it must sit under the vendor's
+		// verified domain, and what stays on app.letterprove.com.
+		name: "set_custom_domain",
+		description:
+			"Serve your public proof page on your own domain, e.g. proof.acme.com. Must be a subdomain of your verified domain. Returns the CNAME record to add. Args: domain.",
+		capability: "vendor:write",
+		inputSchema: S.setCustomDomainInput,
+		outputSchema: S.setCustomDomainOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!customDomainsConfigured()) return { ok: false, status: 503, body: { error: "custom_domains_unavailable" } };
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("domain, domain_verified_at, custom_domain, proofs_published_at")
+				.eq("id", vendorId)
+				.maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			// The rule rests on DNS control of `domain`, so it has to be proven first.
+			if (!vendor.domain_verified_at) {
+				return { ok: false, status: 409, body: { error: "domain_not_verified", detail: "Verify your domain first; the proof domain sits under it." } };
+			}
+
+			const check = checkCustomDomain(String(asRecord(args).domain ?? ""), vendor.domain);
+			if (!check.ok) return { ok: false, status: 400, body: { error: check.error, detail: check.detail } };
+			const domain = check.domain;
+
+			if (vendor.custom_domain !== domain) {
+				const { data: taken } = await db.from("vendors").select("id").eq("custom_domain", domain).neq("id", vendorId).maybeSingle();
+				if (taken) return { ok: false, status: 409, body: { error: "domain_taken", detail: `${domain} is already another vendor's proof domain.` } };
+			}
+
+			const attached = await attachDomain(domain);
+			if (!attached.ok) return { ok: false, status: 502, body: { error: "vercel_refused", detail: attached.detail } };
+			// Replacing a domain: let go of the old one only once the new one is held.
+			if (vendor.custom_domain && vendor.custom_domain !== domain) await detachDomain(vendor.custom_domain);
+
+			const row = { custom_domain: domain, custom_domain_verified_at: vendor.custom_domain === domain ? undefined : null };
+			const { error } = await db.from("vendors").update(row).eq("id", vendorId);
+			if (error) return { ok: false, status: error.code === "23505" ? 409 : 400, body: { error: error.code === "23505" ? "domain_taken" : error.message } };
+
+			const state = await getDomainState(domain);
+			return {
+				ok: true,
+				body: customDomainStatus({ custom_domain: domain, custom_domain_verified_at: null, proofs_published_at: vendor.proofs_published_at }, state),
+			};
+		},
+	}),
+	defineTool({
+		// Same shape as verify_domain: asks Vercel now, and records success so the
+		// proof page can name the custom domain canonical. A failed check never
+		// clears an earlier success — DNS is allowed a bad minute.
+		name: "check_custom_domain",
+		description: "Check whether your proof domain's DNS is set up and record the result. No args.",
+		capability: "vendor:write",
+		inputSchema: S.checkCustomDomainInput,
+		outputSchema: S.checkCustomDomainOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("custom_domain, custom_domain_verified_at, proofs_published_at")
+				.eq("id", vendorId)
+				.maybeSingle<CustomDomainRow>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			if (!vendor.custom_domain || !customDomainsConfigured()) return { ok: true, body: customDomainStatus(vendor, null) };
+
+			const state = await getDomainState(vendor.custom_domain);
+			if (state && state.verified && !state.misconfigured) {
+				const verifiedAt = new Date().toISOString();
+				await db.from("vendors").update({ custom_domain_verified_at: verifiedAt }).eq("id", vendorId);
+				vendor.custom_domain_verified_at = verifiedAt;
+			}
+			return { ok: true, body: customDomainStatus(vendor, state) };
+		},
+	}),
+	defineTool({
+		name: "get_custom_domain",
+		description: "Your proof domain and its last recorded state, without checking DNS again. No args.",
+		capability: "vendor:read",
+		inputSchema: S.getCustomDomainInput,
+		outputSchema: S.getCustomDomainOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("custom_domain, custom_domain_verified_at, proofs_published_at")
+				.eq("id", vendorId)
+				.maybeSingle<CustomDomainRow>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body: customDomainStatus(vendor, null) };
+		},
+	}),
+	defineTool({
+		name: "remove_custom_domain",
+		description: "Stop serving your proof page on your own domain. Your proof page stays on app.letterprove.com. No args.",
+		capability: "vendor:write",
+		inputSchema: S.removeCustomDomainInput,
+		outputSchema: S.removeCustomDomainOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("custom_domain").eq("id", vendorId).maybeSingle<{ custom_domain: string | null }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			if (!vendor.custom_domain) return { ok: true, body: { removed: false, domain: null } };
+
+			const { error } = await db.from("vendors").update({ custom_domain: null, custom_domain_verified_at: null }).eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			// Our side first: once the row is cleared the hostname serves nothing,
+			// whatever Vercel says.
+			if (customDomainsConfigured()) await detachDomain(vendor.custom_domain);
+			return { ok: true, body: { removed: true, domain: vendor.custom_domain } };
 		},
 	}),
 ];

@@ -1,3 +1,4 @@
+import { liveCustomDomain } from "@/lib/vendors/custom-domain";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
@@ -23,9 +24,13 @@ export async function generateMetadata({ params }: { params: Promise<{ vendor: s
 	const vendor = await findPublishedVendor(slug);
 	if (!vendor) notFound();
 
+	// Once a vendor's own proof domain is live, it is the canonical home of this
+	// page, so search engines credit the vendor's domain rather than ours.
+	const customDomain = await liveCustomDomain(slug);
 	return {
 		title: `${vendor.name} — attested proof`,
 		description: `Signed, independently verifiable proof of real product usage for ${vendor.name}.`,
+		...(customDomain ? { alternates: { canonical: `https://${customDomain}/` } } : {}),
 	};
 }
 
