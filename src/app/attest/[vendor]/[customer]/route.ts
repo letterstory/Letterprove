@@ -1,5 +1,6 @@
 import { logProofAccess } from "@/lib/access/log";
 import { customerProof } from "@/lib/attest/proofs";
+import { readingOrder } from "@/lib/attest/reading-order";
 import { notFound, namedProofJson } from "@/lib/http";
 
 /**
@@ -20,5 +21,5 @@ export async function GET(
 	const proof = await customerProof(vendor, slug);
 	if (!proof) return notFound(`no attestation for "${vendor}/${slug}"`);
 
-	return namedProofJson(proof.current);
+	return namedProofJson(readingOrder(proof.current));
 }

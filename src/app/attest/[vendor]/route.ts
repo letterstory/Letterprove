@@ -1,5 +1,6 @@
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorAggregate } from "@/lib/attest/aggregate";
+import { readingOrder } from "@/lib/attest/reading-order";
 import { notFound, proofJson } from "@/lib/http";
 import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 
@@ -38,5 +39,5 @@ export async function GET(
 
 	// Cached for the publishing cadence, not for a field in the body: the body
 	// no longer carries a cache hint (see src/lib/attest/cadence.ts).
-	return proofJson(aggregate, SNAPSHOT_CADENCE_SECONDS);
+	return proofJson(readingOrder(aggregate), SNAPSHOT_CADENCE_SECONDS);
 }

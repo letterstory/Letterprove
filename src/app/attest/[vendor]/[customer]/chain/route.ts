@@ -1,4 +1,5 @@
 import { logProofAccess } from "@/lib/access/log";
+import { readingOrder } from "@/lib/attest/reading-order";
 import { customerProof } from "@/lib/attest/proofs";
 import { notFound, namedProofJson } from "@/lib/http";
 
@@ -32,5 +33,5 @@ export async function GET(
 	// confirms that a private customer exists.
 	if (!proof) return notFound(`no attestation for "${vendor}/${customer}"`);
 
-	return namedProofJson({ vendor, customer, length: proof.chain.length, chain: proof.chain });
+	return namedProofJson({ vendor, customer, length: proof.chain.length, chain: proof.chain.map(readingOrder) });
 }

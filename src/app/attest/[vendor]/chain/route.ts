@@ -1,4 +1,5 @@
 import { logProofAccess } from "@/lib/access/log";
+import { readingOrder } from "@/lib/attest/reading-order";
 import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
 import { notFound, proofJson } from "@/lib/http";
 
@@ -35,5 +36,5 @@ export async function GET(
 	// would read as "this vendor has never claimed anything".
 	if (!chain) return notFound(`no aggregate history for "${vendor}"`);
 
-	return proofJson({ vendor, kind: "aggregate", length: chain.length, chain });
+	return proofJson({ vendor, kind: "aggregate", length: chain.length, chain: chain.map(readingOrder) });
 }
