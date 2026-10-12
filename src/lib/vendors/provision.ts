@@ -3,6 +3,8 @@ import { dbClient } from "@/lib/db/client";
 import { normalizeDomain, domainRejectionReason } from "@/lib/vendors/domain";
 import { generateKey } from "@/lib/vendors/keys";
 import { findVendorByOrg } from "@/lib/fixtures/vendors";
+import { isLetterCompanyDomain } from "@/lib/identity/domains";
+import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 
 /**
  * Create the Letterprove vendor a Letterstory org will publish proofs as, and
@@ -56,12 +58,18 @@ export async function provisionVendorForOrg(
 	}
 
 	const key = generateKey(baseSlug);
+	// A vendor on one of our own domains shares an owner with the issuer, and
+	// says so from its first snapshot (src/lib/attest/issuer.ts). Derived from
+	// the domain at creation rather than left for a later migration: letter.dev
+	// was created on 2026-10-12 without it, the way the #169 backfill had to
+	// catch lettertrace, letterstory and steve-johnson.
+	const issuer_affiliation = isLetterCompanyDomain(domain) ? ISSUER_OPERATOR : null;
 
 	const insert = async (slug: string): Promise<{ id: string } | "conflict" | "error"> => {
 		const id = randomUUID();
 		const { error } = await db
 			.from("vendors")
-			.insert({ id, slug, name, domain, category: DEFAULT_CATEGORY, key, letterstory_org_id: orgId });
+			.insert({ id, slug, name, domain, category: DEFAULT_CATEGORY, key, letterstory_org_id: orgId, issuer_affiliation });
 		if (!error) return { id };
 		// 23505 is unique_violation — could be the slug OR the org link. Either
 		// way the caller should not retry blindly, so it is surfaced as conflict.

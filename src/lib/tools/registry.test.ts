@@ -646,9 +646,10 @@ describe("dispatchTool", () => {
 	});
 
 	it("builds an install snippet from the caller's vendor key and the request's own origin", async () => {
-		vendorRow = { key: "lp_live_acme_9f2c" };
+		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", proofs_published_at: null };
 		const { dispatchTool } = await import("./registry");
 		const { installSnippet } = await import("@/lib/vendors/install");
+		const { badgeHtml } = await import("@/lib/vendors/badge");
 		const origin = "https://acme.example.com";
 
 		const outcome = await dispatchTool("get_install_snippet", {}, principal(["vendor:read"]), { origin });
@@ -661,9 +662,21 @@ describe("dispatchTool", () => {
 					snippet: installSnippet(origin, "lp_live_acme_9f2c"),
 					origin,
 					publishable_key: "lp_live_acme_9f2c",
+					badge: { html: badgeHtml(origin, "acme"), href: `${origin}/proofs/acme`, live: false },
 				},
 			},
 		});
+	});
+
+	// Until a vendor publishes, the page the badge links to is a 404, so the
+	// badge must say it is not live yet.
+	it("marks the footer badge live only once the vendor is published", async () => {
+		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", proofs_published_at: "2026-10-12T00:00:00Z" };
+		const { dispatchTool } = await import("./registry");
+
+		const outcome = await dispatchTool("get_install_snippet", {}, principal(["vendor:read"]), { origin: "https://acme.example.com" });
+
+		expect(outcome.kind === "result" && outcome.result.ok && (outcome.result.body as { badge: { live: boolean } }).badge.live).toBe(true);
 	});
 
 	// A tool call has no browser request behind it — origin can legitimately be
