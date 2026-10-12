@@ -202,11 +202,9 @@ describe("earned — tier 3, payment corroborated by Stripe", () => {
 		expect(earned(customer as never, true, true)).toEqual({ tier: 1, verified: false });
 	});
 
-	it("lets a countersignature still outrank payment", () => {
-		// Tier 4 is the customer themselves confirming — strictly stronger than
-		// the vendor's own payment records.
+	it("tops out at tier 3: a leftover counter-signature on the row earns nothing more", () => {
 		expect(
-			earned({ ...customer, countersignedAt: "2026-08-01T00:00:00Z" } as never, true, true, payment)
-		).toEqual({ tier: 4, verified: true });
+			earned({ ...customer, countersignedAt: "2026-08-01T00:00:00Z" } as never, true, true, payment).tier
+		).toBe(3);
 	});
 });

@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     "What Letterprove collects when its script runs on a customer's site, why it is company-level rather than personal, and what is published.",
 };
 
-const UPDATED = "September 24, 2026";
+const UPDATED = "October 12, 2026";
 
 /**
  * Written against what the code actually does, not against the sibling
@@ -220,10 +220,6 @@ export default function PrivacyPage() {
             membership. Letterprove holds no identity of its own; see §5.
           </li>
           <li>
-            <strong>Resend</strong> — delivers the consent emails described in
-            §4, when a vendor asks us to send one.
-          </li>
-          <li>
             <strong>Stripe</strong> — reads a vendor&apos;s own connected
             account, at their instruction, to corroborate a customer&apos;s paid
             subscription for a higher provenance tier. We do not process
@@ -233,11 +229,19 @@ export default function PrivacyPage() {
             <strong>Slack</strong> — internal alerting for our own team; no
             vendor or visitor data is routed through it.
           </li>
+          <li>
+            <strong>Maverick Intelligence</strong> — identifies the companies
+            and business contacts that visit our marketing site,
+            letterprove.com. It runs on that site only.
+          </li>
         </ul>
         <p>
-          We do not use advertising trackers, we do not use visitor
-          de-anonymisation services on this product, we do not sell information,
-          and we do not build behavioural profiles.
+          Our marketing site, letterprove.com, uses Maverick Intelligence to
+          identify the companies and business contacts that visit it. The
+          Letterprove app, proof pages, attestation documents and the collector
+          script installed on vendors&apos; sites do not use any
+          de-anonymisation service. We do not use advertising trackers, we do
+          not sell information, and we do not build behavioural profiles.
         </p>
       </Section>
 

@@ -4,8 +4,7 @@ import { createCustomer, updateCustomer, deleteCustomer } from "./customers";
 /**
  * Enough of the supabase chain for every shape these functions use: the write
  * chains (insert().select().single(), update/delete().eq().eq().select()
- * .maybeSingle()) and the read chains (select().eq().eq().maybeSingle()), which
- * `updateCustomer` now uses to see the row's subject before it changes it.
+ * .maybeSingle()) and the read chains (select().eq().eq().maybeSingle()).
  *
  * One chainable node backs all of them rather than a hand-wired tree per shape.
  * The tree version broke the moment a function called `.select()` before `.eq()`
@@ -117,98 +116,13 @@ describe("updateCustomer", () => {
 		expect(result).toEqual({ ok: false, status: 404, body: { error: "not_found" } });
 	});
 
-	/*
-	 * The subject of a counter-signature is vendor-writable; the
-	 * counter-signature itself must not outlive it.
-	 *
-	 * `countersigned_at` is correctly not settable through this function, but
-	 * that alone left the cheaper forgery open: have one friendly party
-	 * countersign honestly, then rename the row into a company that never
-	 * approved anything and keep tier 4. Same reasoning as update_vendor
-	 * clearing `domain_verified_at` when the domain moves.
-	 */
-	describe("changing the subject discards what was agreed about it", () => {
-		const countersigned = {
-			id: "c1",
-			slug: "acme",
-			name: "Acme Corp",
-			domain: "acme.com",
-			countersigned_at: "2026-09-01T00:00:00.000Z",
-			consent_token: null,
-		};
+	it("writes exactly the fields given and returns the updated row", async () => {
+		const db = mockSupabase({ id: "c1", slug: "acme", name: "Globex", domain: "acme-hq.com" });
 
-		it("clears the counter-signature and its provenance when the name changes", async () => {
-			const db = mockSupabase(countersigned);
+		const result = await updateCustomer(db as never, "v1", "acme", { name: "Globex", domain: "acme-hq.com" });
 
-			const result = await updateCustomer(db as never, "v1", "acme", { name: "Globex" });
-
-			expect(db.update).toHaveBeenCalledWith(
-				expect.objectContaining({ name: "Globex", countersigned_at: null, countersigned_by: null }),
-			);
-			expect(result.ok).toBe(true);
-			if (result.ok) expect(result.data.countersignatureCleared).toBe(true);
-		});
-
-		it("clears it when the domain changes, which is what tier 4 is bound to", async () => {
-			const db = mockSupabase(countersigned);
-
-			await updateCustomer(db as never, "v1", "acme", { domain: "acme-hq.com" });
-
-			expect(db.update).toHaveBeenCalledWith(
-				expect.objectContaining({ domain: "acme-hq.com", countersigned_at: null }),
-			);
-		});
-
-		it("leaves it alone when the update does not touch the subject", async () => {
-			const db = mockSupabase(countersigned);
-
-			const result = await updateCustomer(db as never, "v1", "acme", { since: "2024-01" });
-
-			expect(db.update).toHaveBeenCalledWith({ since: "2024-01" });
-			if (result.ok) expect(result.data.countersignatureCleared).toBe(false);
-		});
-
-		// A PATCH that writes the same values back is not a subject change. Without
-		// the comparison, any caller that round-trips the whole row would destroy a
-		// counter-signature it never meant to touch.
-		it("leaves it alone when name and domain are re-sent unchanged", async () => {
-			const db = mockSupabase(countersigned);
-
-			await updateCustomer(db as never, "v1", "acme", { name: "Acme Corp", domain: "acme.com" });
-
-			expect(db.update).toHaveBeenCalledWith({ name: "Acme Corp", domain: "acme.com" });
-		});
-
-		// The recipient binding was checked against the domain as it stood when
-		// the link was minted, and the consent page showed the name as it stood
-		// then. A token that outlives either would let an approval land on a claim
-		// its approver was never shown.
-		it("invalidates a live consent link, because it was minted for the old subject", async () => {
-			const db = mockSupabase({ ...countersigned, countersigned_at: null, consent_token: "tok" });
-
-			const result = await updateCustomer(db as never, "v1", "acme", { domain: "acme-hq.com" });
-
-			expect(db.update).toHaveBeenCalledWith(
-				expect.objectContaining({ consent_token: null, consent_token_expires_at: null, consent_sent_to: null }),
-			);
-			if (result.ok) {
-				expect(result.data.pendingConsentCleared).toBe(true);
-				expect(result.data.countersignatureCleared).toBe(false);
-			}
-		});
-
-		// A decline is permanent history and the 30-day cooldown reads from it.
-		// Clearing it here would make a one-character rename a cooldown bypass,
-		// which is the opposite of what recording a decline was for.
-		it("never clears the decline record, so a rename cannot reset the cooldown", async () => {
-			const db = mockSupabase({ ...countersigned, consent_token: "tok" });
-
-			await updateCustomer(db as never, "v1", "acme", { name: "Globex" });
-
-			const [patch] = db.update.mock.calls[0];
-			expect(patch).not.toHaveProperty("consent_declined_at");
-			expect(patch).not.toHaveProperty("consent_decline_count");
-		});
+		expect(db.update).toHaveBeenCalledWith({ name: "Globex", domain: "acme-hq.com" });
+		expect(result).toEqual({ ok: true, data: { id: "c1", slug: "acme", name: "Globex", domain: "acme-hq.com" } });
 	});
 });
 

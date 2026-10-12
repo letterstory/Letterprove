@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 		"The terms for using Letterprove, including what a signed attestation does and does not claim, and the obligations a vendor takes on by publishing one.",
 };
 
-const UPDATED = "September 24, 2026";
+const UPDATED = "October 12, 2026";
 
 /**
  * The clauses that carry real weight here are §4 (what a signature actually
@@ -76,7 +76,7 @@ export default function TermsPage() {
 					Every published claim therefore carries a <strong>provenance tier</strong> describing how
 					much independent corroboration stands behind it — from vendor-asserted at the bottom, to
 					observed by our script, to bound to infrastructure facts you do not control, to
-					corroborated by a third party, to counter-signed by the customer themselves. Anyone
+					corroborated by a third party. Anyone
 					reading a proof is expected to weigh the tier rather than treat every claim as
 					equivalent.
 				</p>

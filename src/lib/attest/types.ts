@@ -23,15 +23,12 @@ export interface AttestationBody {
 	 * the lookalike.
 	 *
 	 * Every other field describes the claim; this one identifies its subject.
-	 * The domain is what telemetry joins on, and what a consent link's
-	 * recipient had to hold a mailbox at, so it is what a tier-4
-	 * counter-signature is actually bound to. The vendor picks it freely (any
-	 * domain that is not free-mail, one of ours, or a reserved TLD), so
-	 * publishing the name without it meant a vendor could register acme-hq.com,
-	 * name the row "Acme Corp", approve their own consent link, and publish
-	 * tier 4 with nothing in the document a reader could notice the
-	 * substitution in. Self-approving on a domain you control is an accepted
-	 * trade (README, "Why delivery is the binding"); doing it invisibly is not.
+	 * The domain is what telemetry and Stripe evidence join on, so it is what
+	 * every tier is actually bound to. The vendor picks it freely (any domain
+	 * that is not free-mail, one of ours, or a reserved TLD), so publishing the
+	 * name without it would let a vendor register acme-hq.com, name the row
+	 * "Acme Corp", and publish with nothing in the document a reader could
+	 * notice the substitution in.
 	 *
 	 * Added 2026-09-10. Snapshots frozen before then do not carry it, which is
 	 * why the field is additive rather than versioned: the signature covers

@@ -7,8 +7,6 @@ vi.mock("@/lib/vendors/customers", () => ({
 	createCustomer: vi.fn(),
 	updateCustomer: vi.fn(),
 	deleteCustomer: vi.fn(),
-	generateConsentLink: vi.fn(),
-	clearConsentToken: vi.fn(),
 }));
 vi.mock("@/lib/vendors/status", () => ({ getVendorStatus: vi.fn() }));
 vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
@@ -22,7 +20,6 @@ vi.mock("@/lib/vendors/verification", () => ({
 	verificationMessage: vi.fn(() => "checked"),
 }));
 vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
-vi.mock("@/lib/email/consent", () => ({ sendConsentRequest: vi.fn() }));
 vi.mock("@/lib/stripe/credentials", () => ({
 	saveCredential: vi.fn(),
 	connectionFor: vi.fn(),
@@ -55,11 +52,6 @@ function customerRow(overrides: Record<string, unknown> = {}) {
 		verified: false,
 		features: [] as string[],
 		consent: "anonymous" as const,
-		countersigned_at: null,
-		consent_sent_to: null,
-		countersigned_by: null,
-		consent_declined_at: null,
-		consent_decline_count: 0,
 		...overrides,
 	};
 }
@@ -185,34 +177,16 @@ describe("dispatchTool", () => {
 		});
 	});
 
-	// A vendor who renames a customer loses that customer's counter-signature,
-	// and with it the strongest claim in the system. Making them diff the row to
-	// find out would hide a consequence they cannot undo alone: re-earning one
-	// needs the customer to act again.
-	it("tells the caller when an update discarded a counter-signature", async () => {
+	it("answers update_customer with the updated row and nothing else", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { updateCustomer } = await import("@/lib/vendors/customers");
-		vi.mocked(updateCustomer).mockResolvedValue({
-			ok: true,
-			data: {
-				customer: customerRow({ name: "Globex", countersigned_at: null }) as never,
-				countersignatureCleared: true,
-				pendingConsentCleared: false,
-			},
-		});
+		vi.mocked(updateCustomer).mockResolvedValue({ ok: true, data: customerRow({ name: "Globex" }) as never });
 
 		const outcome = await dispatchTool("update_customer", { slug: "acme", name: "Globex" }, principal(["vendor:write"]));
 
 		expect(outcome).toEqual({
 			kind: "result",
-			result: {
-				ok: true,
-				body: {
-					customer: customerRow({ name: "Globex", countersigned_at: null }),
-					countersignature_cleared: true,
-					pending_consent_cleared: false,
-				},
-			},
+			result: { ok: true, body: { customer: customerRow({ name: "Globex" }) } },
 		});
 	});
 
@@ -254,95 +228,10 @@ describe("dispatchTool", () => {
 		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { deleted: true } } });
 	});
 
-	it("emails the consent link and never returns the token to the caller", async () => {
+	it("no longer offers request_consent: Letterprove does not email a vendor's customers", async () => {
 		const { dispatchTool } = await import("./registry");
-		const { generateConsentLink } = await import("@/lib/vendors/customers");
-		const { sendConsentRequest } = await import("@/lib/email/consent");
-		vi.mocked(generateConsentLink).mockResolvedValue({
-			ok: true,
-			data: {
-				token: "tok123",
-				expiresAt: "2026-08-28T06:00:00.000Z",
-				sentTo: "ops@acme-customer.com",
-				customerName: "Acme Customer",
-			},
-		});
-		vi.mocked(sendConsentRequest).mockResolvedValue({ ok: true });
-
-		const outcome = await dispatchTool(
-			"request_consent",
-			{ slug: "acme", contact_email: "ops@acme-customer.com" },
-			principal(["vendor:write"]),
-			{ origin: "https://app.letterprove.com" },
-		);
-
-		expect(generateConsentLink).toHaveBeenCalledWith(FAKE_DB, "v1", "acme", "ops@acme-customer.com");
-		expect(vi.mocked(sendConsentRequest).mock.calls[0][0].url).toBe(
-			"https://app.letterprove.com/attest/acme/acme/consent?token=tok123",
-		);
-		expect(outcome).toEqual({
-			kind: "result",
-			result: { ok: true, body: { sentTo: "ops@acme-customer.com", expiresAt: "2026-08-28T06:00:00.000Z" } },
-		});
-
-		// The CLI is a vendor-controlled client, so leaking the token here is the
-		// same hole as leaking it from the dashboard route.
-		expect(JSON.stringify(outcome)).not.toContain("tok123");
-	});
-
-	it("rolls the token back when the consent email fails to send", async () => {
-		const { dispatchTool } = await import("./registry");
-		const { generateConsentLink, clearConsentToken } = await import("@/lib/vendors/customers");
-		const { sendConsentRequest } = await import("@/lib/email/consent");
-		vi.mocked(generateConsentLink).mockResolvedValue({
-			ok: true,
-			data: {
-				token: "tok123",
-				expiresAt: "2026-08-28T06:00:00.000Z",
-				sentTo: "ops@acme-customer.com",
-				customerName: "Acme Customer",
-			},
-		});
-		vi.mocked(sendConsentRequest).mockResolvedValue({ ok: false, error: "Couldn't send the consent email." });
-
-		const outcome = await dispatchTool(
-			"request_consent",
-			{ slug: "acme", contact_email: "ops@acme-customer.com" },
-			principal(["vendor:write"]),
-			{ origin: "https://app.letterprove.com" },
-		);
-
-		expect(clearConsentToken).toHaveBeenCalledWith(FAKE_DB, "v1", "acme", "tok123");
-		expect(outcome).toEqual({
-			kind: "result",
-			result: { ok: false, status: 502, body: { error: "Couldn't send the consent email." } },
-		});
-	});
-
-	it("refuses request_consent with no origin to build an absolute link from", async () => {
-		const { dispatchTool } = await import("./registry");
-
-		const outcome = await dispatchTool(
-			"request_consent",
-			{ slug: "acme", contact_email: "ops@acme-customer.com" },
-			principal(["vendor:write"]),
-		);
-
-		expect(outcome).toEqual({
-			kind: "result",
-			result: { ok: false, status: 400, body: { error: "origin_unavailable" } },
-		});
-	});
-
-	it("requires a slug for request_consent", async () => {
-		const { dispatchTool } = await import("./registry");
-
-		const outcome = await dispatchTool("request_consent", {}, principal(["vendor:write"]), { origin: "https://app.letterprove.com" });
-
-		expect(outcome).toEqual({
-			kind: "result",
-			result: { ok: false, status: 400, body: { error: "slug is required" } },
-		});
+		const outcome = await dispatchTool("request_consent", { slug: "acme" }, principal(["vendor:write"]));
+		expect(outcome).toEqual({ kind: "unknown_tool" });
 	});
 
 	it("reports get_status by delegating to the shared status service", async () => {

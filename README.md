@@ -31,8 +31,6 @@ signed, machine-readable attestations that an agent can fetch, verify, and cite.
 | ✅ Every vendor row is created with a domain-verification token | domain_verification_token has a DB default, so create_vendor gets one without asking — the self-serve signup form this once described was retired with the local dashboard |
 | ⬜ Fraud features (ASN distribution, hash counts) | fraud-features.ts still hardcodes these null — accepted gap, not wired to real ASN data yet |
 | ✅ Tier 3 — Stripe corroboration | lib/stripe/sync.ts joins settled invoices to observed domains and writes vendor_payment_evidence; a subscription with no invoice that actually settled is not evidence, and a TEST-mode key stores nothing |
-| ✅ Tier 4 — customer counter-signing | attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof |
-| ✅ Counter-signature is bound to the customer's own domain | consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token |
 | ✅ Publication is opt-in — a vendor is private until someone publishes it | findPublishedVendor() is the gated resolver every public route goes through; collection, freeze and signing still run while private, so publishing is a flip rather than a rebuild |
 | ✅ Support / help infrastructure | the submit_support_request tool posts through lib/support/slack.ts to a Slack incoming webhook |
 <!-- STATUS:AUTO:END -->
@@ -84,7 +82,7 @@ agent can weigh it instead of trusting it:
 | **1** | Observed by our script in a real browser | With effort |
 | **2** | Bound to infrastructure facts the vendor doesn't control | Hard |
 | **3** | Corroborated by a third party — Stripe, IdP, DNS | Only by paying themselves real money |
-| **4** | Counter-signed by the customer themselves | No |
+| ~~**4**~~ | ~~Counter-signed by the customer themselves~~ — **retired 10-12**; old documents may still carry it, read them as tier 3 | — |
 
 **Tier 2 is the phase-one target.** The vendor can fabricate a payload, but not
 our server's receipt timestamp, not the observed origin, and not the ASN a
@@ -99,10 +97,12 @@ Note the honest limit — corroboration is not immunity. A vendor willing to pay
 themselves through their own Stripe account can still reach tier 3, and nothing
 binds that account to the vendor today. What changed is the price: from free to
 a real charge through a real processor, in an account Stripe has verified,
-leaving a record in the vendor's own books. Tier 4 is the only tier a vendor
-genuinely cannot produce alone.
+leaving a record in the vendor's own books. Tier 3 is the top of the ladder:
+Letterprove attests from the vendor's DNS proof and the vendor's own Stripe
+ledger, and does not contact the vendor's customers (see
+[Customer counter-signing — Retired](#customer-counter-signing--retired-10-12)).
 
-Rigor compounds. Ship tier 1–2, design the schema for 3–4, and never print the
+Rigor compounds. Ship tier 1–2, then 3, and never print the
 word *verified* where the tier doesn't earn it.
 
 ---
@@ -699,8 +699,7 @@ count was reached. Nothing else in the file asks to be trusted.
 display name and the domain independently, and nothing ties one to the other,
 so a name alone identifies nobody: "Acme Corp" on `acme-hq.com` reads exactly
 like "Acme Corp" on `acme.com`. The domain is the field the evidence is
-actually joined on, and it is what a tier-4 counter-signature was mailed to, so
-it is the one field that lets a reader judge whose claim this is rather than
+actually joined on (observed sessions, Stripe invoices), so it is the one field that lets a reader judge whose claim this is rather than
 take the name on faith. It costs nothing in privacy that `customer_name` does
 not already cost, and only named customers are published at all.
 
@@ -710,7 +709,7 @@ published bytes, which the freeze reads back from storage rather than
 recomputing, so snapshots frozen before 2026-09-10 still verify and still link.
 `scripts/verify.mjs` canonicalises whatever keys it is handed and needed no
 change to keep working; it now prints the name and domain together as the
-document's subject, and says out loud that tier 4 binds to the domain.
+document's subject.
 
 ### Freshness
 
@@ -786,8 +785,8 @@ Each snapshot carries `prev_hash`, chaining it to its predecessor. That is what
 upgrades the system from *signed* to *auditable* — we cannot quietly rewrite
 last quarter's numbers, and an agent or a skeptical competitor can prove it.
 
-Per-vendor keys and customer counter-signing (tier 4) are additive later,
-precisely because `key_id` is there from day one.
+Per-vendor keys are additive later, precisely because `key_id` is there from
+day one.
 
 ### The evidence gate — **Decided (08-13)**
 
@@ -863,7 +862,7 @@ copy of the observations. The leaf keeps its data whole; the trunk stays small.
 | **1** | Signups, logins, sessions, active accounts | 1–2 | Script only. Enough for *verified customer, active since, sessions/mo*. |
 | **2** | Feature adoption, seats | 2 | Named events from config. Fills the feature-level proof matrix. |
 | **3** | Payments — read-only Stripe key, settled invoices | 3 | First claim corroborated against a third party's ledger rather than the vendor's word. Contract value, tenure, renewal. Shipped as a pasted restricted key, not Connect: nothing binds the Stripe account to the vendor, which is the open half. |
-| **4** | Retention, ROI, expansion | 3–4 | Most valuable, hardest. Needs customer counter-signing to be credible. |
+| **4** | Retention, ROI, expansion | 3 | Most valuable, hardest. Not yet designed. |
 
 ---
 
@@ -880,130 +879,29 @@ entire pipeline today, and doesn't wait on the legal question below — that
 question decides when a given customer flips to named, not whether the system
 ships.
 
-Design the consent step as the verification step: a customer who approves their
-own attestation has just produced a tier-4 counter-signature, the strongest
-proof in the system.
+### Customer counter-signing — **Retired (10-12)**
 
-### Customer counter-signing — **Built (08-21)**
+From 08-21 to 10-12 a vendor could ask Letterprove to email a customer a link
+to approve their own attestation (`request_consent`), and an approval
+published tier 4. That flow is gone: the tool, the Resend email, the public
+`/attest/{vendor}/{customer}/consent` page, the 30-day decline cooldown, and
+the `countersigned_at`, `countersigned_by`, `consent_token*`,
+`consent_sent_to` and `consent_declined_at`/`consent_decline_count` columns.
 
-The consent step above is no longer just a vendor-side flag — there's now a
-real path for the customer themselves to sign off. A vendor requests consent
-(`request_consent`, 7-day TTL, same unguessable-token-in-a-column shape as
-`vendors.domain_verification_token`) and **Letterprove emails the link to the
-customer**. That link resolves to `/attest/{vendor}/{customer}/consent`, which asks for no
-session at all, since the person opening it has no account anywhere in the
-fleet, may be reading it from an email client, and can't be asked to sign in.
-That was originally a deliberate hole in the auth gate `src/proxy.ts` used to
-run; after the auth unification there is no gate to be outside of — `proxy.ts`
-does proof content negotiation and nothing else — so the property now holds by
-construction rather than by exception. The page is a plain HTML form (no
-client JS required); approving or declining POSTs to `.../consent/respond`,
-which redirects back with the result.
+The decision (Casey, 10-12): Letterprove attests that the vendor is who it says
+it is, from evidence the vendor cannot cheaply fake — DNS control of its domain
+and its own live Stripe ledger, joined to observed usage. It does not email a
+vendor's customers. Asking a vendor's customers to sign off was a different
+product, and the strongest version of it still could not tell a real customer
+from a domain the vendor registered itself.
 
-Approval sets `countersigned_at` on `vendor_customers` — once, never
-cleared — and `earned()` in `src/lib/attest/body.ts` treats its presence as
-tier-4 proof directly, short-circuiting the normal domain/observation
-pipeline entirely. That's the point: tier 4 is supposed to not run through
-the vendor at all. Declining, expiry, an already-used token, and an
-already-countersigned customer are all distinct terminal states on the same
-page, not a generic error.
+`consent` (`named | anonymous`) stays, and is what it always was underneath:
+the vendor's statement that it holds the customer's permission to be named
+(terms §6). It decides only whether a name appears, never the tier.
 
-#### A decline is remembered — **Built (08-27)**
-
-Declining used to clear the token and leave nothing behind. The vendor's
-customer list then read "request consent" again, *identical to a customer who
-was never asked*, so a refusal was indistinguishable from an email that never
-arrived, and could be re-sent immediately and indefinitely. On a product whose
-subject is consent, the customer's only available signal was the one thing
-being dropped.
-
-Declining now stamps `consent_declined_at` and increments
-`consent_decline_count`, and `generateConsentLink` refuses a re-ask for **30
-days** (`src/lib/vendors/consent-cooldown.ts`), answering `429` with
-`declinedAt` and `canAskAgainAt`. The split is the decision: *declined* is
-permanent history and stays visible forever, *can't ask yet* expires. Thirty
-days is a judgement call rather than a derived one — long enough that a re-ask
-is a considered act instead of a reflex, short enough that "not this quarter"
-does not become never.
-
-Two details that are load-bearing rather than incidental. The cooldown is
-checked **before** the recipient binding, so a vendor probing addresses during
-a cooldown learns nothing about which ones would have been accepted. And the
-count travels with the timestamp, because one "not now" reads differently from
-four.
-
-#### Why delivery is the binding — **Fixed (08-23)**
-
-As first built, the link was returned **to the vendor** to forward. Nothing
-checked that they did. Combined with the short-circuit above — tier 4 is
-evaluated *ahead of* the domain-verified and observed gates — a vendor could
-open their own link and publish the strongest tier in the system with no DNS
-proof and no telemetry behind it. On a product whose pitch is "a logo wall
-can be faked, this can't", that was the one failure mode that mattered most.
-
-So the vendor no longer receives the link. They name a recipient, that
-address **must be on the customer's own domain** (exact match or a subdomain
-of it — see `src/lib/vendors/consent-recipient.ts`), and the API answers with
-`{ sentTo, expiresAt }` and nothing else. The domain is read from the stored
-customer row, never from the request, so a vendor cannot supply both sides of
-the comparison. Approving therefore requires a mailbox at the customer's
-domain, which a vendor attesting to a real third party does not control.
-
-Delivery is **fail-closed**, unlike the Slack senders: with `RESEND_API_KEY`
-unset, or on any send failure, the freshly minted token is rolled back and the
-request 502s. "Couldn't send" has to mean "no link exists" — degrading to
-"here, you deliver it" would restore the hole exactly.
-
-`countersigned_by` records which address approved. It is deliberately **not
-published**: naming the individual would leak a person the customer never
-agreed to expose. It exists so a disputed claim can be traced.
-
-**What this does not claim to stop.** A vendor who registers a domain and
-invents a company on it controls both ends and can still self-approve. Email
-delivery cannot fix that, and documenting it beats pretending otherwise. What
-this closes is the easy case: self-approving for a customer whose domain you do
-not control.
-
-#### Making the accepted case visible — **Built (09-10)**
-
-The paragraph above named fraud scoring as the backstop for a fabricated-company
-rig. It is not one, and the reason is worth stating plainly: a rig like that
-generates no telemetry, `fraudFeatures` therefore reports an all-zero window,
-and every threshold on the countersigner has a floor a zero passes. The check
-that was supposed to catch the case is the case it cannot see.
-
-So the accepted trade is kept, and the concealment it allowed is not. Two
-changes, neither of which tries to stop a vendor counter-signing a domain they
-control:
-
-- **The document names the domain.** `customer_domain` is signed into every
-  attestation (see [Shape](#shape)). Registering `acme-hq.com`, calling the row
-  "Acme Corp" and approving your own link still publishes tier 4, but it now
-  publishes `"customer_domain": "acme-hq.com"` next to the name, and a reader
-  who knows Acme is at `acme.com` can see it. Before this, no field in the
-  document could have told them.
-- **A counter-signature does not survive its subject.** `countersigned_at` was
-  never vendor-writable, but `name` and `domain` were, and they are what the
-  customer approved. So the cheap variant was to have one friendly party
-  countersign honestly and then rename the row. `updateCustomer` now clears
-  `countersigned_at` and `countersigned_by` when either changes, the same
-  reasoning `update_vendor` applies when a domain change clears
-  `domain_verified_at`, and reports it as `countersignature_cleared` rather than
-  leaving the caller to diff the row. A live consent link goes with it
-  (`pending_consent_cleared`): the recipient binding was checked against the old
-  domain and the consent page showed the old name, so a token that outlived
-  either would let an approval land on a claim its approver was never shown.
-
-What deliberately does **not** get cleared is `consent_declined_at` and
-`consent_decline_count`. A decline is permanent history, and clearing it on a
-rename would turn the 30-day cooldown into something a vendor resets with a
-one-character edit.
-
-What remains open is the other direction: a customer who counter-signed has no
-way to withdraw it. `lookupConsentRequest` answers `already_countersigned`
-before it looks at a token, so the approval is terminal for them while the
-vendor can now discard it by renaming. That asymmetry is a product decision,
-not an oversight to patch quietly.
+Already-signed snapshots carrying `"tier": 4` stay in their chains and still
+verify; `TIER_LADDER[4]` and `scripts/verify.mjs` describe the tier as retired
+so a reader of an old document is told to weigh it as tier 3.
 
 ### How it is enforced — **Built (08-13)**
 
@@ -1153,7 +1051,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 6 | Letterprove owns its own vendor/customer/consent model; **Letterstory is the identity authority for every human** — one service secret, org resolved to vendor, staff named by an allowlist here | ✅ **Decided (revised 08-28, was: LP owns staff auth too and there is no SSO federation — itself a revision of 08-11's "staff federates via SSO")** — landed by [#124](https://github.com/letterstory/Letterprove/pull/124) and completed by [#130](https://github.com/letterstory/Letterprove/pull/130); see [Identity](#identity--decided-revised-08-28) |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
-| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), [Customer counter-signing](#customer-counter-signing--built-08-21), and [Why delivery is the binding](#why-delivery-is-the-binding--fixed-08-23) |
+| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), [Customer counter-signing](#customer-counter-signing--retired-10-12), and [Why delivery is the binding](#customer-counter-signing--retired-10-12) — counter-signing **superseded (10-12)** by 28 |
 | 10 | Event schema and config endpoint shapes — `POST /api/v1/observe` (`session\|signup\|login`), `GET /api/v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |
@@ -1163,15 +1061,16 @@ signing](#what-is-actually-signing--decided-08-13).
 | 16 | `signingMode()`, not `isDev`, decides whether proofs are labelled a demonstration | ✅ **Decided (08-13)** — see [What is actually signing](#what-is-actually-signing--decided-08-13) |
 | 17 | **Self-inflation** — `asn_distribution`/`distinct_hash_counts` are hardcoded `null` until upstream capture lands, so fraud scoring only catches gross volume/burst anomalies, not a slow, well-distributed spoofing rig | ✅ **Decided (accepted gap, 08-20)** — see [Processing — Letterprove side, step 3](#processing--letterprove-side) |
 | 18 | **A secret may be a tool argument**: `connect_stripe` takes a Stripe restricted key in a POST body; nothing echoes it, no error body quotes it, `classifyKey` refuses `sk_` and `pk_` before anything is written, and a missing `LETTERPROVE_STRIPE_ENCRYPTION_KEY` refuses the write outright rather than storing a live credential in the clear | ✅ **Decided (09-09)**, see `src/lib/tools/registry.ts` and the [Open list](#open) |
-| 19 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#a-decline-is-remembered--built-08-27) |
+| 19 | **A decline is recorded, and cools down a re-ask for 30 days** — permanent history, temporary block | ✅ **Decided (08-27)**, [#122](https://github.com/letterstory/Letterprove/pull/122) — see [A decline is remembered](#customer-counter-signing--retired-10-12) — counter-signing **superseded (10-12)** by 28 |
 | 20 | **Every tool declares a zod input/output contract**, enforced at dispatch and exempt in production | ✅ **Decided (09-08)**, [#128](https://github.com/letterstory/Letterprove/pull/128) — see [Tool contracts](#tool-contracts--decided-09-08) |
-| 21 | **A vendor may counter-sign a domain they control; they may not do it invisibly.** The attestation publishes `customer_domain`, and changing a customer's name or domain discards the counter-signature and any live consent link | ✅ **Decided (09-10)** — see [Making the accepted case visible](#making-the-accepted-case-visible--built-09-10) |
+| 21 | **A vendor may counter-sign a domain they control; they may not do it invisibly.** The attestation publishes `customer_domain`, and changing a customer's name or domain discards the counter-signature and any live consent link | ✅ **Decided (09-10)** — see [Making the accepted case visible](#customer-counter-signing--retired-10-12) — counter-signing **superseded (10-12)** by 28 |
 | 22 | **A vendor is private until someone publishes them.** Collection, rollup, freeze, signing and countersigning all run while private; only publication is gated, and an unpublished vendor 404s exactly as an unknown one does | ✅ **Decided (09-14)** — see [A vendor is private until someone publishes them](#a-vendor-is-private-until-someone-publishes-them--decided-09-14) |
 | 23 | **Legal terms** — the MSA-clause question is closed by using the same privacy policy and terms as every other Letter Company site, applied to Letterprove | ✅ **Decided (10-03)**, Casey |
 | 24 | **A snapshot never expires; the body says when the next one is due.** New snapshots carry `next_snapshot_at` and no `ttl` — cache lifetime is `Cache-Control`'s job — and the discovery document says so in a `freshness` note | ✅ **Decided (10-08)**, Casey — see [Freshness](#freshness) |
 | 25 | **Verification is a fetch, not a computation.** Every attestation signs a `verify` link to its own snapshot on `app.letterprove.com`, which answers in plain language with the signed figures. Engines cannot POST and their fetch tools only open URLs already in the conversation, so the link has to travel inside the document; Gemini certified a tampered signature in 7/16 stress-test answers when left to run Ed25519 itself | ✅ **Decided (10-08)**, Casey — see `src/lib/attest/verify-link.ts` |
 | 26 | **Independence is shown, not claimed; affiliation is disclosed, not hidden.** A vendor that shares an owner with Letterprove's operator (`vendors.issuer_affiliation`, set by migration or staff, never by the vendor) signs an `issuer_affiliation` sentence into every attestation, and its proof page carries the disclosure. Every proof page says who operates Letterprove and what a vendor can and cannot do; the discovery document carries the same as `issuer`. Claude inferred the Letterprove/Lettertrace link from the names alone and discounted the proof — an objection an engine discovers costs more than a fact we state | ✅ **Decided (10-08)**, Casey — see `src/lib/attest/issuer.ts` |
 | 27 | **A vendor's proof page may live on its own domain, but only under the domain it verified.** `set_custom_domain` attaches a subdomain such as `proof.acme.com` to this Vercel project, and `src/proxy.ts` serves that vendor's proof page at its root. It must share the registrable domain the vendor proved by DNS, so nobody can claim another company's hostname before that company points it at us. An unpublished vendor's domain answers 404. The page names the custom domain canonical once it is live, and its signatures and verify links still point at `app.letterprove.com`, which keeps a proof served from the vendor's own domain checkable | ✅ **Decided (10-12)**, Matthew + Casey — see `src/lib/vendors/custom-domain.ts` |
+| 28 | **Letterprove does not contact a vendor's customers; tier 3 is the top of the ladder.** The emailed customer counter-signature (tier 4, `request_consent`) is removed. Attestation rests on the vendor's DNS proof and its own Stripe ledger, joined to observed usage. Old tier-4 snapshots still verify and are described as retired. Supersedes the counter-signing half of 9, and 19 and 21 | ✅ **Decided (10-12)**, Casey — see [Customer counter-signing — Retired](#customer-counter-signing--retired-10-12) |
 
 ### Open
 
@@ -1207,16 +1106,8 @@ signing](#what-is-actually-signing--decided-08-13).
   all. `fraudFeatures` fails toward an all-zero window and a fabricated company
   produces one honestly, so every threshold with a floor waves it through. That
   is defensible for tiers 1-3, which are gated on observation anyway and drop to
-  tier 0 with nothing observed, and it is precisely why tier 4 could not lean on
-  scoring as a backstop (decision 21). A threshold that fires on an *empty*
+  tier 0 with nothing observed. A threshold that fires on an *empty*
   window is the change, and it belongs on the countersigner, not here.
-
-- **A counter-signature cannot be withdrawn by the customer who gave it.**
-  `lookupConsentRequest` returns `already_countersigned` ahead of the token
-  check, so there is no path back. Since 09-10 the vendor can discard one by
-  renaming the customer; the customer still cannot. Whether withdrawal is a
-  link, a reply-to address, or a support request is a product question nobody
-  has answered.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The
