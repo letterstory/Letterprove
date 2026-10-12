@@ -103,8 +103,7 @@ function subjectOf(snapshot) {
  * Both are chosen by the vendor and nothing ties one to the other, so a
  * display name on its own is worth exactly as much as a logo on a wall. The
  * domain is the field the evidence is actually joined on: telemetry arrives
- * under it, and a tier-4 counter-signature means a mailbox at it approved the
- * claim. Printing the name without it would let "Acme Corp" on acme-hq.com
+ * under it, and Stripe evidence is matched on it. Printing the name without it would let "Acme Corp" on acme-hq.com
  * read identically to "Acme Corp" on acme.com.
  *
  * Older snapshots predate the field. Saying so beats printing a blank, which
@@ -132,7 +131,7 @@ const TIERS = {
 	1: "script-observed",
 	2: "infrastructure-bound",
 	3: "third-party confirmed",
-	4: "customer counter-signed",
+	4: "customer counter-signed (retired)",
 };
 
 function tierOf(snapshot) {
@@ -184,22 +183,20 @@ const head = chain.at(-1);
 
 // A signature only ever proves the body was not altered. WHAT the body claims
 // about how it was observed is the tier, and a verifier that prints "verified"
-// without it lets a tier-0 vendor assertion read exactly like a tier-4
-// counter-signed one. Taken from the head: it is the current claim, and tiers
+// without it lets a tier-0 vendor assertion read exactly like a tier-3
+// Stripe-confirmed one. Taken from the head: it is the current claim, and tiers
 // can legitimately rise over a chain's life as evidence improves.
 if (head) console.log(`\n  provenance: ${tierOf(head)}`);
 
 const identity = head && identityOf(head);
 if (identity) console.log(`  subject: ${identity}`);
 
-// Tier 4 is the strongest thing this system publishes and the cheapest to
-// misread. What it proves is that a mailbox on the domain above approved the
-// claim, which is decisive when the vendor does not control that domain and
-// worth nothing when they do. The producer cannot tell those apart; a reader
-// who recognises the company can. Saying so is the difference between
-// evidence and a badge.
+// Tier 4 (an emailed customer counter-signature) was retired on 2026-10-12.
+// Old documents can still carry it; it proved only that a mailbox on the
+// domain above approved the claim, which is worth nothing when the vendor
+// controls that domain.
 if (head?.tier === 4) {
-	console.log("  ↳ tier 4 is bound to that DOMAIN, not to the name. Check it is the company you mean.");
+	console.log("  ↳ tier 4 is retired and no longer issued. It was bound to that DOMAIN, not to the name; read it no higher than tier 3.");
 }
 
 if (head?.method) console.log(`  method: ${head.method}`);

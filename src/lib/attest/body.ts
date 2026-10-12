@@ -25,21 +25,11 @@ const METHOD_PATH = "src/lib/attest/proofs.ts";
  * which is tier 0 in the README's trust model, and cannot be `verified` at
  * any tier.
  *
- * Tier 4 is the one exception to "the vendor's assertion is a ceiling": a
- * customer counter-signing their own attestation (src/app/attest/[vendor]/
- * [customer]/consent) is evidence that doesn't run through the vendor's
- * domain/script pipeline at all — that's the entire point of it being the
- * one tier a vendor can't forge (README § The trust model). So it isn't
- * capped by domainVerified/observed the way tiers 1-3 are; it short-circuits
- * ahead of them.
- *
- * What it is worth depends entirely on WHOSE domain it is bound to. A
- * counter-signature proves a mailbox on `customer.domain` approved the claim,
- * and a vendor who registered that domain themselves holds that mailbox. The
- * README accepts that trade and this function keeps it: it does not try to
- * decide whether a domain is "really" a third party. It is the published body
- * that has to carry `customer_domain`, so a reader can make that judgement
- * instead of taking tier 4 on faith.
+ * The ceiling is tier 3. Tier 4 (a customer counter-signing their own
+ * attestation via an emailed link) was retired on 2026-10-12: Letterprove
+ * attests from the vendor's DNS proof and the vendor's own Stripe ledger, and
+ * does not email the vendor's customers. Old snapshots that carry tier 4 stay
+ * in their chains and still verify; nothing new earns it.
  */
 export function earned(
 	customer: CustomerFixture,
@@ -47,8 +37,6 @@ export function earned(
 	domainVerified: boolean,
 	payment?: PaymentEvidence | null,
 ): { tier: Tier; verified: boolean } {
-	if (customer.countersignedAt) return { tier: 4, verified: true };
-
 	// Same ceiling, one step earlier. An observation is only evidence if we
 	// know who the origin it was pinned to belongs to — and `Origin` binds a
 	// browser, not curl (see /v1/observe). Until DNS control of the vendor's
@@ -60,8 +48,7 @@ export function earned(
 	/*
 	 * Tier 3 — payment corroborated by Stripe.
 	 *
-	 * Deliberately NOT capped by `customer.tier`, for the same reason tier 4
-	 * isn't. The asserted tier is a ceiling on VENDOR-ORIGINATED evidence,
+	 * Deliberately NOT capped by `customer.tier`. The asserted tier is a ceiling on VENDOR-ORIGINATED evidence,
 	 * because a vendor claiming more than they can show is the failure that
 	 * ceiling exists to stop. Capping this would mean a vendor's own
 	 * understatement suppressing third-party corroboration, which is backwards.
@@ -88,7 +75,9 @@ export function earned(
 	 */
 	if (payment && payment.monthlyAmount > 0) return { tier: 3, verified: true };
 
-	return { tier: customer.tier, verified: customer.verified };
+	// Capped at 3 so a stored row still asserting the retired tier 4 can never
+	// publish it.
+	return { tier: Math.min(customer.tier, 3) as Tier, verified: customer.verified };
 }
 
 /**

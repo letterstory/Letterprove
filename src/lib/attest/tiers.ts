@@ -62,10 +62,10 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
 	},
 	4: {
-		name: "customer counter-signed",
-		means: "The customer reviewed this exact usage summary and approved it, at a link delivered to an address on their own domain. The vendor never held that link.",
+		name: "customer counter-signed (retired)",
+		means: "No longer issued; retired on 2026-10-12. Documents signed before then may carry it: it meant the customer approved that usage summary at a link emailed to an address on their own domain. Letterprove now attests from the vendor's DNS proof and the vendor's own Stripe ledger, so tier 3 is the highest tier a new document can carry.",
 		forgeable_by:
-			"Nobody, without control of a mailbox at the customer's own domain. A vendor who registers a domain and invents a company on it controls both ends — fraud scoring, not this tier, is the backstop for that.",
+			"For the historical documents that carry it: anyone controlling a mailbox at the customer's domain, including a vendor who registered that domain themselves. Read it no higher than tier 3.",
 	},
 };
 

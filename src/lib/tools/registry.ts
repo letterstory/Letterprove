@@ -17,8 +17,6 @@ import {
 	createCustomer,
 	updateCustomer,
 	deleteCustomer,
-	clearConsentToken,
-	generateConsentLink,
 	type CreateCustomerInput,
 	type UpdateCustomerInput,
 } from "@/lib/vendors/customers";
@@ -42,7 +40,6 @@ import {
 } from "@/lib/vendors/custom-domain";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
-import { sendConsentRequest } from "@/lib/email/consent";
 import {
 	saveCredential,
 	connectionFor,
@@ -404,7 +401,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "update_customer",
 		description:
-			"Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features. Changing name or domain discards any counter-signature and any live consent link, since both were about the old subject.",
+			"Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features.",
 		capability: "vendor:write",
 		inputSchema: S.updateCustomerInput,
 		outputSchema: S.updateCustomerOutput,
@@ -419,18 +416,7 @@ export const TOOLS: BoundTool[] = [
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			const result = await updateCustomer(db, vendorId, slug, record as UpdateCustomerInput);
 			if (!result.ok) return result;
-			// Reported, not left to a diff. Renaming a customer or repointing
-			// their domain throws away any counter-signature they gave, because
-			// it was given about the old subject, and a caller that did not
-			// expect to lose tier 4 needs to hear it from the response.
-			return {
-				ok: true,
-				body: {
-					customer: result.data.customer,
-					countersignature_cleared: result.data.countersignatureCleared,
-					pending_consent_cleared: result.data.pendingConsentCleared,
-				},
-			};
+			return { ok: true, body: { customer: result.data } };
 		},
 	}),
 	defineTool({
@@ -454,49 +440,6 @@ export const TOOLS: BoundTool[] = [
 			// LetterproveClient.request(), which calls res.json() on every
 			// response), so an empty-body success is expressed as a flag instead.
 			return { ok: true, body: { deleted: true } };
-		},
-	}),
-	defineTool({
-		name: "request_consent",
-		description:
-			"Email a customer the link to approve their own attestation — the tier-4 counter-signature. Args: slug (required), contact_email (required, must be an address on that customer's own domain). Re-issuing invalidates any link already sent. The link is never returned to the caller: it goes to the customer, which is what makes their approval evidence rather than the vendor's assertion.",
-		capability: "vendor:write",
-		inputSchema: S.requestConsentInput,
-		outputSchema: S.requestConsentOutput,
-		handler: async (args, principal, context) => {
-			const record = asRecord(args);
-			const slug = typeof record.slug === "string" ? record.slug : "";
-			if (!slug) return { ok: false, status: 400, body: { error: "slug is required" } };
-			const contactEmail = record.contact_email;
-
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-			// Same reasoning as get_install_snippet: the link has to be absolute
-			// and must point at the host actually serving this app.
-			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
-			const db = dbClient();
-			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-
-			const { data: vendor } = await db.from("vendors").select("slug, name").eq("id", vendorId).maybeSingle();
-			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
-
-			const result = await generateConsentLink(db, vendorId, slug, contactEmail);
-			if (!result.ok) return result;
-
-			const sent = await sendConsentRequest({
-				to: result.data.sentTo,
-				vendorName: vendor.name,
-				customerName: result.data.customerName,
-				url: `${context.origin}/attest/${vendor.slug}/${slug}/consent?token=${result.data.token}`,
-				expiresAt: result.data.expiresAt,
-			});
-
-			if (!sent.ok) {
-				await clearConsentToken(db, vendorId, slug, result.data.token);
-				return { ok: false, status: 502, body: { error: sent.error } };
-			}
-
-			return { ok: true, body: { sentTo: result.data.sentTo, expiresAt: result.data.expiresAt } };
 		},
 	}),
 	defineTool({

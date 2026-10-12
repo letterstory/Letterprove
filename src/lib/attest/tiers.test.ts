@@ -61,10 +61,10 @@ describe("the published tier ladder", () => {
 		expect(tiers).toEqual([...tiers].sort((a, b) => a - b));
 	});
 
-	it("describes tier 4 as reaching the customer's own domain, not the vendor", () => {
-		// Guards the delivery binding's description against quietly softening
-		// back to "the vendor sends a link", which is what it used to be.
-		expect(TIER_LADDER[4].means).toMatch(/their own domain/i);
-		expect(TIER_LADDER[4].means).toMatch(/vendor never held/i);
+	it("keeps tier 4 readable for old documents but says it is retired", () => {
+		// Old snapshots still carry tier 4; a reader must be told it is no
+		// longer issued rather than finding no description at all.
+		expect(TIER_LADDER[4].name).toMatch(/retired/i);
+		expect(TIER_LADDER[4].means).toMatch(/no longer issued/i);
 	});
 });

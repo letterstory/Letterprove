@@ -342,9 +342,10 @@ describe("tier 3 publish path, against a real Postgres schema", () => {
 		expect(earned(customer, false, true, payment)).toEqual({ tier: 0, verified: false });
 		expect(earned(customer, true, false, payment)).toEqual({ tier: 0, verified: false });
 
-		// And a counter-signature still outranks it.
+		// And it is the top: a leftover counter-signature (tier 4, retired)
+		// earns nothing above it.
 		const countersigned = { tier: 1, verified: false, countersignedAt: "2026-08-23T00:00:00Z" } as never;
-		expect(earned(countersigned, true, true, payment)).toEqual({ tier: 4, verified: true });
+		expect(earned(countersigned, true, true, payment).tier).toBe(3);
 	});
 
 	it("a cancelled subscription DISAPPEARS from evidence rather than lingering", async () => {

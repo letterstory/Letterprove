@@ -87,9 +87,9 @@ function runChecks() {
 	//
 	//   - Tier 3 looked for a `stripe` dependency in package.json. There isn't
 	//     one and there shouldn't be: every outbound call here is a plain fetch
-	//     (see lib/support/slack.ts, lib/alerts/notify.ts, lib/email/consent.ts).
-	//   - Tier 4 looked for src/app/customer. The consent page a customer
-	//     actually opens is src/app/attest/[vendor]/[customer]/consent.
+	//     (see lib/support/slack.ts, lib/alerts/notify.ts).
+	//   - Tier 4 (customer counter-signing by emailed link) was retired on
+	//     2026-10-12; its row is gone with it.
 	//   - Support looked for src/app/support. It is src/app/vendor/support.
 	//
 	// That is the failure this file was written to prevent, in its own checks:
@@ -109,13 +109,6 @@ function runChecks() {
 	// (#124), and no tool replaced it — so the libraries and the tables are
 	// intact and nothing in the app can invoke them.
 	const stripeIsReachable = hasStripeSync && hasCallerOutside("src/lib/stripe");
-	const hasCustomerCountersignRoute =
-		existsSync(path.join(ROOT, "src/app/attest/[vendor]/[customer]/consent/page.tsx")) &&
-		/countersigned_at/.test(migrations);
-	// The delivery binding is what makes a counter-signature evidence rather
-	// than the vendor's own click — worth its own row, since tier 4 "existing"
-	// and tier 4 "meaning something" were different things for two days.
-	const consentIsDeliveryBound = existsSync(path.join(ROOT, "src/lib/vendors/consent-recipient.ts"));
 	// Same structural pairing: the gated resolver has to exist in code AND the
 	// column it reads has to be migrated. A `findPublishedVendor` with no
 	// `proofs_published_at` behind it would answer "private" for everyone and
@@ -161,20 +154,6 @@ function runChecks() {
 				: hasStripeSync
 					? "lib/stripe/sync.ts and vendor_payment_evidence are intact, but nothing outside src/lib/stripe imports them — the vendor dashboard that called them went with the auth unification and no tool replaced it"
 					: "no lib/stripe/sync.ts or vendor_payment_evidence table — schema designed for it, not built",
-		},
-		{
-			label: "Tier 4 — customer counter-signing",
-			state: hasCustomerCountersignRoute ? "done" : "planned",
-			detail: hasCustomerCountersignRoute
-				? "attest/[vendor]/[customer]/consent is the page the customer opens; approving sets countersigned_at, which earned() treats as tier-4 proof"
-				: "no customer-facing consent/counter-sign flow exists — countersign.ts is the vendor→Letterstory fraud RPC, not this",
-		},
-		{
-			label: "Counter-signature is bound to the customer's own domain",
-			state: consentIsDeliveryBound ? "done" : "planned",
-			detail: consentIsDeliveryBound
-				? "consent-recipient.ts forces the link to an address on the customer's domain, and the vendor never receives the token"
-				: "the consent link is handed to the vendor, so nothing stops them approving on their customer's behalf",
 		},
 		{
 			label: "Publication is opt-in — a vendor is private until someone publishes it",

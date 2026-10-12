@@ -6,7 +6,6 @@ import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { Mono } from "@/components/ui";
 import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 import { tierLadderDocument } from "@/lib/attest/tiers";
-import { CONSENT_REASK_COOLDOWN_MS } from "@/lib/vendors/consent-cooldown";
 import { ATTEST_SCRIPT_PATH, installSnippet, originFromHeaders } from "@/lib/vendors/install";
 import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
 
@@ -53,7 +52,6 @@ const SECTIONS = [
 	{ id: "endpoints", title: "Endpoint reference" },
 ];
 
-const COOLDOWN_DAYS = Math.round(CONSENT_REASK_COOLDOWN_MS / (24 * 60 * 60 * 1000));
 
 export default async function DocsPage() {
 	// Same derivation as the install snippet itself. A vendor copying a command
@@ -103,7 +101,7 @@ export default async function DocsPage() {
 					<Section n={1} id="install" title="Install">
 						<p>
 							There is no Letterprove login. Letterstory is the identity authority for both
-							products, so your account, your key, your customers and your consent links all live in
+							products, so your account, your key and your customers all live in
 							the Proofs tab there, and everything below is reached from it. This site publishes the
 							proof; it does not hold a session of yours.
 						</p>
@@ -418,22 +416,21 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 						</p>
 
 						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-							Two tiers are not capped by your assertion
+							Tier 3 is not capped by your assertion
 						</h3>
 						<p>
-							<strong>Tier 4 short-circuits everything.</strong> If the customer has counter-signed,
-							the claim is tier 4 before the domain and observation gates are even reached. That is
-							the entire point of it: a counter-signature does not travel through the vendor&apos;s
-							domain, script or pipeline, which is what makes it the one tier a vendor cannot forge.
-							Capping it by a vendor-set number would be capping the one piece of evidence that did
-							not come from the vendor.
+							<strong>Tier 3 is read from a third party&apos;s ledger</strong> rather than from
+							anything you typed, so a vendor understating their own tier does not suppress it. It
+							still sits below the observation and domain gates, because money proves a commercial
+							relationship and not that the product was used.
 						</p>
 						<p>
-							<strong>Tier 3 is not capped either</strong>, for the same reason: it is read from a
-							third party&apos;s ledger rather than from anything you typed. A vendor understating
-							their own tier should not suppress that. Tier 3 still sits below the observation and
-							domain gates, because money proves a commercial relationship and not that the product
-							was used.
+							<strong>Tier 3 is the top of the ladder.</strong> Letterprove attests from two
+							things a vendor cannot fake cheaply: control of their domain, proven by a DNS TXT
+							record, and their own live Stripe ledger. Tier 4, a customer counter-signature
+							collected by emailing the customer, was retired on 2026-10-12. Letterprove does not
+							contact a vendor&apos;s customers. Documents signed before then may still carry tier 4
+							and still verify; read them no higher than tier 3.
 						</p>
 
 						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">What tier 3 actually requires</h3>
@@ -527,48 +524,12 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 							Everything below follows from taking that seriously.
 						</p>
 
-						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-							Tier 4: the customer counter-signs
-						</h3>
+						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">You hold the consent</h3>
 						<p>
-							You generate a consent link from the Proofs tab and give us the address to send it to.
-							That address <strong>must be on the customer&apos;s own domain</strong>, the exact
-							domain or a subdomain of it. A sibling domain is refused: it looks equivalent to a
-							human and is a completely different registration, which is precisely the substitution
-							the check exists to catch. The domain is read from the customer record, never from the
-							request, so a vendor cannot supply both sides of the comparison.
-						</p>
-						<p>
-							<strong>You never receive the token.</strong> The link goes to the customer and the
-							customer alone. Before that rule existed, a vendor could open the link themselves, and
-							because a counter-signature outranks every other gate, that published the strongest
-							tier in the system with nothing behind it.
-						</p>
-						<p>
-							The link stays live for seven days. Generating a new one invalidates the previous one,
-							which is how you replace a link that went to the wrong inbox or expired. The customer
-							sees the exact usage summary that will be published, and approves or declines it.
-						</p>
-						<p>
-							Approving sets consent to named and records the counter-signature together, in one
-							act, because reviewing and approving your own attestation is both the strongest
-							evidence in the system and the actual consent to be named. Nothing in the
-							vendor-facing API can write those fields; only the customer&apos;s own response to
-							that link can.
-						</p>
-
-						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">Declining is remembered</h3>
-						<p>
-							A decline publishes nothing and kills the link. It is also recorded, with a count, and
-							it blocks a re-ask for {COOLDOWN_DAYS} days. A customer here has no account, no
-							dashboard and no other way to object, so a decline that could be ignored instantly was
-							not really a decline. It is not permanent either: the record stays visible afterwards,
-							it just stops blocking. The cooldown is checked before the recipient address is, so
-							probing addresses during one tells you nothing.
-						</p>
-						<p>
-							The decline is visible to you, which is the point. &ldquo;They said no&rdquo; and
-							&ldquo;the email never arrived&rdquo; look identical otherwise.
+							Marking a customer as named is your statement that you have their permission to be
+							identified publicly (see the terms). Letterprove does not contact your customers to
+							check it. Naming changes only whether their name appears; it never raises the tier,
+							which still comes from observation, your domain proof and your Stripe ledger.
 						</p>
 
 						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">Withdrawal takes effect</h3>

@@ -180,11 +180,7 @@ export function classifyRow(
 			detail: "record exists; contributes to the aggregate but is not named",
 		};
 	}
-	// Countersignature is tier-4 evidence in its own right (earned()'s own
-	// first, unconditional check) — a named customer who countersigned is
-	// published regardless of observation, or this status would contradict
-	// the earnedTier computed two lines above from the same fact.
-	if (!observed && !customer.countersignedAt) {
+	if (!observed) {
 		return { ...base, status: "no-observation", detail: "named, but nothing observed to earn a tier" };
 	}
 	return {

@@ -38,14 +38,6 @@ const customer = z.object({
 	verified: z.boolean(),
 	features: z.array(z.string()),
 	consent,
-	countersigned_at: z
-		.string()
-		.nullable()
-		.describe("When the customer counter-signed — the tier-4 evidence a vendor cannot forge."),
-	consent_sent_to: z.string().nullable().describe("Where a live consent link went, or null if none is outstanding."),
-	countersigned_by: z.string().nullable().describe("Which address approved. Recorded for audit; never published."),
-	consent_declined_at: z.string().nullable().describe("When they last declined. Blocks re-asking for 30 days."),
-	consent_decline_count: z.number().int().describe("How many times. One 'not now' reads differently from four."),
 });
 
 /** promoteDomain's success shape, returned by both promotion tools. */
@@ -86,7 +78,7 @@ export const getProofSummaryOutput = z.object({
 	slug: z.string().describe("Used to build the public proof URL."),
 	tier: z.number().int(),
 	tier_name: z.string().describe("What the tier means, so a caller need not carry its own ladder."),
-	attested_customers: z.number().int().describe("Counter-signed only. A customer record alone does not count."),
+	attested_customers: z.number().int().describe("Customers whose current attestation is verified by evidence. A customer record alone does not count."),
 	companies_observed: z.number().int(),
 	sessions_30d: z.number().int(),
 	last_attested: z.string().nullable(),
@@ -216,36 +208,12 @@ export const updateCustomerInput = z.object({
 	consent: consent.optional(),
 	features: z.array(z.enum(FEATURES as unknown as [string, ...string[]])).optional(),
 });
-export const updateCustomerOutput = z.object({
-	customer,
-	countersignature_cleared: z
-		.boolean()
-		.describe(
-			"True when this update discarded a tier-4 counter-signature. Name and domain are what the customer approved, so changing either voids it. Re-earning one needs the customer to act again, and a decline blocks the next ask for 30 days.",
-		),
-	pending_consent_cleared: z
-		.boolean()
-		.describe(
-			"True when this update invalidated a consent link that was still live. It was minted against the old name and domain, so an approval on it would land on a claim its approver never saw.",
-		),
-});
+export const updateCustomerOutput = z.object({ customer });
 
 export const deleteCustomerInput = z.object({ slug: z.string().min(1) });
 export const deleteCustomerOutput = z
 	.object({ deleted: z.literal(true) })
 	.describe("This seam always answers with JSON, so an empty success is a flag rather than a 204.");
-
-export const requestConsentInput = z.object({
-	slug: z.string().min(1),
-	contact_email: z
-		.string()
-		.min(1)
-		.describe("Must be on the customer's own domain. That binding is what makes approval evidence."),
-});
-export const requestConsentOutput = z.object({
-	sentTo: z.string().describe("Where it went. The link itself is never returned to the caller."),
-	expiresAt: z.string(),
-});
 
 export const recordObservedInput = z.object({
 	domain: z.string().min(1).describe("Must already be observed for this vendor; promotion cannot invent evidence."),

@@ -374,8 +374,8 @@ function CustomerCard({ proof, vendor }: { proof: CustomerProof; vendor: string 
 			</div>
 
 			{/* The domain, not only the name. Both are vendor-chosen and unrelated
-			    to each other, and the domain is what the evidence is joined on and
-			    what a tier-4 counter-signature was mailed to. A card showing only
+			    to each other, and the domain is what the evidence (observed sessions,
+			    Stripe invoices) is joined on. A card showing only
 			    the name gives a reader no way to tell a real customer from a
 			    lookalike registered on a domain the vendor owns. */}
 			<p className="mt-1 font-mono text-sm text-fog">{a.customer_domain}</p>
