@@ -505,3 +505,38 @@ export const getReadUsageOutput = z.object({
 		tier3_rate_cents: z.number().int(),
 	}),
 });
+
+// ---------------------------------------------------------------- custom domain
+
+/** What a vendor's proof domain looks like right now. One shape for set, check and get. */
+export const customDomainStatus = z.object({
+	domain: z.string().nullable().describe("The proof hostname (e.g. proof.acme.com), or null when none is set."),
+	url: z.string().nullable().describe("https:// URL of the proof page on that hostname."),
+	dns: z
+		.object({ type: z.literal("CNAME"), name: z.string(), value: z.string() })
+		.nullable()
+		.describe("The one record the vendor adds at their DNS provider."),
+	extra_records: z
+		.array(z.object({ type: z.string(), domain: z.string(), value: z.string() }))
+		.describe("Further records Vercel asks for, only when the hostname is claimed by another Vercel account."),
+	configured: z.boolean().describe("DNS points at us."),
+	verified: z.boolean().describe("Vercel accepts the hostname, so it serves it over HTTPS."),
+	published: z.boolean().describe("The vendor's proofs are public. Until they are, the hostname answers 404."),
+	live: z.boolean().describe("configured, verified and published: the page is up on the vendor's domain."),
+	verified_at: z.string().nullable().describe("When we last saw it configured and verified."),
+	message: z.string().describe("One plain sentence on what to do next."),
+});
+
+export const setCustomDomainInput = z.object({
+	domain: z.string().min(1).describe("A subdomain of your verified domain, e.g. proof.acme.com or success.acme.com."),
+});
+export const setCustomDomainOutput = customDomainStatus;
+export const checkCustomDomainInput = empty;
+export const checkCustomDomainOutput = customDomainStatus;
+export const getCustomDomainInput = empty;
+export const getCustomDomainOutput = customDomainStatus;
+export const removeCustomDomainInput = empty;
+export const removeCustomDomainOutput = z.object({
+	removed: z.boolean().describe("False when there was no proof domain to remove."),
+	domain: z.string().nullable().describe("The hostname that stopped serving your proof page."),
+});
