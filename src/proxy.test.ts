@@ -58,6 +58,20 @@ describe("proxy — a vendor's own proof domain", () => {
 		expect(res!.status).toBe(404);
 	});
 
+	it("serves only that vendor's documents on its domain, never another vendor's", async () => {
+		const { proxy: p } = await freshProxy({ "proof.acme.com": "acme" });
+		const get = (path: string) => p(new NextRequest(`https://proof.acme.com${path}`, { headers: { host: "proof.acme.com" } }));
+		expect(await get("/attest/acme.json")).toBeUndefined();
+		expect(await get("/verify/acme/20261012T160507661Z")).toBeUndefined();
+		expect(await get("/keys")).toBeUndefined();
+		expect((await get("/attest/rival.json"))!.status).toBe(404);
+		expect((await get("/proofs/rival"))!.status).toBe(404);
+		expect((await get("/admin"))!.status).toBe(404);
+		const docs = await get("/docs");
+		expect(docs!.status).toBe(308);
+		expect(docs!.headers.get("location")).toBe("https://app.letterprove.com/docs");
+	});
+
 	it("leaves our own root alone", async () => {
 		const { proxy: p } = await freshProxy({});
 		expect(await p(new NextRequest("https://app.letterprove.com/", { headers: { host: "app.letterprove.com" } }))).toBeUndefined();

@@ -29,11 +29,21 @@ export async function proxy(request: NextRequest) {
 	// An unknown or unpublished host answers 404 rather than our home page, so a
 	// hostname can't confirm who has installed us. See lib/vendors/custom-domain.ts.
 	const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
-	if (pathname === "/" && host && !isOwnHost(host)) {
+	if (host && !isOwnHost(host)) {
 		const slug = await slugForCustomDomain(host.split(":")[0]);
 		if (!slug) return new NextResponse("Not found", { status: 404 });
-		const target = prefersJson(request.headers.get("accept")) ? `/api/proofs/${slug}` : `/proofs/${slug}`;
-		return NextResponse.rewrite(new URL(target, request.url));
+		if (pathname === "/") {
+			const target = prefersJson(request.headers.get("accept")) ? `/api/proofs/${slug}` : `/proofs/${slug}`;
+			return NextResponse.rewrite(new URL(target, request.url));
+		}
+		// Only this vendor's own documents, and the shared pages a reader needs to
+		// check them. Without this, proof.acme.com/attest/rival.json served a
+		// rival's proof from Acme's domain.
+		if (SHARED_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+			// Letterprove's own pages, linked from the page chrome: sent home, not served as the vendor's.
+			return NextResponse.redirect(`https://app.letterprove.com${pathname}`, 308);
+		}
+		if (!servesOnCustomDomain(pathname, slug)) return new NextResponse("Not found", { status: 404 });
 	}
 
 	const match = pathname.match(/^\/proofs\/([^/]+)$/);
@@ -48,6 +58,25 @@ export async function proxy(request: NextRequest) {
 	}
 }
 
+/** Letterprove's own pages, which a custom domain redirects to app.letterprove.com. */
+const SHARED_PAGES = ["/docs", "/privacy", "/terms"];
+
+/**
+ * What a vendor's custom domain may serve besides its root: its own proof page,
+ * attestations, chains and verify pages, plus the shared keys, discovery and
+ * framework assets those pages load.
+ */
+function servesOnCustomDomain(pathname: string, slug: string): boolean {
+	const own = [`/proofs/${slug}`, `/attest/${slug}`, `/verify/${slug}`, `/api/proofs/${slug}`];
+	if (own.some((p) => pathname === p || pathname.startsWith(`${p}/`) || pathname.startsWith(`${p}.`))) return true;
+	return (
+		pathname.startsWith("/_next/") ||
+		pathname.startsWith("/.well-known/") ||
+		pathname.startsWith("/api/well-known/") ||
+		["/keys", "/verify", "/favicon.ico", "/icon.png", "/apple-icon.png", "/logo.svg", "/robots.txt"].includes(pathname)
+	);
+}
+
 /**
  * Browsers send `text/html,...,*\/*`, so a bare wildcard must NOT count as
  * asking for JSON — that would serve raw documents to people. Only an explicit
@@ -59,4 +88,6 @@ function prefersJson(accept: string | null): boolean {
 	return lower.includes("application/json") && !lower.includes("text/html");
 }
 
-export const config = { matcher: ["/", "/proofs/:path*"] };
+// Every path, so a custom domain can be held to its own vendor's pages. On our
+// own hosts everything but /proofs returns immediately, without a lookup.
+export const config = { matcher: ["/((?!_next/static|_next/image).*)"] };
