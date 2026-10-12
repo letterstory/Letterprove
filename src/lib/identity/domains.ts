@@ -189,6 +189,11 @@ function isInternal(domain: string): boolean {
 	return false;
 }
 
+/** Whether a domain is one of the Letter Company's own, at any depth — the same list the classifier reads. */
+export function isLetterCompanyDomain(domain: string): boolean {
+	return isInternal(normalise(domain));
+}
+
 /**
  * TLDs reserved by RFC 2606 / RFC 6761 for documentation and testing. Real
  * mail never originates from one, so anything arriving under them is a

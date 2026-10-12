@@ -30,6 +30,7 @@ import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installSnippet } from "@/lib/vendors/install";
+import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
 import { generateKey } from "@/lib/vendors/keys";
 import { sendSupportMessage } from "@/lib/support/slack";
 import { sendConsentRequest } from "@/lib/email/consent";
@@ -720,7 +721,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "get_install_snippet",
-		description: "The <script> tag to install on the caller's site, pointed at this server's own origin. Args: none.",
+		description: "The <script> tag to install on the caller's site, pointed at this server's own origin, and the \"Attested and proven by Letterprove\" footer badge (show it only when badge.live — before publishing its link is a 404). Args: none.",
 		capability: "vendor:read",
 		inputSchema: S.getInstallSnippetInput,
 		outputSchema: S.getInstallSnippetOutput,
@@ -734,7 +735,7 @@ export const TOOLS: BoundTool[] = [
 			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const { data: vendor } = await db.from("vendors").select("key").eq("id", vendorId).maybeSingle();
+			const { data: vendor } = await db.from("vendors").select("key, slug, proofs_published_at").eq("id", vendorId).maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
 			// publishable_key is returned alongside the snippet rather than left
 			// for the caller to recover. Letterstory was regex-ing it back out of
@@ -748,6 +749,14 @@ export const TOOLS: BoundTool[] = [
 					snippet: installSnippet(context.origin, vendor.key),
 					origin: context.origin,
 					publishable_key: vendor.key,
+					// The footer badge rides the same call: it is the other thing a
+					// vendor pastes into their site. `live` is false until the vendor
+					// publishes, because until then the page it links to is a 404.
+					badge: {
+						html: badgeHtml(context.origin, vendor.slug),
+						href: proofPageUrl(context.origin, vendor.slug),
+						live: Boolean(vendor.proofs_published_at),
+					},
 				},
 			};
 		},

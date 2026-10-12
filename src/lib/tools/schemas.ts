@@ -129,6 +129,13 @@ export const getInstallSnippetOutput = z.object({
 	snippet: z.string().describe("Pointed at the origin actually serving this request, never a stored host."),
 	origin: z.string(),
 	publishable_key: z.string().describe("Ships in the page's HTML by design. Not a secret."),
+	badge: z
+		.object({
+			html: z.string().describe("Self-contained footer link: \"Attested and proven by Letterprove\". Loads nothing; inherits the footer's colour."),
+			href: z.string().describe("The vendor's public proof page."),
+			live: z.boolean().describe("True once the vendor is published. Before that the proof page is a 404, so do not show the badge."),
+		})
+		.describe("The footer badge a vendor adds to their site once published."),
 });
 
 export const rotateKeyInput = empty;

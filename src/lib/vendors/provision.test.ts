@@ -66,6 +66,16 @@ describe("provisionVendorForOrg", () => {
 		expect(typeof row.key).toBe("string");
 	});
 
+	it("discloses a shared owner from creation for a vendor on one of our own domains", async () => {
+		insert.mockResolvedValue({ error: null });
+		await provisionVendorForOrg(ORG, { name: "letter.dev", domain: "letter.dev" });
+		expect(insert.mock.calls[0][0]).toMatchObject({ issuer_affiliation: "Letter Company" });
+
+		insert.mockClear();
+		await provisionVendorForOrg(ORG, { name: "Acme", domain: "acme.com" });
+		expect(insert.mock.calls[0][0]).toMatchObject({ issuer_affiliation: null });
+	});
+
 	it("retries once on a slug conflict, then succeeds", async () => {
 		insert.mockResolvedValueOnce({ error: { code: "23505" } }).mockResolvedValueOnce({ error: null });
 		const r = await provisionVendorForOrg(ORG, { name: "Acme", domain: "acme.com" });
