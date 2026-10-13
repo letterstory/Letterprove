@@ -93,6 +93,24 @@ export default function PrivacyPage() {
           <em>company</em>, which is the entire point of the product.
         </p>
         <p>
+          <strong>One exception, for automated visitors only.</strong> When the
+          visitor is an AI agent or an automated browser (the browser says it
+          is automated, or its user-agent names an agent), the script sends one
+          extra message with the page path, without its query string. A vendor
+          can also have its own server forward the same for agents that never
+          run scripts. We keep a daily count per agent and path for that
+          vendor, and no IP address or raw user-agent. People browsing normally
+          never trigger it.
+        </p>
+        <p>
+          <strong>If a vendor connects PostHog</strong>, we read, with a
+          read-only key the vendor supplies, which company email domains the
+          vendor&apos;s own PostHog project has identified people from, since
+          when, and how active each was in the last 30 days. The split from
+          address to domain happens inside PostHog, so no address, name or
+          person identifier reaches us. We never send anything to PostHog.
+        </p>
+        <p>
           <strong>If a vendor connects Stripe</strong>, we read invoices and
           customer records from the vendor&apos;s own Stripe account, with a
           read-only key the vendor supplies. Those records include the billing
