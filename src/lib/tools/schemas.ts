@@ -744,12 +744,12 @@ export const getAgentVisitsOutput = z.object({
 const tracking = z
 	.enum(["off", "active", "pending_registration"])
 	.describe(
-		"off: not turned on. active: attest.js loads the Maverick pixel and visitors are being identified. pending_registration: turned on, but the domain isn't registered with Maverick yet, so nobody is identified.",
+		"off: not turned on. active: attest.js loads the visitor identification pixel and visitors are being identified. pending_registration: turned on, but the domain isn't registered for visitor identification yet, so nobody is identified.",
 	);
 export const visitorIdentificationStatus = z.object({
 	enabled: z.boolean().describe("Whether the vendor turned visitor identification on."),
 	tracking,
-	registered_domains: z.array(z.string()).describe("Hosts this feature registered with Maverick."),
+	registered_domains: z.array(z.string()).describe("Hosts registered for visitor identification."),
 	message: z.string(),
 });
 export const setVisitorIdentificationInput = z.object({
@@ -786,14 +786,14 @@ const visitorCompany = z.object({
 export const getVisitorsOutput = z.object({
 	enabled: z.boolean(),
 	tracking,
-	configured: z.boolean().describe("Whether this deployment can read from Maverick at all."),
+	configured: z.boolean().describe("Whether this deployment can read identified visitors at all."),
 	window_days: z.number(),
 	error: z
 		.object({ reason: z.enum(["forbidden", "failed"]), message: z.string() })
 		.nullable()
 		.describe("Why the live pull failed, when it did. Null on success."),
 	companies: z.array(visitorCompany).describe("One row per visiting company, most people first. Private: never published."),
-	visitors: z.array(visitorPerson).describe("Identified people, newest first. Pulled live from Maverick; Letterprove stores none of it."),
+	visitors: z.array(visitorPerson).describe("Identified people, newest first. Pulled live from the identification provider; Letterprove stores none of it."),
 	total: z.number().describe("Identified people in the window before `limit` applied."),
 });
 
@@ -843,7 +843,7 @@ export const clearLogoWallOutput = z.object({ cleared: z.literal(true).describe(
 const scriptModules = z.object({
 	proofs: z.boolean().describe("Sign-ins observed by the script: the evidence behind your proof."),
 	agent_visitors: z.boolean().describe("AI agents and crawlers reading your site, counted privately."),
-	human_visitors: z.boolean().describe("People and companies visiting your site, identified by Maverick. Needs a verified domain."),
+	human_visitors: z.boolean().describe("People and companies visiting your site, identified by visitor identification. Needs a verified domain."),
 });
 
 export const getScriptInput = empty;

@@ -979,10 +979,10 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
             </h3>
             <p>
               Turn on <strong>Identify visitors</strong> and the same script
-              also loads the Maverick Intelligence pixel on your site, so the 
+              also loads a visitor identification pixel on your site, so the 
               <strong>Who visits your site</strong> panel can show the people
               and companies visiting. It is off by default and needs a verified
-              domain. Visitors are fetched from Maverick when you open the
+              domain. Visitors are fetched from our identification provider when you open the
               panel; Letterprove stores none of it, and it never appears on
               your proof. Identifying visitors is processing of your
               visitors&apos; data, so mention it in your own privacy policy

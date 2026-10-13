@@ -103,7 +103,7 @@ async function request<T>(
 				await new Promise((r) => setTimeout(r, RETRY_AFTER_MS[attempt]));
 				continue;
 			}
-			return { ok: false, reason: "failed", message: `Maverick ${path} failed: ${lastError}` };
+			return { ok: false, reason: "failed", message: `Visitor identification request failed: ${lastError}` };
 		}
 
 		if (res.ok) return { ok: true, data: (await res.json()) as T };
@@ -111,15 +111,15 @@ async function request<T>(
 		const detail = await res.text().catch(() => "");
 		lastError = `${res.status}: ${detail.slice(0, 200) || res.statusText}`;
 		if (res.status === 401 || res.status === 403) {
-			return { ok: false, reason: "forbidden", message: `Maverick rejected the ${init.key} API key` };
+			return { ok: false, reason: "forbidden", message: `The visitor identification provider rejected the ${init.key} API key` };
 		}
 		if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS - 1) {
 			await new Promise((r) => setTimeout(r, RETRY_AFTER_MS[attempt]));
 			continue;
 		}
-		return { ok: false, reason: "failed", message: `Maverick ${path} failed (${lastError})` };
+		return { ok: false, reason: "failed", message: `Visitor identification request failed (${lastError})` };
 	}
-	return { ok: false, reason: "failed", message: `Maverick ${path} failed after ${MAX_ATTEMPTS} attempts (${lastError})` };
+	return { ok: false, reason: "failed", message: `Visitor identification request failed after ${MAX_ATTEMPTS} attempts (${lastError})` };
 }
 
 /** GET /v1/people — identified visitors, newest activity first. */
