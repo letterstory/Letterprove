@@ -43,11 +43,16 @@ import { sendSupportMessage } from "@/lib/support/slack";
 import {
 	saveCredential,
 	connectionFor,
+	credentialFor,
+	classifyKey,
+	setProductScope,
 	disconnect as disconnectStripeCredential,
 	type KeyRejection,
 	type StripeConnection,
 } from "@/lib/stripe/credentials";
 import { syncVendorPayments } from "@/lib/stripe/sync";
+import { checkStripeAccount, overrideOf } from "@/lib/stripe/account";
+import { fetchProducts } from "@/lib/stripe/fetch";
 import { paymentEvidenceCount } from "@/lib/attest/payment-evidence";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
@@ -191,11 +196,11 @@ const KEY_REFUSAL: Record<KeyRejection | "not_configured" | "storage_unavailable
 	unrestricted: {
 		status: 400,
 		detail:
-			"That is an unrestricted secret key (sk_). It can refund your customers, and publishing proof never needs that. Create a restricted key (rk_) with read access to Subscriptions, Customers and Invoices instead. Nothing was stored.",
+			"That is an unrestricted secret key (sk_). It can refund your customers, and publishing proof never needs that. Create a restricted key (rk_) with read access to Subscriptions, Invoices and Accounts instead. Nothing was stored.",
 	},
 	publishable: {
 		status: 400,
-		detail: "That is a publishable key (pk_). It cannot read subscriptions at all. Create a restricted key (rk_) with read access to Subscriptions, Customers and Invoices instead. Nothing was stored.",
+		detail: "That is a publishable key (pk_). It cannot read subscriptions at all. Create a restricted key (rk_) with read access to Subscriptions, Invoices and Accounts instead. Nothing was stored.",
 	},
 	malformed: {
 		status: 400,
@@ -223,7 +228,27 @@ function stripeConnectionBody(connection: StripeConnection, evidenceDomains: num
 		last_synced_at: connection.lastSyncedAt,
 		last_sync_error: connection.lastSyncError,
 		evidence_domains: evidenceDomains,
+		product_scope: {
+			mode: connection.productIds.length > 0 ? ("selected" as const) : ("all_products" as const),
+			product_ids: connection.productIds,
+		},
+		account: connection.stripeAccountId
+			? { id: connection.stripeAccountId, domains: connection.stripeAccountDomains, checked_at: connection.accountCheckedAt }
+			: null,
 	};
+}
+
+/** Why the account behind a key was refused, as a tool answers it. */
+const ACCOUNT_REFUSAL_STATUS = {
+	stripe_account_permission_missing: 400,
+	stripe_account_domain_mismatch: 409,
+	stripe_account_unreadable: 502,
+} as const;
+
+function productIdsArg(value: unknown): string[] | null {
+	if (value === undefined) return null;
+	const parsed = S.setStripeScopeInput.shape.product_ids.safeParse(value);
+	return parsed.success ? [...new Set(parsed.data)].sort() : null;
 }
 
 export const TOOLS: BoundTool[] = [
@@ -1026,7 +1051,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "connect_stripe",
 		description:
-			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key, which needs read access to Subscriptions, Customers and Invoices. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
+			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key, which needs read access to Subscriptions, Invoices and Accounts; product_ids (optional) — the Stripe products that are this product, when the account bills several. The Stripe account must be the vendor's own: one of the domains it publishes (business website, support email) has to share the vendor's verified domain, or the key is refused. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
 		capability: "vendor:write",
 		inputSchema: S.connectStripeInput,
 		outputSchema: S.connectStripeOutput,
@@ -1045,7 +1070,27 @@ export const TOOLS: BoundTool[] = [
 				return { ok: false, status: 400, body: { error: "restricted_key is required" } };
 			}
 
-			const saved = await saveCredential(vendorId, submitted);
+			const productIds = record.product_ids === undefined ? undefined : productIdsArg(record.product_ids);
+			if (productIds === null) {
+				return { ok: false, status: 400, body: { error: "invalid_product_ids", detail: "product_ids must be Stripe product ids (prod_…)." } };
+			}
+
+			// Refuse the obvious key mistakes before any network call, so an sk_
+			// key is never sent anywhere, even to Stripe.
+			const classified = classifyKey(submitted);
+			if (!classified.ok) {
+				const refusal = KEY_REFUSAL[classified.reason];
+				return { ok: false, status: refusal.status, body: { error: classified.reason, detail: refusal.detail } };
+			}
+
+			// The ledger has to be this vendor's before it is stored at all: a key
+			// for someone else's account is refused, not kept and quietly ignored.
+			const account = await checkStripeAccount(classified.key, vendorId);
+			if (!account.ok) {
+				return { ok: false, status: ACCOUNT_REFUSAL_STATUS[account.error], body: { error: account.error, detail: account.detail } };
+			}
+
+			const saved = await saveCredential(vendorId, submitted, { productIds, account: account.account });
 			if (!saved.ok) {
 				const refusal = KEY_REFUSAL[saved.reason];
 				return { ok: false, status: refusal.status, body: { error: saved.reason, detail: refusal.detail } };
@@ -1135,6 +1180,134 @@ export const TOOLS: BoundTool[] = [
 					// the vendor ever learns about it.
 					...(result.scopeWarning ? { scope_warning: result.scopeWarning } : {}),
 				},
+			};
+		},
+	}),
+	defineTool({
+		name: "list_stripe_products",
+		description:
+			"The products in the caller's vendor's connected Stripe account, with whether each has a recurring price, and the current product scope. No args. Use it to choose product_ids for set_stripe_scope when the account bills more than one product.",
+		capability: "vendor:read",
+		inputSchema: S.listStripeProductsInput,
+		outputSchema: S.listStripeProductsOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const credential = await credentialFor(vendorId);
+			if (!credential) {
+				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first with connect_stripe." } };
+			}
+			const listed = await fetchProducts(credential.key);
+			if (!listed.ok) return { ok: false, status: 502, body: { error: "stripe_read_failed", detail: listed.error } };
+			return {
+				ok: true,
+				body: {
+					products: listed.products,
+					names_available: listed.namesAvailable,
+					product_scope: {
+						mode: credential.productIds.length > 0 ? ("selected" as const) : ("all_products" as const),
+						product_ids: credential.productIds,
+					},
+				},
+			};
+		},
+	}),
+	defineTool({
+		name: "set_stripe_scope",
+		description:
+			"Choose which Stripe products are this product, so payments for the account's other products stop corroborating customers. Args: product_ids (Stripe product ids; an empty list means every product counts). Takes effect at the next sync — run sync_stripe_payments to apply it now.",
+		capability: "vendor:write",
+		inputSchema: S.setStripeScopeInput,
+		outputSchema: S.setStripeScopeOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+
+			const productIds = productIdsArg(asRecord(args).product_ids ?? null);
+			if (productIds === null) {
+				return { ok: false, status: 400, body: { error: "invalid_product_ids", detail: "product_ids must be a list of Stripe product ids (prod_…)." } };
+			}
+			if (!(await connectionFor(vendorId))) {
+				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first with connect_stripe." } };
+			}
+			if (!(await setProductScope(vendorId, productIds))) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const connection = await connectionFor(vendorId);
+			if (!connection) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: stripeConnectionBody(connection, await paymentEvidenceCount(vendorId)) };
+		},
+	}),
+	defineTool({
+		name: "set_stripe_account_override",
+		description:
+			"Staff only. Approve a vendor's Stripe account whose published domains don't match the vendor's verified domain (e.g. a parent company billing for a subsidiary), or clear that approval. Args: vendor (slug), reason (required when setting), stripe_account_id (optional — defaults to the account behind the vendor's connected key), clear (optional). The approval covers that one account only.",
+		capability: "staff:write",
+		inputSchema: S.setStripeAccountOverrideInput,
+		outputSchema: S.setStripeAccountOverrideOutput,
+		// Staff tools act across vendors by slug, not principal.vendorId.
+		handler: async (args, principal) => {
+			const record = asRecord(args);
+			const slug = typeof record.vendor === "string" ? record.vendor.trim() : "";
+			if (!slug) return { ok: false, status: 400, body: { error: "vendor is required" } };
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const { data: vendor } = await db.from("vendors").select("id, slug").eq("slug", slug).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+
+			if (record.clear === true) {
+				const { error } = await db
+					.from("vendors")
+					.update({
+						stripe_account_override_account_id: null,
+						stripe_account_override_at: null,
+						stripe_account_override_by: null,
+						stripe_account_override_reason: null,
+					})
+					.eq("id", vendor.id);
+				if (error) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+				return { ok: true, body: { vendor: vendor.slug, override: null } };
+			}
+
+			const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+			if (reason.length < 10) {
+				return { ok: false, status: 400, body: { error: "reason_required", detail: "Say why this account may corroborate a vendor on a different domain (at least 10 characters)." } };
+			}
+			let accountId = typeof record.stripe_account_id === "string" ? record.stripe_account_id.trim() : "";
+			if (!accountId) {
+				const connection = await connectionFor(vendor.id);
+				accountId = connection?.stripeAccountId ?? "";
+			}
+			if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+				return {
+					ok: false,
+					status: 409,
+					body: { error: "account_unknown", detail: "No Stripe account has been read for this vendor yet. Pass stripe_account_id, or have the vendor connect a key with Accounts read first." },
+				};
+			}
+
+			const at = new Date().toISOString();
+			const { error } = await db
+				.from("vendors")
+				.update({
+					stripe_account_override_account_id: accountId,
+					stripe_account_override_at: at,
+					stripe_account_override_by: principal.userId ?? null,
+					stripe_account_override_reason: reason,
+				})
+				.eq("id", vendor.id);
+			if (error) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+
+			const saved = overrideOf({
+				stripe_account_override_account_id: accountId,
+				stripe_account_override_at: at,
+				stripe_account_override_by: principal.userId ?? null,
+				stripe_account_override_reason: reason,
+			})!;
+			return {
+				ok: true,
+				body: { vendor: vendor.slug, override: { stripe_account_id: saved.accountId, at: saved.at, by: saved.by, reason: saved.reason } },
 			};
 		},
 	}),

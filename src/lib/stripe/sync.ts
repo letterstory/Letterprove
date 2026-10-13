@@ -29,10 +29,20 @@
  *      control. Consecutive failures are counted, the count clears the rows
  *      once it passes the threshold, and `last_synced_at` now means what it
  *      says: the last time a sync actually succeeded.
+ *
+ *   4. THE ACCOUNT HAS TO BE THE VENDOR'S. Read on every sync, because the key
+ *      can be swapped for one from another account at any time (account.ts).
+ *      A failure here clears evidence at once rather than after the failure
+ *      threshold: it is not Stripe being briefly unreachable, it is a ledger
+ *      that does not belong to this vendor, and nothing it says is evidence.
+ *
+ *   5. ONLY THE VENDOR'S CHOSEN PRODUCTS COUNT. One Stripe account often bills
+ *      several products; the scope decides which money is this product's.
  */
 
 import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
+import { checkStripeAccount, recordAccount } from "./account";
 import { credentialFor } from "./credentials";
 import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
 import { mapPayments } from "./map";
@@ -53,7 +63,7 @@ const FAILURES_BEFORE_CLEARING = 3;
 
 /** What the vendor is told when their restricted key predates the invoice read. */
 const SCOPE_HELP =
-	"Your Stripe restricted key cannot read Invoices, and payment evidence now requires an invoice that actually settled. Add read access to Invoices on the key in Stripe, then sync again.";
+	"Your Stripe restricted key cannot read Invoices, and payment evidence requires an invoice that actually settled. Add read access to Invoices on the key in Stripe, then sync again.";
 
 export type SyncResult =
 	| {
@@ -79,6 +89,23 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 
 	const credential = await credentialFor(vendorId);
 	if (!credential) return { ok: false, error: "No Stripe key connected." };
+
+	const account = await checkStripeAccount(credential.key, vendorId);
+	if (account.ok || account.account) await recordAccount(vendorId, account.ok ? account.account : account.account!);
+	if (!account.ok) {
+		// Unreachable is an ordinary failure, counted toward the threshold like
+		// any other. A permission gap or a foreign account is not transient:
+		// nothing this ledger says is evidence for this vendor, so it goes now.
+		if (account.error === "stripe_account_unreadable") return recordFailure(vendorId, account.detail);
+		await clearEvidence(vendorId);
+		// A test key stores nothing whatever it reads, so its wiring problems
+		// travel back as a warning instead of paging anyone (see below).
+		if (!credential.livemode) {
+			await recordSuccess(vendorId, new Date().toISOString());
+			return { ok: true, matched: 0, unmatched: 0, testMode: true, truncated: false, scopeWarning: account.detail };
+		}
+		return recordFailure(vendorId, account.detail);
+	}
 
 	const fetched = await fetchSubscriptions(credential.key);
 	if (!fetched.ok) return recordFailure(vendorId, fetched.error);
@@ -122,6 +149,7 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	const { data: vendorRow } = await db.from("vendors").select("domain").eq("id", vendorId).maybeSingle();
 	const mapping = mapPayments(fetched.subscriptions, observed, invoices.payments, {
 		vendorDomain: vendorRow?.domain,
+		productScope: new Set(credential.productIds),
 	});
 
 	const syncedAt = new Date().toISOString();

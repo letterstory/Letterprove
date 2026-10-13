@@ -105,7 +105,11 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 			const orderBys: { col: string; ascending: boolean }[] = [];
 			let mode: "select" | "insert" | "update" | "delete" | "upsert" | null = null;
 			let selectCols = "*";
-			let returningCols = "id";
+			// `*` rather than `id`: an update with no .select() returns nothing
+			// through supabase-js whatever the table's columns, and tables keyed on
+			// something else (vendor_stripe_credentials is keyed on vendor_id)
+			// would otherwise fail here where they succeed in production.
+			let returningCols = "*";
 			let insertRows: Record<string, unknown>[] | undefined;
 			let updatePatch: Record<string, unknown> | undefined;
 			let upsertRow: Record<string, unknown> | undefined;

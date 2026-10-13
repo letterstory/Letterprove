@@ -8,10 +8,10 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 // The ONE faked boundary, and it is not Postgres: fetch.ts is an HTTP call to
 // Stripe, already covered by its own tests. Everything downstream — mapping,
 // the evidence write, reading it back, and the tier decision — runs for real.
-vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn(), fetchPaidInvoices: vi.fn() }));
+vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn(), fetchPaidInvoices: vi.fn(), fetchAccount: vi.fn() }));
 
 import { syncVendorPayments } from "./sync";
-import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
+import { fetchAccount, fetchPaidInvoices, fetchSubscriptions } from "./fetch";
 import { encryptStripeKey } from "./credentials";
 import { paymentEvidenceFor, paymentEvidenceCount } from "@/lib/attest/payment-evidence";
 import { earned } from "@/lib/attest/body";
@@ -169,36 +169,51 @@ function pgliteSupabase() {
  * map.ts measures against now and a hard-coded date would start failing on
  * whatever day it aged past the window.
  */
-function settled(ids: string[], over: Record<string, unknown> = {}) {
+/** What each test's subscriptions settled with: the frozen billing email and the amount paid. */
+const billed = new Map<string, { email: string | null; amount: number }>();
+
+/**
+ * Money that really settled: one invoice in March 2025 (tenure) and one two
+ * days ago (recency), each carrying the billing email Stripe froze on it.
+ */
+function settled(ids: string[]) {
 	const recent = Math.floor(Date.now() / 1000) - 2 * 24 * 60 * 60;
+	const first = Math.floor(Date.parse("2025-03-05T00:00:00Z") / 1000);
+	const invoice = (id: string, paidAt: number) => {
+		const { email, amount } = billed.get(id) ?? { email: `billing@${PAYING_DOMAIN}`, amount: 250000 };
+		return {
+			id: `in_${id}_${paidAt}`,
+			paidAt,
+			amountPaid: amount,
+			currency: "usd",
+			customerEmail: email,
+			billingReason: "subscription_cycle",
+			lines: [{ product: "prod_probe", net: amount }],
+			linesComplete: true,
+		};
+	};
 	return {
 		ok: true as const,
 		truncated: false,
-		payments: new Map(
-			ids.map((id) => [
-				id,
-				{
-					firstSettledAt: Math.floor(Date.parse("2025-03-05T00:00:00Z") / 1000),
-					lastSettledAt: recent,
-					settledCount: 6,
-					markedPaidCount: 0,
-					...over,
-				},
-			])
-		),
+		payments: new Map(ids.map((id) => [id, { settled: [invoice(id, first), invoice(id, recent)], markedPaidCount: 0 }])),
 	};
 }
 
-function subscription(over: Record<string, unknown> = {}) {
+/**
+ * A subscription. `amount` and `customerEmail` describe what its settled
+ * invoices carry, since that is where the paid amount and billed identity
+ * come from now; they are registered for settled() rather than kept on it.
+ */
+function subscription(over: { id?: string; amount?: number; customerEmail?: string | null; interval?: "month" | "year"; start_date?: number } = {}) {
+	const id = over.id ?? "sub_probe_1";
+	billed.set(id, { email: over.customerEmail === undefined ? `billing@${PAYING_DOMAIN}` : over.customerEmail, amount: over.amount ?? 250000 });
 	return {
-		id: "sub_probe_1",
+		id,
 		status: "active",
-		start_date: Math.floor(Date.parse("2025-03-01T00:00:00Z") / 1000),
+		start_date: over.start_date ?? Math.floor(Date.parse("2025-03-01T00:00:00Z") / 1000),
 		currency: "usd",
-		amount: 250000,
-		interval: "month" as const,
-		customerEmail: `billing@${PAYING_DOMAIN}`,
-		...over,
+		interval: over.interval ?? ("month" as const),
+		productIds: ["prod_probe"],
 	};
 }
 
@@ -250,7 +265,10 @@ afterAll(async () => {
 
 beforeEach(async () => {
 	vi.clearAllMocks();
-	vi.mocked(fetchPaidInvoices).mockResolvedValue(settled(["sub_probe_1"]) as never);
+	billed.clear();
+	// Built at call time: every subscription the test declared has settled.
+	vi.mocked(fetchPaidInvoices).mockImplementation(async () => settled([...billed.keys()]) as never);
+	vi.mocked(fetchAccount).mockResolvedValue({ ok: true, account: { id: "acct_probe", domains: ["tier3-probe.com"] } });
 	const { dbClient } = await import("@/lib/db/client");
 	vi.mocked(dbClient).mockReturnValue(pgliteSupabase() as never);
 	await pg.query("delete from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
@@ -540,5 +558,50 @@ describe("tier 3 publish path, against a real Postgres schema", () => {
 		const { rows } = await pg.query("select * from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
 		expect(rows).toHaveLength(0);
 		expect(await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN)).toBeNull();
+	});
+
+	it("a key from another business's Stripe account writes nothing until staff approve that account", async () => {
+		await setCredential(true);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, subscriptions: [subscription()], truncated: false });
+		vi.mocked(fetchAccount).mockResolvedValue({ ok: true, account: { id: "acct_parent", domains: ["parent-holdings.com"] } });
+
+		const refused = await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+		expect(refused).toMatchObject({ ok: false });
+		expect(await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN)).toBeNull();
+		// What the account said is recorded against the credential, so the
+		// vendor and staff can see why, through the real columns.
+		const { rows: cred } = await pg.query(
+			"select stripe_account_id, stripe_account_domains, last_sync_error from vendor_stripe_credentials where vendor_id = $1",
+			[VENDOR_ID],
+		);
+		expect(cred[0]).toMatchObject({ stripe_account_id: "acct_parent", stripe_account_domains: ["parent-holdings.com"] });
+		expect(String((cred[0] as { last_sync_error: string }).last_sync_error)).toMatch(/parent-holdings\.com/);
+
+		await pg.query(
+			"update vendors set stripe_account_override_account_id = 'acct_parent', stripe_account_override_at = now(), stripe_account_override_reason = 'Parent company bills for this product' where id = $1",
+			[VENDOR_ID],
+		);
+		try {
+			const approved = await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+			expect(approved).toMatchObject({ ok: true, matched: 1 });
+			expect(await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN)).not.toBeNull();
+		} finally {
+			await pg.query(
+				"update vendors set stripe_account_override_account_id = null, stripe_account_override_at = null, stripe_account_override_reason = null where id = $1",
+				[VENDOR_ID],
+			);
+		}
+	});
+
+	it("product scope survives the real text[] column and filters what counts", async () => {
+		await setCredential(true);
+		await pg.query("update vendor_stripe_credentials set product_ids = '{prod_other}' where vendor_id = $1", [VENDOR_ID]);
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, subscriptions: [subscription()], truncated: false });
+
+		const result = await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
+
+		expect(result).toMatchObject({ ok: true, matched: 0, unmatched: 1 });
+		const { rows } = await pg.query("select reason from vendor_payment_unmatched where vendor_id = $1", [VENDOR_ID]);
+		expect(rows).toEqual([{ reason: "out_of_scope" }]);
 	});
 });
