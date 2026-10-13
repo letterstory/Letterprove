@@ -239,6 +239,8 @@ export async function disconnect(vendorId: string): Promise<boolean> {
 	if (cleared.error) return false;
 	const clearedUnmatched = await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
 	if (clearedUnmatched.error) return false;
+	const clearedPayers = await db.from("vendor_stripe_payers").delete().eq("vendor_id", vendorId);
+	if (clearedPayers.error) return false;
 
 	const { error } = await db.from("vendor_stripe_credentials").delete().eq("vendor_id", vendorId);
 	return !error;

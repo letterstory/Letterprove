@@ -98,7 +98,9 @@ describe("publicLogos", () => {
 	it("grades status from evidence alone", () => {
 		expect(statusOf("a.com", new Set(["a.com"]), new Set(["a.com"]))).toBe("paying");
 		expect(statusOf("a.com", new Set(["a.com"]), new Set())).toBe("active");
-		expect(statusOf("a.com", new Set(), new Set(["a.com"]))).toBe("not_observed");
+		// Stripe alone is enough for a logo: managed accounts pay without signing in.
+		expect(statusOf("a.com", new Set(), new Set(["a.com"]))).toBe("paying");
+		expect(statusOf("a.com", new Set(), new Set())).toBe("not_observed");
 	});
 });
 

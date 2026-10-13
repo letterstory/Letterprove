@@ -59,8 +59,7 @@ import {
 	hostCount,
 	observedSince,
 	payingAmong,
-	payingDomainsAmong,
-	reportedHistory,
+	stripePayingDomains, reportedHistory,
 	stripeBinding,
 	type ReportedHistory,
 	type StripeBinding,
@@ -281,7 +280,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 			? publicLogos(
 					await readLogoWall(vendor.id),
 					new Set(attributable),
-					binding ? await payingDomainsAmong(vendor.id, attributable) : new Set<string>(),
+					binding ? await stripePayingDomains(vendor.id) : new Set<string>(),
 				)
 			: null;
 	const now = new Date().toISOString();

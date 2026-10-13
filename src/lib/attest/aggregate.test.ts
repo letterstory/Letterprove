@@ -24,6 +24,7 @@ vi.mock("./vendor-evidence", () => ({
 	observedSince: vi.fn(async () => null),
 	reportedHistory: vi.fn(async () => null),
 	payingDomainsAmong: vi.fn(async () => new Set()),
+	stripePayingDomains: vi.fn(async () => new Set()),
 }));
 vi.mock("@/lib/vendors/logo-wall", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/vendors/logo-wall")>()),
@@ -309,7 +310,7 @@ describe("aggregateBody", () => {
 			const lw = await import("@/lib/vendors/logo-wall");
 			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
 			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
-			vi.mocked(ev.payingDomainsAmong).mockResolvedValueOnce(new Set(["globex.com"]));
+			vi.mocked(ev.stripePayingDomains).mockResolvedValueOnce(new Set(["globex.com"]));
 			vi.mocked(lw.readLogoWall).mockResolvedValueOnce({
 				page_url: "https://lettertrace.com/customers",
 				checked_at: new Date().toISOString(),

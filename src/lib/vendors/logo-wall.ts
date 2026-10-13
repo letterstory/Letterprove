@@ -320,9 +320,14 @@ export async function recheckAllLogoWalls(fetcher: Fetcher = fetch): Promise<{ c
 // ---------------------------------------------------------------- status
 
 /** Status per listed company from the observed and paying domain sets. Pure. */
+/**
+ * "paying" on a settled invoice in the vendor's bound Stripe, whether or not
+ * the company signed in (managed accounts pay without logging in); else
+ * "active" when Letterprove observed it signing in; else "not_observed".
+ */
 export function statusOf(domain: string, observed: ReadonlySet<string>, paying: ReadonlySet<string>): LogoStatus {
-	if (!observed.has(domain)) return "not_observed";
-	return paying.has(domain) ? "paying" : "active";
+	if (paying.has(domain)) return "paying";
+	return observed.has(domain) ? "active" : "not_observed";
 }
 
 export interface PublicLogos {
@@ -334,8 +339,9 @@ export interface PublicLogos {
 }
 
 /**
- * The attestation's `logos` block. Pure. Names ONLY companies that are both on
- * the vendor's page and observed; everything else is a count. Null when there
+ * The attestation's `logos` block. Pure. Names ONLY companies that are on the
+ * vendor's page and either observed signing in or paying through its bound
+ * Stripe; everything else is a count. Null when there
  * is nothing checked recently enough to sign.
  */
 export function publicLogos(

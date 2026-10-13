@@ -104,6 +104,28 @@ export async function payingAmong(vendorId: string, observed: readonly string[])
 }
 
 /**
+ * Every company domain with fresh payment evidence in the vendor's Stripe,
+ * observed or not. For the logo wall only: a company the vendor already shows
+ * publicly may be marked "paying" on Stripe's word alone. Every count on the
+ * proof still uses payingAmong, which joins to observed domains.
+ */
+export async function stripePayingDomains(vendorId: string): Promise<Set<string>> {
+	const db = dbClient();
+	if (!db) return new Set();
+	const floor = new Date(Date.now() - MAX_EVIDENCE_AGE_MS).toISOString();
+	const [evidence, payers] = await Promise.all([
+		db.from("vendor_payment_evidence").select("domain, monthly_amount").eq("vendor_id", vendorId).gte("synced_at", floor),
+		db.from("vendor_stripe_payers").select("domain").eq("vendor_id", vendorId).gte("synced_at", floor),
+	]);
+	const out = new Set<string>();
+	if (!evidence.error && evidence.data) {
+		for (const r of evidence.data as { domain: string; monthly_amount: number | string }[]) if (Number(r.monthly_amount) >= 1) out.add(r.domain);
+	}
+	if (!payers.error && payers.data) for (const r of payers.data as { domain: string }[]) out.add(r.domain);
+	return out;
+}
+
+/**
  * Which of the given observed company domains carry fresh payment evidence.
  * Same rule as payingAmong, returned as domains for the logo check, which
  * names a company only when it is also on the vendor's own public logo wall.
