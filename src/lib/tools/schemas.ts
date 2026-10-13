@@ -881,6 +881,8 @@ const displaySections = z.object({
 	payment_details: z.boolean().describe("The Stripe product scope and the first verified payment date."),
 	observed_since: z.boolean(),
 	hosts: z.boolean(),
+	growth: z.boolean().describe("Companies observed per month, last six months."),
+	retention: z.boolean().describe("Of the companies active 60 days ago, how many are still signing in."),
 });
 
 export const getProofDisplayInput = empty;

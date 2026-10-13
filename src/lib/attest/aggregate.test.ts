@@ -17,6 +17,7 @@ vi.mock("./geo-distribution", () => ({
 }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("./payment-evidence", () => ({ paymentScopeFor: vi.fn(async () => null) }));
+vi.mock("./growth", () => ({ growthFor: vi.fn(async () => null), retentionFor: vi.fn(async () => null) }));
 vi.mock("./display", async (importOriginal) => {
 	const real = await importOriginal<typeof import("./display")>();
 	return { ...real, displayFor: vi.fn(async () => ({ ...real.DEFAULT_DISPLAY })) };
@@ -375,6 +376,30 @@ describe("aggregateBody", () => {
 			expect(b.tier).toBe(1);
 			expect(b.companies_observed).toBe(1);
 			expect(b.domain).toBe("lettertrace.com");
+		});
+
+		it("carries growth and retention when there is enough history, and drops them when hidden", async () => {
+			await withRollups([row("globex.com", 2)], false);
+			await asVendor({});
+			const g = await import("./growth");
+			const growth = [{ month: "2026-09", companies_observed: 60 }, { month: "2026-10", companies_observed: 87 }];
+			const retention = { cohort: 50, retained: 41, window: "60d" as const };
+			vi.mocked(g.growthFor).mockResolvedValue(growth);
+			vi.mocked(g.retentionFor).mockResolvedValue(retention);
+
+			const shown = (await aggregateBody("lettertrace"))!;
+			expect(shown.growth).toEqual(growth);
+			expect(shown.retention).toEqual(retention);
+			expect(shown.tier).toBe(1);
+
+			const display = await import("./display");
+			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, growth: false, retention: false });
+			const hidden = (await aggregateBody("lettertrace"))!;
+			expect(hidden).not.toHaveProperty("growth");
+			expect(hidden).not.toHaveProperty("retention");
+			expect(hidden.hidden_by_vendor).toEqual(["growth", "retention"]);
+			vi.mocked(g.growthFor).mockResolvedValue(null);
+			vi.mocked(g.retentionFor).mockResolvedValue(null);
 		});
 
 		it("states that nothing is hidden when the vendor shows everything", async () => {

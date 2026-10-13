@@ -26,6 +26,8 @@ const HIDDEN_LABELS: Record<string, string> = {
 	payment_details: "payment details",
 	observed_since: "first observed date",
 	hosts: "extra hosts",
+	growth: "companies per month",
+	retention: "retention",
 };
 
 
@@ -216,13 +218,50 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									unattributable domains excluded.
 								</dd>
 							</div>
-							{a.payment_scope?.mode === "selected" && (
+							{a.payment_scope && a.tier === 3 && (
 								<div>
 									<dt className="inline">Payments: </dt>
-									<dd className="inline">{a.payment_scope.products} Stripe products in scope.</dd>
+									<dd className="inline">
+										{a.payment_scope.mode === "selected"
+											? "verified by Stripe, for the products the vendor chose."
+											: "verified by Stripe."}
+									</dd>
 								</div>
 							)}
 						</dl>
+
+						{a.growth && a.growth.length > 0 && (
+							<>
+								<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">
+									Companies observed per month
+								</h2>
+								<dl
+									className="mt-4 grid gap-px overflow-hidden rounded-lg border border-edge bg-edge"
+									style={{ gridTemplateColumns: `repeat(${a.growth.length}, minmax(0, 1fr))` }}
+								>
+									{a.growth.map((g) => (
+										<Tile key={g.month} label={monthLabel(g.month)} value={g.companies_observed.toLocaleString("en-US")} />
+									))}
+								</dl>
+								<p className="mt-4 text-sm text-fog">
+									The highest number of companies observed in any signed snapshot that month.
+								</p>
+							</>
+						)}
+
+						{a.retention && (
+							<>
+								<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Retention</h2>
+								<p className="mt-4 text-sm text-fog">
+									<span className="font-semibold text-mint">
+										Of {a.retention.cohort.toLocaleString("en-US")} companies active 60 days ago,{" "}
+										{a.retention.retained.toLocaleString("en-US")} are still signing in.
+									</span>{" "}
+									Active 60 days ago means observed in the 30 days ending 60 days ago. Still signing in means
+									observed in the last 30 days.
+								</p>
+							</>
+						)}
 
 						{a.reported_history && (
 							<>
@@ -322,4 +361,10 @@ function Tile({
 			{sub && <div className="mt-0.5 leading-4">{sub}</div>}
 		</div>
 	);
+}
+
+/** "2026-10" → "Oct 2026". */
+function monthLabel(month: string): string {
+	const [y, m] = month.split("-").map(Number);
+	return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }

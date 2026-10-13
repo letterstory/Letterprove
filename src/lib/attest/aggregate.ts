@@ -54,6 +54,7 @@ import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
 import { DEFAULT_DISPLAY, displayFor, hiddenSections, type DisplaySection, type DisplaySettings } from "./display";
+import { growthFor, retentionFor, type GrowthPoint, type Retention } from "./growth";
 import { withDisclosure } from "./issuer";
 import { publicLogos, readLogoWall, type PublicLogos } from "@/lib/vendors/logo-wall";
 import {
@@ -155,6 +156,20 @@ export interface AggregateBody {
 	 * Absent before 2026-10-13.
 	 */
 	hidden_by_vendor?: string[];
+	/**
+	 * Companies observed per calendar month (UTC), oldest first, up to six
+	 * months: the highest companies_observed any frozen snapshot carried that
+	 * month. From Letterprove's own signed history. Absent with under two
+	 * months of history. Absent before 2026-10-13.
+	 */
+	growth?: GrowthPoint[];
+	/**
+	 * Of the company domains observed in the 30 days ending 60 days ago
+	 * (`cohort`), how many were also observed in the last 30 days
+	 * (`retained`). Counts only. Absent when the cohort is under 10. Absent
+	 * before 2026-10-13.
+	 */
+	retention?: Retention;
 	observed_through: string;
 	published_at: string;
 	/** When a newer snapshot is due. Absent on snapshots signed before 2026-10-08 — see ./cadence.ts. */
@@ -296,7 +311,11 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 			: null;
 	const now = new Date().toISOString();
 	const observed = attributable.length > 0;
-	const display = vendor.id ? await displayFor(vendor.id) : { ...DEFAULT_DISPLAY };
+	const [display, growth, retention] = await Promise.all([
+		vendor.id ? displayFor(vendor.id) : Promise.resolve({ ...DEFAULT_DISPLAY }),
+		vendor.domainVerified ? growthFor(vendor.slug) : Promise.resolve(null),
+		vendor.domainVerified ? retentionFor(vendor.slug, vendor.domain) : Promise.resolve(null),
+	]);
 	return applyDisplay({
 		vendor: vendor.slug,
 		kind: "aggregate",
@@ -316,6 +335,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		...(history ? { reported_history: history } : {}),
 		...(logos ? { logos } : {}),
 		...(scope ? { payment_scope: scope } : {}),
+		...(growth ? { growth } : {}),
+		...(retention ? { retention } : {}),
 		observed_through: now,
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),
@@ -333,6 +354,8 @@ const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
 	payment_details: ["payment_scope", "paying_since"],
 	observed_since: ["observed_since"],
 	hosts: ["hosts"],
+	growth: ["growth"],
+	retention: ["retention"],
 };
 
 /**

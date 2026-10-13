@@ -461,7 +461,15 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 vendor&apos;s own Stripe account; this is the first such
                 invoice. How many pay is kept private to the vendor. <code>payment_scope</code> says whether every
                 product the account bills counts or only the products the vendor
-                chose, as a count, never by name.
+                chose. Its <code>products</code> number counts Stripe products,
+                not customers.
+              </li>
+              <li>
+                <code>growth</code>: companies observed per month for up to six
+                months, from Letterprove&apos;s own signed history.{" "}
+                <code>retention</code>: of the companies active 60 days ago, how
+                many are still signing in. Both are counts and never change the
+                tier.
               </li>
               <li>
                 <code>sessions</code>, <code>signups</code>,{" "}
@@ -703,8 +711,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               more than this product, choose which products count in the
               Stripe panel. Your attestation carries{" "}
               <code>payment_scope</code>: whether every product counts or only
-              the ones you chose, and how many. Counts only; product names are
-              never published.
+              the ones you chose. Your proof page says &quot;Payments verified by
+              Stripe, for the products you chose&quot; and never shows how many
+              products or their names.
             </p>
             <p>
               <strong>Evidence expires.</strong> The sync runs hourly, and
