@@ -658,6 +658,7 @@ export const syncPosthogOutput = posthogConnection;
 export const disconnectPosthogInput = empty;
 export const disconnectPosthogOutput = z.object({
 	disconnected: z.literal(true).describe("The key and all history read with it are gone."),
+});
 
 // ---------------------------------------------------------------- agent visits
 
