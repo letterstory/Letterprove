@@ -68,6 +68,7 @@ import { posthogStatus } from "@/lib/posthog/status";
 import { syncVendorPosthog } from "@/lib/posthog/sync";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
+import { fetchVendorVisitors, setVisitorIdentification } from "@/lib/vendors/visitors";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -1723,6 +1724,54 @@ export const TOOLS: BoundTool[] = [
 				console.error("[letterprove:agent-visits] report failed", e instanceof Error ? e.message : String(e));
 				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			}
+		},
+	}),
+	/*
+	 * ---------------------------------------------------------------- visitors
+	 *
+	 * Vendor-private analytics, not evidence: who visits the vendor's own site,
+	 * identified by Maverick through the pixel attest.js loads. Pulled live and
+	 * never stored or signed — see src/lib/vendors/visitors.ts.
+	 */
+	defineTool({
+		name: "set_visitor_identification",
+		description:
+			"Turn visitor identification on or off for the caller's vendor. On, attest.js also loads the Maverick Intelligence pixel on your site, and get_visitors shows the people and companies it identified. Args: enabled (boolean). Needs a DNS-verified domain. Private: none of it is published or counted in your proof, and Letterprove stores no identified person.",
+		capability: "vendor:write",
+		inputSchema: S.setVisitorIdentificationInput,
+		outputSchema: S.setVisitorIdentificationOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const enabled = asRecord(args).enabled;
+			if (typeof enabled !== "boolean") {
+				return { ok: false, status: 400, body: { error: "invalid_enabled", detail: "enabled must be true or false." } };
+			}
+			const result = await setVisitorIdentification(vendorId, enabled);
+			if (!result.ok) {
+				const status = result.error === "not_found" ? 404 : result.error === "domain_not_verified" ? 409 : 503;
+				return { ok: false, status, body: { error: result.error, detail: result.detail } };
+			}
+			return { ok: true, body: result.status };
+		},
+	}),
+	defineTool({
+		name: "get_visitors",
+		description:
+			"People and companies Maverick identified visiting the caller's vendor's own site (verified domain and accepted hosts), newest first, with a per-company rollup. Args: limit (default 50, max 200), days (default 30, max 90). Pulled live from Maverick each time (cached five minutes); Letterprove stores none of it and never publishes it. Also reports whether identification is on.",
+		capability: "vendor:read",
+		inputSchema: S.getVisitorsInput,
+		outputSchema: S.getVisitorsOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const parsed = S.getVisitorsInput.safeParse(args ?? {});
+			if (!parsed.success) {
+				return { ok: false, status: 400, body: { error: "invalid_args", detail: "limit is 1–200 and days is 1–90, both whole numbers." } };
+			}
+			const result = await fetchVendorVisitors(vendorId, parsed.data);
+			if (!result) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body: result };
 		},
 	}),
 ];

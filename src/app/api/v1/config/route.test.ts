@@ -13,11 +13,13 @@ import { GET } from "./route";
 
 vi.mock("@/lib/fixtures/vendors", () => ({ findVendorByKey: vi.fn() }));
 vi.mock("@/lib/telemetry/ping", () => ({ recordConfigPing: vi.fn() }));
+vi.mock("@/lib/vendors/visitors", () => ({ visitorPixel: vi.fn() }));
 vi.mock("@/lib/oauth/ratelimit", () => ({ oauthRateLimit: vi.fn(), oauthClientIp: vi.fn(() => "203.0.113.9") }));
 
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { recordConfigPing } from "@/lib/telemetry/ping";
+import { visitorPixel } from "@/lib/vendors/visitors";
 
 const VENDOR = {
 	id: "00000000-0000-0000-0000-000000000001",
@@ -39,9 +41,17 @@ beforeEach(() => {
 	vi.mocked(findVendorByKey).mockResolvedValue(VENDOR as never);
 	vi.mocked(recordConfigPing).mockResolvedValue(undefined);
 	vi.mocked(oauthRateLimit).mockResolvedValue(true);
+	vi.mocked(visitorPixel).mockResolvedValue(null);
 });
 
 describe("GET /v1/config", () => {
+	it("hands attest.js the Maverick pixel only when visitor identification is on", async () => {
+		vi.mocked(visitorPixel).mockResolvedValue({ customer_id: "1091", profile_id: "abcDEF123" });
+		const body = await (await get("?k=lp_live_vantage_9f2c")).json();
+		expect(body.visitors).toEqual({ pixel: { customer_id: "1091", profile_id: "abcDEF123" } });
+		expect(visitorPixel).toHaveBeenCalledWith(VENDOR.id);
+	});
+
 	it("answers a known key with the current config version", async () => {
 		const res = await get("?k=lp_live_vantage_9f2c");
 

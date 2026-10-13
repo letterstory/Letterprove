@@ -49,6 +49,13 @@ export default function PrivacyPage() {
           cookies. We do not set anything on your device, and there is nothing
           on a vendor&apos;s site that identifies you personally to us.
         </p>
+        <p>
+          One exception is opt-in and belongs to the vendor: a vendor can turn
+          on <strong>visitor identification</strong>, which has our script also
+          load the Maverick Intelligence pixel on that vendor&apos;s own site
+          (see section 7). It is separate from the evidence we publish and
+          never appears in it.
+        </p>
       </Section>
 
       <Section n={2} title="What the script records">
@@ -259,16 +266,32 @@ export default function PrivacyPage() {
           <li>
             <strong>Maverick Intelligence</strong> — identifies the companies
             and business contacts that visit our marketing site,
-            letterprove.com. It runs on that site only.
+            letterprove.com, and, for vendors who turn on visitor
+            identification, that vendor&apos;s own site.
           </li>
         </ul>
         <p>
           Our marketing site, letterprove.com, uses Maverick Intelligence to
           identify the companies and business contacts that visit it. The
-          Letterprove app, proof pages, attestation documents and the collector
-          script installed on vendors&apos; sites do not use any
-          de-anonymisation service. We do not use advertising trackers, we do
-          not sell information, and we do not build behavioural profiles.
+          Letterprove app, proof pages and attestation documents do not use any
+          de-anonymisation service.
+        </p>
+        <p>
+          The collector script on a vendor&apos;s site does not either, unless
+          that vendor turns on <strong>visitor identification</strong>. Then
+          the script also loads the Maverick Intelligence pixel on the
+          vendor&apos;s own site, and Maverick identifies the companies and
+          business contacts visiting it. The vendor sees those visitors in its
+          private dashboard. Letterprove pulls them live from Maverick each time
+          the vendor looks and does not store them; they are never published,
+          never signed, and never counted in any proof. Letterprove&apos;s own
+          collection stays as described in section 2: a company domain, never a
+          person. A vendor who turns this on is responsible for disclosing it in
+          its own privacy policy.
+        </p>
+        <p>
+          We do not use advertising trackers, we do not sell information, and we
+          do not build behavioural profiles.
         </p>
       </Section>
 
