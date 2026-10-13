@@ -28,6 +28,12 @@
  * key, the path and that flag. The server reads who it was from the request's
  * own headers. Ordinary visitors send nothing. See src/lib/agents/visits.ts.
  *
+ * One opt-in exception to "this script only reports domains": a vendor who
+ * turns on visitor identification gets the Maverick pixel loaded on their
+ * site too (loadVisitorPixel below). That is a separate, vendor-private
+ * product — README § Visitor identification — and nothing it sees passes
+ * through this script.
+ *
  * Every public method is wrapped so nothing here can throw into the host
  * page: a vendor's product must work identically whether this script loads,
  * fails, or is missing entirely.
@@ -142,6 +148,7 @@
 				cfg = body.cfg;
 				ready = true;
 				flush();
+				if (body.visitors && body.visitors.pixel) loadVisitorPixel(body.visitors.pixel);
 			})
 			.catch(function () {
 				failed = true;
@@ -170,6 +177,52 @@
 				AGENT_VISIT_URL,
 				JSON.stringify({ k: key, path: location.pathname, client: true, webdriver: webdriver })
 			);
+		} catch {
+			// never throw into the host page
+		}
+	}
+
+	/**
+	 * Visitor identification, only when the vendor turned it on (the config
+	 * carries `visitors.pixel` then and never otherwise). Loads the Maverick
+	 * Intelligence pixel exactly as Letter's own sites do, once. Skipped on
+	 * localhost and preview hosts, and when the page already runs Maverick.
+	 * Nothing it identifies passes through this script or reaches the proof:
+	 * see src/lib/vendors/visitors.ts.
+	 */
+	var MAVERICK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+	function loadVisitorPixel(pixel) {
+		try {
+			var customerId = String(pixel.customer_id || "");
+			var profileId = String(pixel.profile_id || "");
+			if (!MAVERICK_ID.test(customerId) || !MAVERICK_ID.test(profileId)) return;
+			var h = window.location.hostname;
+			if (h === "localhost" || h === "127.0.0.1" || /\.vercel\.app$/.test(h)) return;
+			if (window.maverick || document.getElementById("__maverick__")) return;
+			var c = {
+				customerId: customerId,
+				profileId: profileId,
+				cdn: "cdn.maverickintelligence.co",
+				api: "api.maverickintelligence.co",
+				app: "app.maverickintelligence.co",
+				vector: "true",
+			};
+			window.maverick = { config: c, initialized: false, q: [] };
+			window.maverick.identify = function () {
+				window.maverick.q.push(["identify", arguments]);
+			};
+			var s = document.createElement("script");
+			s.async = true;
+			s.id = "__maverick__";
+			s.src = "https://" + c.app + "/maverick-pro.min.js";
+			s.setAttribute("data-customer-id", c.customerId);
+			s.setAttribute("data-profile-id", c.profileId);
+			s.setAttribute("data-cdn", c.cdn);
+			s.setAttribute("data-api", c.api);
+			s.setAttribute("data-vector", c.vector);
+			var f = document.getElementsByTagName("script")[0];
+			if (f && f.parentNode) f.parentNode.insertBefore(s, f);
+			else (document.head || document.documentElement).appendChild(s);
 		} catch {
 			// never throw into the host page
 		}

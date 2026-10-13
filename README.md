@@ -528,7 +528,9 @@ GET /api/v1/config?k=lp_live_…
 → 200, Cache-Control: max-age=…, stale-while-revalidate
 {
   "cfg":     7,
-  "signals": []   // reserved for phase-2 named/feature events; empty in phase 1
+  "signals": [],  // reserved for phase-2 named/feature events; empty in phase 1
+  "visitors": { "pixel": { "customer_id": "…", "profile_id": "…" } }
+                  // only when the vendor turned on visitor identification
 }
 ```
 
@@ -618,6 +620,41 @@ collector, **the script's response carries a diagnostic header**
 be answerable with one `curl`, not an afternoon. Configuration bugs across a
 distributed install look exactly like broken code; this is what makes them
 visible.
+
+### Visitor identification — **Decided (10-13)**
+
+A vendor can have the people visiting its own site identified, through the
+same `attest.js` tag. It is vendor-private analytics, a different data class
+from everything above, and it is kept apart from the evidence on purpose:
+
+- **Opt-in, per vendor.** `set_visitor_identification { enabled }`. It needs a
+  DNS-verified domain. Turning it on registers the verified domain and each
+  accepted host as a Maverick Intelligence Tracked Domain under our partner
+  account (`clientRef = letterprove:{vendor id}`) and records the account's
+  pixel ids. From then on `/v1/config` carries
+  `visitors: { pixel: { customer_id, profile_id } }`, and `attest.js` loads the
+  Maverick pixel exactly as Letter's own sites do. Off, the config has no
+  `visitors` field and the script is unchanged.
+- **Nothing stored.** `get_visitors { limit, days }` pulls people from
+  Maverick live (cached five minutes, since the account's 1,000 requests an
+  hour are shared with Letterstory) and returns them with a per-company
+  rollup. Letterprove writes none of it to its database.
+- **Never evidence, never public.** A company visiting a site is not a
+  customer. Nothing here is signed, counted in an attestation, or shown on a
+  proof page.
+- **Tenant isolation.** The partner account sees every tracked site's people.
+  A record reaches a vendor only when it was seen on that vendor's verified
+  domain or an accepted host, or carries that vendor's `clientRef`, and only
+  while the domain is still verified (`attributeVisitors` in
+  `src/lib/vendors/visitors.ts`).
+- **Turning it off** deactivates only the domains this feature registered. A
+  domain the partner account already tracked (one of our own sites) is never
+  deactivated by a vendor.
+
+Env: `MAVERICK_API_KEY` (data reads), `MAVERICK_PARTNER_API_KEY` (Tracked
+Domain registration), optional `MAVERICK_PIXEL_PROFILE_ID` when Maverick's
+registration answer carries no profile id. Without the partner key the toggle
+is stored and reported `pending_registration`.
 
 ---
 
@@ -1082,6 +1119,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 30 | **Letterprove attests the vendor, in counts, and never names a customer.** One attestation per vendor: identity (`domain`, `domain_verified_since`, `hosts`, `stripe_account_bound`/`stripe_binding`) and evidence (`companies_observed`, `paying_companies`, `paying_since`, `sessions`, `observed_since`, `payment_scope`). Per-customer documents, their verify links, the per-customer freeze and the vendor-set `consent` field are retired; their URLs answer 410. **Vendor tier = the strongest evidence class present** — 3 when at least one observed company pays through the vendor's own bound Stripe account, 1 when companies are observed on the DNS-proven domain, 0 otherwise — published beside `paying_companies` so it is never read as "every company pays". A minimum share was rejected: any threshold is arbitrary and hides the number a reader needs; the count states it exactly. `paying_companies` joins payment evidence to the attestation's own observed domains (not to the vendor's customer list), and counts only while the Stripe account is bound | ✅ **Decided (10-13)**, Casey — see [Customers are never named](#customers-are-never-named--decided-10-13) |
 | 31 | **The vendor's own PostHog is read, never written, and published only as labelled history.** `connect_posthog` takes a personal API key (`phx_`, `query:read`); a public project key (`phc_`) is refused. A daily sync reads, inside PostHog, the domain part of identified people's emails — never an address — and keeps company domains only. The attestation carries `reported_history` (`companies`, `since`, `active_companies_30d`, `observed_also_reported`) listed in `vendor_stated`, and it never moves the tier: the vendor controls that project, and anyone with its public key can send events into it. Published only while the project records traffic on the vendor's verified domain or accepted hosts, synced within two days; three failed syncs clear it. Its value is history Letterprove cannot have observed before install, and `observed_also_reported` is how far that history agrees with what Letterprove observed | ✅ **Decided (10-13)**, Matthew's rollout list — see `src/lib/posthog/` |
 | 32 | **Agent visits to a vendor's own site are private analytics, never evidence.** `attest.js` beacons automated-browser page views, and an optional server snippet forwards agent and crawler requests, to `POST /api/v1/agent-visit`; `get_agent_visits` reports them, verified (operator-published addresses) vs. claimed. No address or raw user-agent is stored, and nothing reaches the attestation | ✅ **Decided (10-13)** — see [Agent visits](#agent-visits--decided-10-13) |
+| 33 | **Visitor identification is the vendor's private analytics, loaded by the same script, and never evidence.** Opt-in per vendor; `attest.js` loads the Maverick pixel only when `/v1/config` says so; identified people are pulled live for the vendor and never stored, signed or published. Attribution is limited to the vendor's verified domain and accepted hosts | ✅ **Decided (10-13)**, Matthew + Casey — see [Visitor identification](#visitor-identification--decided-10-13) |
 
 ### Open
 

@@ -689,3 +689,61 @@ export const getAgentVisitsOutput = z.object({
 		.array(z.object({ day: z.string(), total: z.number().int(), verified: z.number().int() }))
 		.describe("Days with visits only, oldest first."),
 });
+
+// ------------------------------------------------------------- visitors
+
+const tracking = z
+	.enum(["off", "active", "pending_registration"])
+	.describe(
+		"off: not turned on. active: attest.js loads the Maverick pixel and visitors are being identified. pending_registration: turned on, but the domain isn't registered with Maverick yet, so nobody is identified.",
+	);
+export const visitorIdentificationStatus = z.object({
+	enabled: z.boolean().describe("Whether the vendor turned visitor identification on."),
+	tracking,
+	registered_domains: z.array(z.string()).describe("Hosts this feature registered with Maverick."),
+	message: z.string(),
+});
+export const setVisitorIdentificationInput = z.object({
+	enabled: z.boolean().describe("true to identify visitors to your own site through the attest.js tag; false to stop."),
+});
+export const setVisitorIdentificationOutput = visitorIdentificationStatus;
+export const getVisitorsInput = z.object({
+	limit: z.number().int().min(1).max(200).optional().describe("How many people to return, newest first. Default 50."),
+	days: z.number().int().min(1).max(90).optional().describe("How far back to look. Default 30."),
+});
+const visitorPerson = z.object({
+	person_id: z.string(),
+	name: z.string().nullable(),
+	title: z.string().nullable(),
+	company: z.string().nullable(),
+	company_domain: z.string().nullable(),
+	email: z.string().nullable().describe("Work address only."),
+	linkedin_url: z.string().nullable(),
+	location: z.string().nullable(),
+	seniority: z.string().nullable(),
+	job_function: z.string().nullable(),
+	visit_count: z.number(),
+	first_seen: z.string(),
+	last_seen: z.string(),
+	seen_on: z.string().nullable().describe("The host the person was seen on."),
+});
+const visitorCompany = z.object({
+	company: z.string().nullable(),
+	domain: z.string().nullable(),
+	people: z.number(),
+	visits: z.number(),
+	last_seen: z.string(),
+});
+export const getVisitorsOutput = z.object({
+	enabled: z.boolean(),
+	tracking,
+	configured: z.boolean().describe("Whether this deployment can read from Maverick at all."),
+	window_days: z.number(),
+	error: z
+		.object({ reason: z.enum(["forbidden", "failed"]), message: z.string() })
+		.nullable()
+		.describe("Why the live pull failed, when it did. Null on success."),
+	companies: z.array(visitorCompany).describe("One row per visiting company, most people first. Private: never published."),
+	visitors: z.array(visitorPerson).describe("Identified people, newest first. Pulled live from Maverick; Letterprove stores none of it."),
+	total: z.number().describe("Identified people in the window before `limit` applied."),
+});
