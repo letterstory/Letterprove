@@ -5,15 +5,11 @@ import { notFound, proofJson } from "@/lib/http";
 import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 
 /**
- * A vendor's aggregate attestation — `/attest/{vendor}.json`.
+ * A vendor's attestation — `/attest/{vendor}.json`: who the vendor is and the
+ * evidence behind it, in counts. The only document Letterprove publishes about
+ * a vendor (README decision 30). It names nobody.
  *
- * Sits one segment above the per-customer route on purpose: this is a claim
- * about the vendor, not about any customer of theirs. It is also the only
- * signed claim most vendors can publish today, since naming a customer needs
- * that customer's consent and counting them does not.
- *
- * Public and cacheable like every other proof surface. It names nobody — the
- * whole design point — so there is no CONSENT gate here.
+ * Public and cacheable like every other proof surface.
  *
  * There is a PUBLICATION gate, which is a different question and was missing:
  * `publishedVendorAggregate`, not `vendorAggregate`. Naming nobody is not the

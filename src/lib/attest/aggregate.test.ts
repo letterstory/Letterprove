@@ -17,6 +17,12 @@ vi.mock("./geo-distribution", () => ({
 }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("./payment-evidence", () => ({ paymentScopeFor: vi.fn(async () => null) }));
+vi.mock("./vendor-evidence", () => ({
+	stripeBinding: vi.fn(async () => null),
+	hostCount: vi.fn(async () => 0),
+	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
+	observedSince: vi.fn(async () => null),
+}));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
 	findVendor: vi.fn(),
@@ -212,6 +218,88 @@ describe("aggregateBody", () => {
 	it("never uses the word customer in the published body", async () => {
 		await withRollups([row("acme.com", 1)]);
 		expect(JSON.stringify(await aggregateBody("lettertrace"))).not.toMatch(/customer/i);
+	});
+
+	describe("identity and evidence (decision 30)", () => {
+		async function asVendor(extra: Record<string, unknown> = {}) {
+			const { findVendor } = await import("@/lib/fixtures/vendors");
+			vi.mocked(findVendor).mockResolvedValue({
+				id: "v-1",
+				slug: "lettertrace",
+				name: "Lettertrace",
+				domain: "lettertrace.com",
+				category: "x",
+				key: "k",
+				domainVerified: true,
+				domainVerifiedAt: "2026-09-02T14:11:08.000Z",
+				customers: [],
+				...extra,
+			} as never);
+		}
+
+		it("states who the vendor is: its proven domain, since when, hosts and Stripe binding", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor();
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.hostCount).mockResolvedValueOnce(2);
+			vi.mocked(ev.observedSince).mockResolvedValueOnce("2026-09-03T01:05:00.000Z");
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.domain).toBe("lettertrace.com");
+			expect(b.domain_verified_since).toBe("2026-09-02T14:11:08.000Z");
+			expect(b.hosts).toBe(2);
+			expect(b.stripe_account_bound).toBe(true);
+			expect(b.stripe_binding).toBe("domain_match");
+			expect(b.observed_since).toBe("2026-09-03T01:05:00.000Z");
+		});
+
+		it("is tier 3 when at least one observed company pays, and says how many", async () => {
+			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
+			await asVendor();
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("staff_override");
+			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.tier).toBe(3);
+			expect(b.paying_companies).toBe(1);
+			expect(b.companies_observed).toBe(2);
+			expect(b.paying_since).toBe("2025-11-03T00:00:00.000Z");
+			expect(b.stripe_binding).toBe("staff_override");
+			// Joined against the attestation's own observed companies.
+			expect(ev.payingAmong).toHaveBeenCalledWith("v-1", ["globex.com", "initech.com"]);
+		});
+
+		it("counts no payment from a Stripe account that isn't bound to the vendor", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor();
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.payingAmong).mockResolvedValue({ companies: 5, since: "2025-01-01T00:00:00.000Z" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.stripe_account_bound).toBe(false);
+			expect(b.paying_companies).toBe(0);
+			expect(b.tier).toBe(1);
+			expect(ev.payingAmong).not.toHaveBeenCalled();
+		});
+
+		it("claims nothing about identity or payment when the domain isn't proven", async () => {
+			await withRollups([row("globex.com", 2)], false);
+			await asVendor({ domainVerified: false, domainVerifiedAt: null });
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.hostCount).mockResolvedValueOnce(3);
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.domain_verified_since).toBeNull();
+			expect(b.hosts).toBe(0);
+			expect(b.tier).toBe(0);
+		});
+	});
+
+	it("never carries a customer domain, even one with payment evidence", async () => {
+		await withRollups([row("globex.com", 2)]);
+		expect(JSON.stringify(await aggregateBody("lettertrace"))).not.toContain("globex");
 	});
 });
 

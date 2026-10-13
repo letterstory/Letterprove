@@ -2,17 +2,17 @@ import { NextResponse } from "next/server";
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
 import { jwksResult } from "@/lib/attest/keys";
-import { customerProof } from "@/lib/attest/proofs";
 import type { SignedAttestation } from "@/lib/attest/types";
 import { methodUrl } from "@/lib/attest/method";
 import { verifyAttestation } from "@/lib/attest/verify";
 import { parseVerifyPath, snapshotStamp, VERIFY_ORIGIN } from "@/lib/attest/verify-link";
-import { proofHtml, proofJson, namedProofJson } from "@/lib/http";
+import { proofHtml, proofJson, retiredCustomerProof } from "@/lib/http";
 
 /**
- * `/verify/{vendor}/{stamp}` and `/verify/{vendor}/{customer}/{stamp}` — the
- * plain-language check every signed attestation links to in its `verify`
- * field. Why a link rather than a submit-a-document endpoint, and how the URL
+ * `/verify/{vendor}/{stamp}` — the plain-language check every signed vendor
+ * attestation links to in its `verify` field. The per-customer form,
+ * `/verify/{vendor}/{customer}/{stamp}`, answers 410: per-customer documents
+ * were retired on 2026-10-13 (README decision 30). Why a link rather than a submit-a-document endpoint, and how the URL
  * is formed: src/lib/attest/verify-link.ts.
  *
  * It answers with the figures Letterprove actually signed for that snapshot,
@@ -20,10 +20,9 @@ import { proofHtml, proofJson, namedProofJson } from "@/lib/http";
  * a copy showing anything different has been altered. A reader compares
  * numbers; nobody has to run Ed25519.
  *
- * The gates are the ones every proof route already uses, reached through the
- * same functions: an unpublished vendor, and a customer who did not consent to
- * be named, 404 here exactly as an unknown one does. One 404 for all of them,
- * or guessing a URL would confirm that a private vendor or customer exists.
+ * The gate is the one every proof route already uses, reached through the same
+ * function: an unpublished vendor 404s here exactly as an unknown one does, or
+ * guessing a URL would confirm that a private vendor exists.
  *
  * HTML by default — that is what a browser and an answer engine's fetch tool
  * ask for — and JSON for `Accept: application/json` or `?format=json`.
@@ -35,12 +34,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 		(request.headers.get("accept") ?? "").startsWith("application/json");
 
 	const parsed = parseVerifyPath(rest);
-	logProofAccess(request, parsed?.customer ? `${vendor}/${parsed.customer}/verify` : `${vendor}/aggregate/verify`);
+	if (parsed?.customer) return retiredCustomerProof(vendor, { html: !wantsJson });
+	logProofAccess(request, `${vendor}/aggregate/verify`);
 	if (!parsed) return missing(wantsJson);
 
-	const chain = parsed.customer
-		? ((await customerProof(vendor, parsed.customer))?.chain ?? null)
-		: ((await publishedVendorAggregateChain(vendor)) as unknown as SignedAttestation[] | null);
+	const chain = (await publishedVendorAggregateChain(vendor)) as unknown as SignedAttestation[] | null;
 	const entry = chain?.find((e) => snapshotStamp(e.published_at) === parsed.stamp);
 	if (!chain || !entry) return missing(wantsJson);
 
@@ -52,11 +50,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 	}
 	const check = verifyAttestation(entry, keys.jwks);
 	const { signature: _signature, ...signed } = entry;
-	const latestUrl = parsed.customer
-		? `${VERIFY_ORIGIN}/attest/${vendor}/${parsed.customer}.json`
-		: `${VERIFY_ORIGIN}/attest/${vendor}.json`;
+	const latestUrl = `${VERIFY_ORIGIN}/attest/${vendor}.json`;
 	const isLatest = latest.published_at === entry.published_at;
-	const names = Boolean(parsed.customer);
 
 	const statement = check.ok
 		? `Letterprove issued this attestation, and its signature checks out against key ${entry.key_id} in the published key set. ` +
@@ -73,7 +68,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 			jwks_uri: `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`,
 			latest: isLatest ? null : { published_at: latest.published_at, url: latestUrl },
 		};
-		return names ? namedProofJson(body) : proofJson(body);
+		return proofJson(body);
 	}
 
 	const rows = Object.entries(signed)
@@ -90,26 +85,23 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 				`<p>Keys: <a href="${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json">${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json</a>. ` +
 				`Machine-readable: <a href="?format=json">?format=json</a>.</p>`,
 		),
-		{ names },
 	);
 }
 
 /**
  * No snapshot at this address. Deliberately NOT a verdict of forgery.
  *
- * A miss has several innocent causes — the vendor unpublished, the customer is
- * no longer named, the link was mistyped or truncated in transit — and one
+ * A miss has several innocent causes — the vendor unpublished, the link was mistyped or truncated in transit — and one
  * guilty one, and from a URL alone we cannot tell them apart. This page used
  * to say "not issued by Letterprove" for all of them, which also meant every
  * genuine document served before its hour was frozen got called a forgery by
  * our own checker. The only thing that can establish forgery is the signature,
  * so the page says what it knows and points at that check. The answer is the
- * same for every cause, so it still confirms nothing about private vendors or
- * customers.
+ * same for every cause, so it still confirms nothing about private vendors.
  */
 function missing(wantsJson: boolean): NextResponse {
 	const statement =
-		"Letterprove has no public snapshot at this address. That alone does not mean a document pointing here is forged: the vendor may have unpublished, the customer may no longer be named, or the link may have been altered or cut short. " +
+		"Letterprove has no public snapshot at this address. That alone does not mean a document pointing here is forged: the vendor may have unpublished, or the link may have been altered or cut short. " +
 		"To check a copy yourself, verify its signature against Letterprove's published keys — only a document signed by one of those keys was issued by Letterprove. " +
 		"Do not rely on figures you cannot verify either way.";
 	const keys = `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`;

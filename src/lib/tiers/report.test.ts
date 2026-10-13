@@ -8,8 +8,7 @@ vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 // module. These tests are about the tier decision, not about where identity is
 // stored — and that storage is moving from static fixtures to Postgres, at
 // which point a test that leans on the fixtures would start failing for a
-// reason that has nothing to do with what it asserts. `consentOf` stays real
-// because it IS part of the decision under test.
+// reason that has nothing to do with what it asserts.
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
 	allVendors: vi.fn(),
@@ -32,9 +31,10 @@ const VANTAGE = {
 	domain: "vantage.example",
 	category: "demo",
 	key: "lp_live_vantage",
+	domainVerified: true,
 	customers: [
-		customer({ slug: "acme-corp", domain: "acme-corp.example", consent: "named" }),
-		customer({ slug: "northwind", domain: "northwind.example", consent: "anonymous" }),
+		customer({ slug: "acme-corp", domain: "acme-corp.example" }),
+		customer({ slug: "northwind", domain: "northwind.example" }),
 		customer({ slug: "globex", domain: "globex.example", tier: 1, verified: false }),
 	],
 };
@@ -45,6 +45,7 @@ const LETTERTRACE = {
 	domain: "lettertrace.com",
 	category: "real",
 	key: "lp_live_lettertrace",
+	domainVerified: true,
 	customers: [],
 };
 
@@ -105,18 +106,29 @@ describe("tierReport", () => {
 		expect(await tierReport("vantage")).toBeNull();
 	});
 
-	// The lettertrace shape: real traffic, no customer records. This is the
-	// backlog the report exists to make visible.
-	it("flags attributable traffic that nobody has turned into a customer", async () => {
+	// Since decision 30 every observed company counts in the vendor
+	// attestation, customer record or not. The list is private bookkeeping.
+	it("counts observed companies whether or not they are on the vendor's list", async () => {
 		await withRollups([rollup("tenevents.com", 3), rollup("o3world.com", 1)]);
 
 		const r = await tierReport("lettertrace");
 		expect(r!.observed).toBe(2);
 		expect(r!.attributable).toBe(2);
+		expect(r!.published).toBe(2);
+		expect(r!.paying).toBe(0);
 		expect(r!.unpublishedEvidence).toBe(2);
-		expect(r!.published).toBe(0);
-		expect(r!.rows.every((x) => x.status === "no-customer-record")).toBe(true);
+		expect(r!.rows.every((x) => x.status === "observed")).toBe(true);
 		expect(r!.rows[0].domain).toBe("tenevents.com"); // busiest first
+	});
+
+	it("counts nothing while the vendor's domain is unproven", async () => {
+		await withRollups([rollup("tenevents.com", 3)]);
+		const { allVendors } = await import("@/lib/fixtures/vendors");
+		vi.mocked(allVendors).mockResolvedValue([{ ...LETTERTRACE, domainVerified: false }] as never);
+
+		const r = await tierReport("lettertrace");
+		expect(r!.published).toBe(0);
+		expect(r!.rows[0].earnedTier).toBe(0);
 	});
 
 	// Free-mail and our own domains are counted and shown, never publishable.
@@ -132,12 +144,12 @@ describe("tierReport", () => {
 		expect(byDomain["gmail.com"].status).toBe("not-attributable");
 		expect(byDomain["gmail.com"].kind).toBe("free_mail");
 		expect(byDomain["lettertrace.com"].kind).toBe("internal");
-		expect(byDomain["globex.com"].status).toBe("no-customer-record");
+		expect(byDomain["globex.com"].status).toBe("observed");
 
 		expect(r!.observed).toBe(3);
 		expect(r!.attributable).toBe(1);
-		// Only the real company counts as actionable backlog.
-		expect(r!.unpublishedEvidence).toBe(1);
+		// Only the real company counts.
+		expect(r!.published).toBe(1);
 	});
 
 	// A customer on record with no traffic is as much a finding as traffic with
@@ -153,7 +165,7 @@ describe("tierReport", () => {
 
 // Every status branch, decoupled from the fixtures. The demo vendor cannot
 // reach most of these: its `.example` domains are reserved-TLD by design, so
-// they stop at not-attributable before consent or observation is considered.
+// they stop at not-attributable before observation is considered.
 describe("classifyRow", () => {
 	const none = { sessions: 0, signups: 0, logins: 0 };
 	const busy = { sessions: 12, signups: 1, logins: 3 };
@@ -165,47 +177,43 @@ describe("classifyRow", () => {
 		tier: 2 as const,
 		verified: true,
 		features: [],
-		consent: "named" as const,
 	};
 
 	// The stored tier (2 on this fixture) has no effect: tiers come from
 	// evidence alone, and observation without payment is tier 1.
-	it("publishes at the earned tier when a named customer has evidence", () => {
+	it("counts an observed company at the earned tier", () => {
 		const r = classifyRow("acme.com", busy, customer, true);
-		expect(r.status).toBe("published");
+		expect(r.status).toBe("observed");
 		expect(r.earnedTier).toBe(1);
-		expect(r).not.toHaveProperty("assertedTier");
+		expect(r).not.toHaveProperty("consent");
 	});
 
-	it("reports a named customer with no evidence at tier 0", () => {
+	it("marks an observed company with payment evidence as paying, at tier 3", () => {
+		const r = classifyRow("acme.com", busy, undefined, true, undefined, true);
+		expect(r.status).toBe("paying");
+		expect(r.earnedTier).toBe(3);
+	});
+
+	it("never counts payment without observed use", () => {
+		const r = classifyRow("acme.com", none, customer, true, undefined, true);
+		expect(r.status).toBe("no-observation");
+		expect(r.earnedTier).toBe(0);
+	});
+
+	it("reports a listed company with no evidence at tier 0", () => {
 		const r = classifyRow("acme.com", none, customer, true);
 		expect(r.status).toBe("no-observation");
 		expect(r.earnedTier).toBe(0);
 	});
 
-	// Regression: classifyRow used to report "no-observation" here purely off
-	// the observation gate, contradicting the earnedTier 4 computed two lines
-	// above from the exact same countersignedAt fact — the report telling its
-	// reader two different things about one customer.
 	it("does not publish a leftover counter-signature with zero observation: tier 4 is retired", () => {
 		const r = classifyRow("acme.com", none, { ...customer, countersignedAt: "2026-09-01T00:00:00Z" } as never, true);
 		expect(r.status).toBe("no-observation");
 		expect(r.earnedTier).toBe(0);
 	});
 
-	it("reports a withheld customer as consent-blocked, not as missing evidence", () => {
-		const r = classifyRow("acme.com", busy, { ...customer, consent: "anonymous" }, true);
-		expect(r.status).toBe("consent-withheld");
-		expect(r.sessions).toBe(12);
-	});
-
-	it("treats an omitted consent field as withheld", () => {
-		const { consent: _omitted, ...noConsent } = customer;
-		expect(classifyRow("acme.com", busy, noConsent, true).status).toBe("consent-withheld");
-	});
-
-	it("flags observed, attributable traffic with no record", () => {
-		expect(classifyRow("acme.com", busy, undefined, true).status).toBe("no-customer-record");
+	it("counts observed, attributable traffic with no record", () => {
+		expect(classifyRow("acme.com", busy, undefined, true).status).toBe("observed");
 	});
 
 	// The worst case the ordering exists for: a customer record on a domain that
@@ -223,7 +231,7 @@ describe("classifyRow", () => {
 	// still been observed.
 	it("counts any event type as evidence, not just sessions", () => {
 		const signupOnly = classifyRow("acme.com", { sessions: 0, signups: 1, logins: 0 }, customer, true);
-		expect(signupOnly.status).toBe("published");
+		expect(signupOnly.status).toBe("observed");
 		expect(signupOnly.earnedTier).toBe(1);
 	});
 });

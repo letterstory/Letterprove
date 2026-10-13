@@ -40,7 +40,7 @@
  */
 
 export type DomainKind =
-	/** A real organisation. Eligible to become a customer, pending consent. */
+	/** A real organisation. Counts as a company in the vendor attestation. */
 	| "company"
 	/** A person's mailbox. Never a customer, at any tier. */
 	| "free_mail"
@@ -265,7 +265,7 @@ export function classifyDomain(domain: string, vendorDomain?: string): DomainCla
 	return { kind: "company", reason: "not a known consumer or internal domain" };
 }
 
-/** Can this domain ever be attributed to a customer? Consent is a separate question. */
+/** Can this domain ever be attributed to a company? */
 export function isAttributable(domain: string, vendorDomain?: string): boolean {
 	return classifyDomain(domain, vendorDomain).kind === "company";
 }

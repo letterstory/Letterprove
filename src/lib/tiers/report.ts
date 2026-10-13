@@ -5,21 +5,21 @@
  * join to answer, which means it gets answered by hand or not at all. This
  * turns it into a function.
  *
- * For one vendor it lines up three things that normally live apart — what was
- * observed (`hot_rollups`), who the vendor claims as a customer (the customer
- * records), and what the evidence gate will actually publish — and states, per
- * domain, the single reason that domain is or isn't a published claim.
+ * For one vendor it lines up what was observed (`hot_rollups`), which of those
+ * domains pay through the vendor's own Stripe account (payment evidence), and
+ * the vendor's private customer list, and states per domain how it counts in
+ * the vendor attestation.
  *
- * It reports; it publishes nothing. Every value here is derived from data that
- * already exists, and nothing it returns is signed or reaches an attestation.
- * That matters because it deliberately exposes customer domains, including
- * withheld and unattributable ones — **this output is staff-only and must
- * never be served unauthenticated.**
+ * It reports; it publishes nothing. The vendor attestation publishes counts
+ * only (README decision 30); this is the per-domain view behind them, and it
+ * deliberately exposes customer domains — **this output is for the vendor
+ * itself (list_observed) and staff (tier_report), and must never be served
+ * unauthenticated.**
  */
 
 import { classifyDomain, type DomainKind } from "@/lib/identity/domains";
 import { earned } from "@/lib/attest/body";
-import { allVendors, consentOf, type Consent, type CustomerFixture } from "@/lib/fixtures/vendors";
+import { allVendors, type CustomerFixture } from "@/lib/fixtures/vendors";
 import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import type { Tier } from "@/lib/attest/types";
@@ -28,21 +28,17 @@ import type { Tier } from "@/lib/attest/types";
 const WINDOW_DAYS = 30;
 
 /**
- * The single reason a domain is, or is not, a published claim. Ordered from
- * "nothing to say" to "actually published" — the first one that applies wins,
- * because a domain blocked for two reasons is only actionable on the first.
+ * How a domain counts in the vendor attestation. The first that applies wins.
  */
 export type TierStatus =
-	/** Observed, but the domain can never name a company. */
+	/** Observed, but the domain can never name a company: excluded, counted in `domains_excluded`. */
 	| "not-attributable"
-	/** Attributable and observed — nobody has created a customer record. */
-	| "no-customer-record"
-	/** Record exists, but consent to be named has not been given. */
-	| "consent-withheld"
-	/** Record exists and is publishable, but nothing was observed. */
+	/** On the vendor's private list, but nothing observed in the window: not counted. */
 	| "no-observation"
-	/** Published, at the tier the evidence earned. */
-	| "published";
+	/** An observed company: counted in `companies_observed`. */
+	| "observed"
+	/** An observed company with a settled, in-scope invoice: also counted in `paying_companies`. */
+	| "paying";
 
 export interface DomainTierRow {
 	domain: string;
@@ -50,11 +46,10 @@ export interface DomainTierRow {
 	sessions: number;
 	signups: number;
 	logins: number;
-	/** The customer record this domain maps to, when one exists. */
+	/** The vendor's private customer record for this domain, when one exists. Never published. */
 	customer: string | null;
-	/** What the evidence actually supports right now. */
+	/** What the evidence supports for this domain right now. Null when it can't name a company. */
 	earnedTier: Tier | null;
-	consent: Consent | null;
 	status: TierStatus;
 	/** Written to be read by a person deciding what to do next. */
 	detail: string;
@@ -66,10 +61,12 @@ export interface VendorTierReport {
 	observed: number;
 	/** Of those, how many could ever name a company. */
 	attributable: number;
-	/** Attributable, observed, and not published — the actionable backlog. */
+	/** Observed companies without payment evidence: counted, but not corroborated by Stripe. */
 	unpublishedEvidence: number;
-	/** Customer records that are actually publishing a claim today. */
+	/** Observed companies counted in the vendor attestation (`companies_observed`). */
 	published: number;
+	/** Of those, how many pay through the vendor's own Stripe account (`paying_companies`). */
+	paying: number;
 	rows: DomainTierRow[];
 }
 
@@ -121,70 +118,65 @@ async function observedTotals(vendorSlug: string): Promise<Map<string, RollupTot
 }
 
 /**
- * The whole decision, as a pure function.
- *
- * Exported because this is the part worth testing exhaustively: the fixture
- * vendors can't exercise every branch (vantage's `.example` domains are
- * reserved-TLD by design, so they never reach the consent or observation
- * checks), and a status this report gets wrong sends someone to fix the wrong
- * thing.
+ * The whole decision, as a pure function, exported so every branch is tested.
  */
 export function classifyRow(
 	domain: string,
 	totals: RollupTotals,
 	customer: CustomerFixture | undefined,
 	/**
-	 * The vendor's DNS-verified state. This report exists to tell an operator
-	 * why a customer isn't earning a tier, so it has to apply the
-	 * same gate publishing does — otherwise it would report an earned tier
-	 * the proof will never actually carry.
+	 * The vendor's DNS-verified state. The same gate the attestation applies,
+	 * so this never reports a tier the proof will not carry.
 	 */
 	domainVerified: boolean,
 	vendorDomain?: string,
+	/** Whether this domain has fresh payment evidence from the vendor's own Stripe account. */
+	paid = false,
 ): DomainTierRow {
 	const { kind } = classifyDomain(domain, vendorDomain);
 	const observed = totals.sessions + totals.signups + totals.logins > 0;
+	const payment = paid ? { currency: "", monthlyAmount: 1, since: "", subscriptionCount: 1 } : null;
 
 	const base = {
 		domain,
 		kind,
 		...totals,
 		customer: customer?.slug ?? null,
-		earnedTier: customer ? earned(customer, observed, domainVerified).tier : null,
-		consent: customer ? consentOf(customer) : null,
+		earnedTier: kind === "company" ? earned(observed, domainVerified, payment).tier : null,
 	};
 
-	// Order matters: an unattributable domain with a record is still
-	// unattributable, and that is the thing to fix first.
 	if (kind !== "company") {
-		return {
-			...base,
-			status: "not-attributable",
-			detail: `${kind} — counted, never publishable as a customer`,
-		};
-	}
-	if (!customer) {
-		return {
-			...base,
-			status: "no-customer-record",
-			detail: "observed and attributable — no customer record exists yet",
-		};
-	}
-	if (consentOf(customer) !== "named") {
-		return {
-			...base,
-			status: "consent-withheld",
-			detail: "record exists; contributes to the aggregate but is not named",
-		};
+		return { ...base, status: "not-attributable", detail: `${kind}: counted as excluded, never as a company` };
 	}
 	if (!observed) {
-		return { ...base, status: "no-observation", detail: "named, but nothing observed to earn a tier" };
+		return { ...base, status: "no-observation", detail: "on your list, but nothing observed in the last 30 days" };
+	}
+	if (base.earnedTier === 3) {
+		return { ...base, status: "paying", detail: "observed and paying through your Stripe account: counted in paying_companies" };
 	}
 	return {
 		...base,
-		status: "published",
-		detail: `published at tier ${base.earnedTier}`,
+		status: "observed",
+		detail: domainVerified
+			? "observed: counted in companies_observed"
+			: "observed, but your domain isn't proven by DNS, so nothing counts yet",
 	};
+}
+
+/** Domains with fresh payment evidence, or null when the read failed. */
+async function paidDomains(vendorId: string): Promise<Set<string> | null> {
+	const db = dbClient();
+	if (!db) return null;
+	const floor = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+	const { data, error } = await db
+		.from("vendor_payment_evidence")
+		.select("domain, monthly_amount")
+		.eq("vendor_id", vendorId)
+		.gte("synced_at", floor);
+	if (error || !data) return null;
+	return new Set(
+		(data as { domain: string; monthly_amount: number | string }[]).filter((r) => Number(r.monthly_amount) >= 1).map((r) => r.domain),
+	);
 }
 
 /**
@@ -200,12 +192,13 @@ export async function tierReport(vendorSlug: string): Promise<VendorTierReport |
 
 	const totals = await observedTotals(vendor.slug);
 	if (!totals) return null;
+	// A failed payment read shows nobody as paying, which understates; it
+	// never invents a paying company.
+	const paid = (vendor.id ? await paidDomains(vendor.id) : null) ?? new Set<string>();
 
 	const byDomain = new Map<string, CustomerFixture>();
 	for (const c of vendor.customers) byDomain.set(c.domain, c);
 
-	// Union of what was observed and who is on record: a customer with no
-	// traffic is as much a finding as traffic with no customer.
 	const domains = new Set<string>([...totals.keys(), ...byDomain.keys()]);
 
 	const rows = [...domains]
@@ -216,18 +209,19 @@ export async function tierReport(vendorSlug: string): Promise<VendorTierReport |
 				byDomain.get(d),
 				vendor.domainVerified,
 				vendor.domain,
+				paid.has(d),
 			),
 		)
 		.sort((a, b) => b.sessions - a.sessions || a.domain.localeCompare(b.domain));
 
+	const counted = rows.filter((r) => (r.status === "observed" || r.status === "paying") && vendor.domainVerified);
 	return {
 		vendor: vendor.slug,
 		observed: [...totals.keys()].length,
 		attributable: rows.filter((r) => r.kind === "company" && totals.has(r.domain)).length,
-		unpublishedEvidence: rows.filter(
-			(r) => r.status === "no-customer-record" || r.status === "consent-withheld"
-		).length,
-		published: rows.filter((r) => r.status === "published").length,
+		unpublishedEvidence: counted.filter((r) => r.status === "observed").length,
+		published: counted.length,
+		paying: counted.filter((r) => r.status === "paying").length,
 		rows,
 	};
 }

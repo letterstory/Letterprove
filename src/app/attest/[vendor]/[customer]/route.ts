@@ -1,25 +1,12 @@
-import { logProofAccess } from "@/lib/access/log";
-import { customerProof } from "@/lib/attest/proofs";
-import { readingOrder } from "@/lib/attest/reading-order";
-import { notFound, namedProofJson } from "@/lib/http";
+import { retiredCustomerProof } from "@/lib/http";
 
 /**
- * One customer's current attestation.
- *
- * The `.json` suffix is accepted and stripped: the README advertises
- * `/attest/{vendor}/{customer}.json`, and plenty of things that fetch a URL
- * cannot set an Accept header.
+ * Formerly one customer's attestation. Retired on 2026-10-13 (README decision
+ * 30): Letterprove attests the vendor only and names no customer. 410 for
+ * every slug, with the vendor's own attestation linked. Not logged as a read:
+ * nothing is served, so nothing is billed.
  */
-export async function GET(
-	request: Request,
-	{ params }: { params: Promise<{ vendor: string; customer: string }> }
-) {
-	const { vendor, customer } = await params;
-	const slug = customer.endsWith(".json") ? customer.slice(0, -".json".length) : customer;
-	logProofAccess(request, `${vendor}/${slug}`);
-
-	const proof = await customerProof(vendor, slug);
-	if (!proof) return notFound(`no attestation for "${vendor}/${slug}"`);
-
-	return namedProofJson(readingOrder(proof.current));
+export async function GET(_request: Request, { params }: { params: Promise<{ vendor: string; customer: string }> }) {
+	const { vendor } = await params;
+	return retiredCustomerProof(vendor);
 }

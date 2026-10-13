@@ -15,7 +15,7 @@ const UPDATED = "October 13, 2026";
  *
  *   §2  src/lib/telemetry/record.ts — the exact column list written per event
  *   §3  src/app/api/v1/observe/route.ts — origin pinning, DNS verification gate
- *   §4  src/lib/fixtures/vendors.ts consentOf() — anonymous is the default
+ *   §4  src/lib/attest/aggregate.ts — the only published document: counts, no names
  *   §6  src/lib/db/client.ts — RLS, service-role isolation
  *
  * If one of those changes, this page is wrong and has to change with it. The
@@ -158,19 +158,17 @@ export default function PrivacyPage() {
           it usually would.
         </p>
         <p>
-          <strong>Aggregate counts are public.</strong> A vendor&apos;s proof
-          page shows totals — how many companies were observed, how many
-          sessions, how many signups. These name nobody.
+          <strong>Counts about the vendor are public.</strong> A vendor&apos;s
+          proof shows that it controls its domain, whether its Stripe account
+          is its own, and totals — how many companies were observed, how many
+          of them pay, how many sessions. These name nobody.
         </p>
         <p>
-          <strong>A customer is named only when the vendor says it may be.</strong>{" "}
-          The default is anonymous: a customer added without anyone considering
-          the question is withheld from publication, never published by
-          accident. Naming is the vendor&apos;s statement that it holds that
-          customer&apos;s permission; Letterprove does not contact the
-          vendor&apos;s customers to confirm it, and every attestation lists the
-          name among the fields the vendor stated. A customer is counted in the
-          totals either way; naming controls only whether their name appears.
+          <strong>No customer is ever named.</strong> Letterprove does not
+          publish, or contact, any of a vendor&apos;s customers. Company domains
+          are used inside Letterprove only to join observed usage to the
+          vendor&apos;s Stripe payments. Attestations that named individual
+          customers were retired on October 13, 2026.
         </p>
         <p>
           We never publish individual events, individual visitors, or the raw
@@ -185,8 +183,8 @@ export default function PrivacyPage() {
           organization membership are handled entirely by Letterstory, which
           Letterprove trusts as an authenticated peer. We do not store a
           vendor password or password hash. We do store what you enter about
-          your company and customers: names, domains, categories, the date a
-          relationship started, and which features you claim.
+          your company, and any private customer list you keep (names,
+          domains, start dates, notes). That list is never published.
         </p>
         <p>
           Your publishable key is not a secret. It ships in your page&apos;s

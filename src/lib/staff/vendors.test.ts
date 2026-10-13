@@ -46,18 +46,16 @@ describe("vendorRoster", () => {
 		expect(await vendorRoster()).toBeNull();
 	});
 
-	it("counts named separately from withheld, treating an absent consent field as withheld", async () => {
+	it("counts the vendor's private customer list, and nothing about naming", async () => {
 		await setup(mockDb());
 		const [v] = (await vendorRoster())!;
-		expect(v.customers.total).toBe(3);
-		// Only "a" declares named; "b" is anonymous and "c" omits the field.
-		expect(v.customers.named).toBe(1);
+		expect(v.customers).toEqual({ total: 3 });
 	});
 
 	it("reports what the vendor actually publishes", async () => {
 		await setup(mockDb());
 		const [v] = (await vendorRoster())!;
-		expect(v.aggregate).toEqual({ companies: 15, sessions: 20, tier: 2 });
+		expect(v.aggregate).toEqual({ companies: 15, paying: 0, sessions: 20, tier: 2 });
 	});
 
 	// A failed telemetry read is not "publishes nothing" — surfacing 0 companies

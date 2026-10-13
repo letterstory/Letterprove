@@ -1,21 +1,13 @@
 /**
  * Turn an observed domain into a customer record.
  *
- * The gap this closes: lettertrace has been observed for 25 real company
- * domains and has three customer records, all of them `.example` fixtures. So
- * every signed per-customer claim in production is about a company that does
- * not exist, while the evidence about companies that do exist is attached to
- * nothing. The tier report already names each of those domains
- * `no-customer-record`; until now the only way to act on that was a hand-written
- * Supabase insert.
+ * Adds an observed domain to the vendor's PRIVATE customer list. Nothing on
+ * that list is ever published (README decision 30): the vendor attestation
+ * counts observed and paying companies whether or not they are on it. The list
+ * exists for the vendor's own bookkeeping.
  *
  * What this deliberately does NOT let staff do:
  *
- *   - **Set consent.** A record is always created `anonymous`. Being named is
- *     the customer's decision, evidenced outside this system; a staff member
- *     clicking a button is not that evidence. It contributes to the aggregate
- *     immediately and can be flipped to `named` later, which is the
- *     "build named, ship anonymized, flip as consent lands" order.
  *   - **Set tier or verified.** Those are stored as a ceiling and re-derived
  *     from evidence at publish time by earned(). Letting an operator type a
  *     number here would make the tier an assertion again, which is the thing
@@ -157,7 +149,6 @@ export async function promoteDomain(vendorSlug: string, rawDomain: string): Prom
 		tier: 1,
 		verified: false,
 		features: [],
-		consent: "anonymous",
 	});
 
 	if (error) {

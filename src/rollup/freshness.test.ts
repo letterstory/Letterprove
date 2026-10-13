@@ -75,34 +75,28 @@ describe("checkPublicationFreshness", () => {
 		const result = await checkPublicationFreshness();
 
 		expect(result.ok).toBe(false);
-		expect(result.checks.filter((c) => !c.ok)).toHaveLength(2);
+		expect(result.checks.filter((c) => !c.ok)).toHaveLength(1);
 		expect(result.checks[0].detail).toContain(`${STALE_AFTER_HOURS}h behind`);
 	});
 
-	// A combined verdict would have hidden this: the aggregate is publishing
-	// fine and only the per-customer half has stalled, which is a different
-	// investigation and a different blast radius.
-	it("names only the half that has stalled", async () => {
+	// Per-customer snapshots were retired on 2026-10-13 and are no longer
+	// frozen, so that table going stale must never page anyone.
+	it("ignores the retired per-customer table, however stale", async () => {
 		await useDb(
 			mockDb({
-				published_snapshots: { bucket: CURRENT_BUCKET - 9 },
+				published_snapshots: { bucket: CURRENT_BUCKET - 99 },
 				published_aggregates: { bucket: CURRENT_BUCKET },
 			})
 		);
 
 		const result = await checkPublicationFreshness();
 
-		expect(result.ok).toBe(false);
-		const failing = result.checks.filter((c) => !c.ok);
-		expect(failing).toHaveLength(1);
-		expect(failing[0].scope).toContain("per-customer");
+		expect(result.ok).toBe(true);
+		expect(result.checks.map((c) => c.scope)).toEqual(["vendor attestations (/attest/{vendor})"]);
 	});
 
-	// A deploy whose vendors have no named customers never writes
-	// published_snapshots. Paging about that every 15 minutes forever is the
-	// loudest possible way to say nothing.
 	it("does not call an unwritten table stale", async () => {
-		await useDb(mockDb({ published_snapshots: { bucket: null }, published_aggregates: { bucket: CURRENT_BUCKET } }));
+		await useDb(mockDb({ published_aggregates: { bucket: null } }));
 
 		const result = await checkPublicationFreshness();
 
@@ -114,13 +108,13 @@ describe("checkPublicationFreshness", () => {
 	// but it must not masquerade as a staleness finding.
 	it("reports a failed read as uncheckable rather than as staleness", async () => {
 		await useDb(
-			mockDb({ published_snapshots: { error: "connection reset" }, published_aggregates: { bucket: CURRENT_BUCKET } })
+			mockDb({ published_aggregates: { error: "connection reset" } })
 		);
 
 		const result = await checkPublicationFreshness();
 
 		expect(result.ok).toBe(false);
-		expect(result.checks[0].detail).toContain("cannot read published_snapshots");
+		expect(result.checks[0].detail).toContain("cannot read published_aggregates");
 		expect(result.checks[0].detail).toContain("connection reset");
 	});
 

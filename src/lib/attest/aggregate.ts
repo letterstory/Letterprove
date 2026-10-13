@@ -1,19 +1,25 @@
 /**
- * The vendor-level attestation — the one claim we can publish before anyone
- * consents to be named.
+ * The vendor attestation — the one public claim Letterprove makes.
  *
- * Naming a customer discloses *their* data and needs their say-so (README §
- * Consent). Counting them does not: *"12 companies observed, 47 sessions in
- * the last 30 days"* identifies nobody. That makes this the only verifiable
- * thing Letterprove can say about a real vendor today — every per-customer
- * proof is withheld until consent lands, so `/proofs/lettertrace` is
- * otherwise empty despite a month of genuine observations.
+ * It says two things about a vendor and nothing about anyone else:
+ *
+ *   1. WHO THEY ARE. The domain they proved by DNS (re-checked daily), since
+ *      when, how many extra hosts the collector accepts, and whether the
+ *      Stripe account they connected is theirs (its published domains match,
+ *      or staff approved it).
+ *   2. WHAT BACKS IT. How many companies were observed signing in over the
+ *      last 30 days, how many sessions, and how many of those companies are
+ *      paying through that Stripe account — counts, never names.
+ *
+ * NO CUSTOMER IS EVER NAMED. Customer domains exist internally because they
+ * are the join key between observed sign-ins and Stripe payments; nothing in
+ * this body, or anywhere public, carries one. Per-customer documents were
+ * retired on 2026-10-13 (README decision 30).
  *
  * WHAT IT DELIBERATELY DOES NOT SAY. Not "customers" — "companies observed".
  * A session from `someone@acme.com` proves a person at Acme used the product;
- * it does not prove Acme buys it. That is a commercial fact we do not hold,
- * and the gap between those two sentences is the whole reason this product
- * exists. The wire field is `companies_observed` for the same reason.
+ * it does not prove Acme buys it. `paying_companies` is the subset where a
+ * settled invoice in the vendor's own Stripe account says Acme does.
  *
  * Unattributable domains are counted and excluded, never silently dropped:
  * `domains_excluded` is published alongside so the headline can be read
@@ -26,8 +32,7 @@
  * exactly the frozen rows and nothing signed on the side (see buildChainFor),
  * so every document handed out is stored and its `verify` link resolves.
  *
- * The immutability caveat that applies to customer snapshots applies here too:
- * a frozen entry is permanent, so a wrong one is permanent. That is why the
+ * A frozen entry is permanent, so a wrong one is permanent. That is why the
  * freeze refuses a development-key signature and refuses a body built on a
  * failed telemetry read, rather than persisting a signed zero.
  */
@@ -49,14 +54,38 @@ import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
 import { withDisclosure } from "./issuer";
+import { hostCount, observedSince, payingAmong, stripeBinding, type StripeBinding } from "./vendor-evidence";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
 const WINDOW_DAYS = 30;
 
 export interface AggregateBody {
 	vendor: string;
-	/** Distinguishes this from a customer attestation at a glance. */
+	/** The only kind published since 2026-10-13. Older chains also hold retired per-customer documents. */
 	kind: "aggregate";
+	/**
+	 * The domain the vendor proved by DNS. Absent before 2026-10-13, like every
+	 * identity field below.
+	 */
+	domain?: string;
+	/** When DNS control was last proven (re-checked daily), or null when it isn't proven. */
+	domain_verified_since?: string | null;
+	/** How many extra hosts the collector accepts events from. A count, never the hosts. */
+	hosts?: number;
+	/** Whether the connected Stripe account is the vendor's own. False when Stripe isn't connected. */
+	stripe_account_bound?: boolean;
+	/** How that was established: its published domains match, or staff approved it. Null when not bound. */
+	stripe_binding?: StripeBinding | null;
+	/**
+	 * Observed companies with a settled, in-scope invoice in the vendor's own
+	 * Stripe account. A count, never names. 0 when Stripe isn't connected or
+	 * isn't bound. Absent before 2026-10-13.
+	 */
+	paying_companies?: number;
+	/** Earliest settled invoice among `paying_companies`, or null. */
+	paying_since?: string | null;
+	/** When Letterprove first observed usage for this vendor, from its own frozen record. */
+	observed_since?: string | null;
 	window_days: number;
 	/** Distinct company domains observed. NOT a customer count — see module doc. */
 	companies_observed: number;
@@ -103,9 +132,14 @@ interface Totals {
 }
 
 /**
- * What the evidence supports for a vendor-wide claim. The same rule as a
- * customer claim in body.ts's earned(), minus payment: the aggregate makes no
- * commercial claim, so it tops out at tier 1.
+ * What the evidence supports for the vendor claim: the strongest evidence
+ * class present, with `paying_companies` published beside it so "tier 3" is
+ * never read as "every company pays" (README decision 30).
+ *
+ *   3 — companies observed on a verified domain, and at least one of them
+ *       pays through the vendor's own (bound) Stripe account;
+ *   1 — companies observed on a verified domain;
+ *   0 — nothing observed, or the domain isn't proven.
  *
  * Tier 1, not 2. This used to claim tier 2 on the strength of two
  * infrastructure facts (our receipt timestamp and the pinned origin, decision
@@ -119,8 +153,9 @@ interface Totals {
  * Capped at 0 with nothing observed: a tier is a statement about evidence,
  * and there isn't any.
  */
-export function earnedAggregateTier(observed: boolean, domainVerified: boolean): Tier {
-	return observed && domainVerified ? 1 : 0;
+export function earnedAggregateTier(observed: boolean, domainVerified: boolean, payingCompanies = 0): Tier {
+	if (!observed || !domainVerified) return 0;
+	return payingCompanies > 0 ? 3 : 1;
 }
 
 /** Every domain this vendor was observed for in the window, with its totals. */
@@ -189,16 +224,34 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		{ sessions: 0, signups: 0, logins: 0 }
 	);
 
-	const scope = vendor.id ? await paymentScopeFor(vendor.id) : null;
+	const [scope, binding, hosts, firstObserved] = await Promise.all([
+		vendor.id ? paymentScopeFor(vendor.id) : Promise.resolve(null),
+		vendor.id ? stripeBinding(vendor.id, vendor.domain) : Promise.resolve(null),
+		vendor.id ? hostCount(vendor.id) : Promise.resolve(0),
+		observedSince(vendor.slug),
+	]);
+	// Payment only counts from an account that is the vendor's own. The Stripe
+	// sync already clears evidence on a mismatch; this holds even if a row
+	// outlives that.
+	const paying = binding && vendor.id ? await payingAmong(vendor.id, attributable) : { companies: 0, since: null };
 	const now = new Date().toISOString();
+	const observed = attributable.length > 0;
 	return {
 		vendor: vendor.slug,
 		kind: "aggregate",
+		domain: vendor.domain,
+		domain_verified_since: vendor.domainVerified && vendor.domainVerifiedAt ? new Date(vendor.domainVerifiedAt).toISOString() : null,
+		hosts: vendor.domainVerified ? hosts : 0,
+		stripe_account_bound: binding !== null,
+		stripe_binding: binding,
 		window_days: WINDOW_DAYS,
 		companies_observed: attributable.length,
 		...summed,
 		domains_excluded: excluded.length,
-		tier: earnedAggregateTier(attributable.length > 0, vendor.domainVerified),
+		paying_companies: paying.companies,
+		paying_since: paying.since,
+		observed_since: firstObserved ?? (observed ? now : null),
+		tier: earnedAggregateTier(observed, vendor.domainVerified, paying.companies),
 		vendor_stated: [],
 		...(scope ? { payment_scope: scope } : {}),
 		observed_through: now,
@@ -211,7 +264,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 }
 
 /**
- * Memoised per hour, matching the customer chains — see hourly-memo.ts for how
+ * Memoised per hour — see hourly-memo.ts for how
  * long a chain still waiting on this hour's freeze is held.
  */
 const chainCache = createHourlyMemo<{ chain: SignedAggregate[] | null; complete: boolean }>((v) => v.complete);
@@ -233,10 +286,10 @@ export async function signAggregate(
 	const body = await aggregateBody(vendorSlug);
 	if (!body) return null;
 
-	// Vendor-scoped fraud features: the same shape the customer path sends,
-	// unfiltered by domain. Supplied explicitly because countersign cannot
-	// derive them — there is no customer to look up. The `customer` field is a
-	// label on the scorer's side, never a key, so it names the claim instead.
+	// Vendor-scoped fraud features, unfiltered by domain. Supplied explicitly
+	// because countersign cannot derive them — there is no customer to look
+	// up. The `customer` field is a label on the scorer's side, never a key, so
+	// it names the claim instead.
 	const features = await fraudFeatures(vendorSlug, "*aggregate*", null);
 
 	return signAttestation({ ...body, prev_hash: prevHash }, features);
@@ -245,7 +298,7 @@ export async function signAggregate(
 /**
  * The published chain: exactly the rows the hourly freeze has written.
  *
- * Nothing signed on the side, for the reason given at length in proofs.ts: a
+ * Nothing signed on the side. A
  * live entry signed per instance carried a `verify` link to a snapshot that was
  * never stored, so /verify called our own document a forgery. Null until the
  * first freeze. Development signing is the one exception, because the freeze

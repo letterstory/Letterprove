@@ -8,9 +8,8 @@
  * is any of it live.
  *
  * Everything here is already in the database. The value is the join: vendor
- * identity, the customers they have declared, and what actually publishes —
- * which today is usually the aggregate and nothing else, because naming a
- * customer needs that customer's consent.
+ * identity, how many customers they keep on their private list, and what the
+ * vendor attestation — the only thing Letterprove publishes — says.
  *
  * This used to also resolve the humans behind each vendor via `vendor_members`
  * — dropped by the auth-unification migration (20260828130000). Membership now
@@ -27,7 +26,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
-import { allVendors, consentOf } from "@/lib/fixtures/vendors";
+import { allVendors } from "@/lib/fixtures/vendors";
 import { aggregateBody } from "@/lib/attest/aggregate";
 import type { Tier } from "@/lib/attest/types";
 
@@ -37,11 +36,12 @@ export interface VendorRow {
 	domain: string;
 	category: string;
 	key: string;
-	customers: { total: number; named: number };
+	/** The vendor's private customer list. Never published. */
+	customers: { total: number };
 	/** When this vendor's proofs went public, or null while they are private. */
 	published_at: string | null;
 	/** What the vendor-level attestation currently says, or null if it publishes nothing. */
-	aggregate: { companies: number; sessions: number; tier: Tier } | null;
+	aggregate: { companies: number; paying: number; sessions: number; tier: Tier } | null;
 }
 
 export async function vendorRoster(): Promise<VendorRow[] | null> {
@@ -61,10 +61,7 @@ export async function vendorRoster(): Promise<VendorRow[] | null> {
 				domain: v.domain,
 				category: v.category,
 				key: v.key,
-				customers: {
-					total: v.customers.length,
-					named: v.customers.filter((c) => consentOf(c) === "named").length,
-				},
+				customers: { total: v.customers.length },
 				// Whether anything below is actually reachable by a stranger. A
 				// private vendor's aggregate is computed and frozen exactly as a
 				// public one's, so without this the roster reads identically for
@@ -73,7 +70,7 @@ export async function vendorRoster(): Promise<VendorRow[] | null> {
 				// A null aggregate means telemetry could not be read, which is not
 				// the same as publishing nothing — the page distinguishes them.
 				aggregate: agg
-					? { companies: agg.companies_observed, sessions: agg.sessions, tier: agg.tier }
+					? { companies: agg.companies_observed, paying: agg.paying_companies ?? 0, sessions: agg.sessions, tier: agg.tier }
 					: null,
 			};
 		})

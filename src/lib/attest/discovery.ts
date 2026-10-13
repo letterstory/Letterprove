@@ -53,7 +53,7 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 	return {
 		name: "Letterprove",
 		description:
-			"Cryptographically attested proof of real product usage, published for evaluating agents.",
+			"Signed, hourly attestations that a software vendor is who it says it is (its domain, proven by DNS; its Stripe account, bound to that domain) and is backed by data (companies observed using it, and how many pay). Counts only; no customer is ever named.",
 		signing: {
 			alg: "EdDSA",
 			crv: "Ed25519",
@@ -81,9 +81,9 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		// The check an answer engine can actually perform: fetch a URL that is
 		// already in the document. See ./verify-link.ts.
 		verify_links: {
-			pattern: `${VERIFY_ORIGIN}/verify/{vendor}[/{customer}]/{published_at as YYYYMMDDTHHMMSSmmmZ}`,
+			pattern: `${VERIFY_ORIGIN}/verify/{vendor}/{published_at as YYYYMMDDTHHMMSSmmmZ}`,
 			note:
-				"Every attestation signed since 2026-10-08 carries `verify`, a link to that exact snapshot on this host. Fetching it shows, in plain language, the figures Letterprove signed and whether the signature checks out. A copy whose figures differ from that page was altered. A `verify` link that points anywhere but this host was not issued by Letterprove. One that 404s means Letterprove cannot vouch for that copy (the vendor or customer may no longer be public); only its signature, checked against `jwks_uri`, settles whether Letterprove issued it.",
+				"Every attestation signed since 2026-10-08 carries `verify`, a link to that exact snapshot on this host. Fetching it shows, in plain language, the figures Letterprove signed and whether the signature checks out. A copy whose figures differ from that page was altered. A `verify` link that points anywhere but this host was not issued by Letterprove. One that 404s means Letterprove cannot vouch for that copy (the vendor may no longer be public); only its signature, checked against `jwks_uri`, settles whether Letterprove issued it. Per-customer documents and their verify links (`/verify/{vendor}/{customer}/…`) were retired on 2026-10-13 and answer 410; copies signed before then still verify against `jwks_uri`.",
 		},
 		// Beside the verifier on purpose. Those two answer the two separate
 		// questions an agent has — "is this document genuine" and "how much is
@@ -103,12 +103,10 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 			note:
 				"A vendor listed in `affiliated_vendors` shares an owner with Letterprove's operator, and every attestation for it carries a signed `issuer_affiliation` saying so. The same collector, code and signing apply to it as to any other vendor; weigh its proofs knowing the relationship.",
 		},
-		// The aggregate is listed beside the report on purpose. It is the only
-		// claim most vendors will ever publish — a customer is named only when
-		// the vendor states it has permission — so an agent that only found `report` would miss
-		// the one thing that is actually signed for them. `chain` is what makes
-		// it auditable rather than merely signed: walk it and you can prove no
-		// earlier figure was restated.
+		// `aggregate` is the vendor attestation, the one signed claim
+		// Letterprove makes about a vendor. `chain` is what makes it auditable
+		// rather than merely signed: walk it and you can prove no earlier figure
+		// was restated.
 		// Published vendors only. This is the first document an agent reads, so
 		// a private vendor listed here would be named and linked by the very
 		// thing that tells agents where to look, and the 404s behind it would be

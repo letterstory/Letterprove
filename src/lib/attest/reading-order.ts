@@ -28,8 +28,14 @@ const LEAD = [
 	"customer_name",
 	"customer_domain",
 	"kind",
+	"domain",
+	"domain_verified_since",
+	"stripe_account_bound",
+	"stripe_binding",
 	"verified",
 	"tier",
+	"companies_observed",
+	"paying_companies",
 	"vendor_stated",
 ] as const;
 

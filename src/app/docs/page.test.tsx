@@ -90,13 +90,15 @@ describe("the docs page", () => {
 	 */
 	it("keeps the unflattering facts", async () => {
 		const text = await render("app.letterprove.com");
-		// seats_active is signed as a literal 0 for everyone (src/rollup/snapshots.ts).
-		expect(text).toMatch(/seats_active[\s\S]{0,40}always 0/);
+		// Companies observed are not customers, and the docs say so.
+		expect(text).toMatch(/does not prove the company buys it/);
+		// Tier 3 is never read as "every company pays".
+		expect(text).toMatch(/Tier 3 never means every company pays/);
 		// Tier 2 is not issued: the ASN binding it describes is not built.
 		expect(text).toMatch(/Tier 2 is not issued/);
-		// Customer details are the vendor's word, and the docs say so.
-		expect(text).toMatch(/vendor_stated/);
+		// Customers are never named.
+		expect(text).toMatch(/never names, publishes or contacts your customers/);
 		// A valid signature is not the claim; the tier is.
-		expect(text).toMatch(/tier-0 body asserts only that the vendor said so/);
+		expect(text).toMatch(/tier-0 document asserts nothing beyond the vendor existing/);
 	});
 });

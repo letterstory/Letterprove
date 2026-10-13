@@ -4,20 +4,16 @@ import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
 import { notFound, proofJson } from "@/lib/http";
 
 /**
- * A vendor's full aggregate history — `/attest/{vendor}/chain`.
+ * A vendor's full attestation history — `/attest/{vendor}/chain`.
  *
- * The counterpart to `/attest/{vendor}/{customer}/chain`, and the thing that
- * makes the vendor-level claim auditable rather than merely signed: each entry
+ * The thing that makes the vendor claim auditable rather than merely signed: each entry
  * carries the hash of its predecessor, so a verifier can prove we have not
  * quietly restated last month's numbers.
  *
- * RESERVED SLUG. This is a static segment sitting beside `[customer]`, and
- * Next resolves static before dynamic — so a customer slugged "chain" would be
- * unreachable at `/attest/{vendor}/chain`. That slug is refused at customer
- * creation for exactly this reason (see api/vendor/customers), rather than
- * left to be discovered when someone's proof silently 404s.
+ * A static segment beside the retired `[customer]` route; Next resolves static
+ * before dynamic.
  *
- * Names nobody, so no consent gate — but publication-gated all the same, via
+ * Names nobody, but publication-gated, via
  * `publishedVendorAggregateChain`. The history is built and frozen for a
  * private vendor exactly as for a public one; what publication decides is
  * whether it leaves the building. That is what makes going public a flip

@@ -1,4 +1,3 @@
-import { freezeSnapshots } from "@/rollup/freeze";
 import { freezeAggregates } from "@/rollup/freeze-aggregates";
 import { sendAlert } from "@/lib/alerts/notify";
 
@@ -10,12 +9,12 @@ import { sendAlert } from "@/lib/alerts/notify";
  * closed rather than leaving the endpoint open.
  *
  * This is the route that signs and publishes, so its failures are the
- * expensive ones. They used to also be the quiet ones: a failed half returned
- * 500 into Vercel's logs and nothing told a human, while the served
- * attestations went on advertising a `published_at` and a `ttl` that said they
- * were current. Every failure path here now pages, and names which half died
- * and how far it got, because "the freeze failed" does not tell you whose
- * proofs stopped updating.
+ * expensive ones. Every failure path pages, and says how far it got, because
+ * "the freeze failed" does not tell you whose proofs stopped updating.
+ *
+ * One half since 2026-10-13: the vendor attestations. Per-customer snapshots
+ * were retired (README decision 30) and are no longer frozen; their stored
+ * history is untouched.
  */
 type Half = { ok: boolean; frozen: number; skipped?: string[]; detail?: string };
 
@@ -23,7 +22,7 @@ const SKIPPED_NAMES_IN_ALERT = 5;
 
 /**
  * Everything a human needs out of a single Slack line: why it broke, how far
- * it got before it broke, and which subjects were left out. `frozen` is blast
+ * it got before it broke, and which vendors were left out. `frozen` is blast
  * radius in the other direction, since dying at vendor 40 of 41 is a very
  * different morning from dying at vendor 1.
  */
@@ -55,31 +54,9 @@ export async function GET(request: Request) {
 		return new Response("unauthorized", { status: 401 });
 	}
 
-	// Both halves of the published record: per-customer snapshots and the
-	// vendor-level aggregate. Run together because they must share an hour
-	// bucket — a chain whose two halves disagreed about which hour they were
-	// in would be far harder to reason about than one cron doing both.
-	//
-	// Independent results rather than a single ok: the aggregate publishes for
-	// vendors with no customers at all, so snapshots freezing nothing is a
-	// normal state and must not mask an aggregate failure, or vice versa.
-	const [snapshotsResult, aggregatesResult] = await Promise.allSettled([freezeSnapshots(), freezeAggregates()]);
-	const snapshots = settled(snapshotsResult);
-	const aggregates = settled(aggregatesResult);
-	const ok = snapshots.ok && aggregates.ok;
-
-	// One alert per failing half, not one per run. Partial failure is the
-	// common case, and collapsing the two into "cron failed" would throw away
-	// the only part of the message that says where to look.
-	if (!snapshots.ok) {
-		await sendAlert("hourly freeze failed: per-customer snapshots", failureDetail(snapshots));
-	}
+	const aggregates = settled((await Promise.allSettled([freezeAggregates()]))[0]);
 	if (!aggregates.ok) {
-		await sendAlert("hourly freeze failed: vendor aggregates", failureDetail(aggregates));
+		await sendAlert("hourly freeze failed: vendor attestations", failureDetail(aggregates));
 	}
-
-	// Response shape and status are unchanged: Vercel's retry and its failed
-	// cron display key off the 500, and alerting must not change whether this
-	// run reports success.
-	return Response.json({ ok, snapshots, aggregates }, { status: ok ? 200 : 500 });
+	return Response.json({ ok: aggregates.ok, aggregates }, { status: aggregates.ok ? 200 : 500 });
 }

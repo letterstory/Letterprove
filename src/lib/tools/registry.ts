@@ -296,12 +296,12 @@ export const TOOLS: BoundTool[] = [
 		},
 	}),
 	defineTool({
-		// The vendor-level proof rollup for the summary tab: headline tier +
-		// counts. `list_snapshots` is per-customer and can't answer this. Returns
+		// The vendor attestation read back for the summary tab: tier + counts.
+		// Returns
 		// the slug so the caller builds the public /proofs, /attest URLs against
 		// Letterprove's own origin (they must not point at the caller's host).
 		name: "get_proof_summary",
-		description: "Vendor-level proof rollup for the caller's vendor: headline tier, counts, and slug for public URLs.",
+		description: "The caller's vendor attestation, read back: tier, companies observed, paying companies, sessions, and the slug for public URLs. Works while private.",
 		capability: "vendor:read",
 		inputSchema: S.getProofSummaryInput,
 		outputSchema: S.getProofSummaryOutput,
@@ -324,7 +324,8 @@ export const TOOLS: BoundTool[] = [
 					slug: vendor.slug,
 					tier: summary.tier,
 					tier_name: TIER_LADDER[summary.tier].name,
-					attested_customers: summary.attested_customers,
+					attested_customers: summary.paying_companies,
+					paying_companies: summary.paying_companies,
 					companies_observed: summary.companies_observed,
 					sessions_30d: summary.sessions_30d,
 					last_attested: summary.last_attested || null,
@@ -410,7 +411,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "create_customer",
-		description: "Create a customer for the caller's vendor. Args: slug, name, domain, since, consent?.",
+		description: "Add a customer to the caller's private list. Never published: the attestation counts companies, it does not name them. Args: slug, name, domain, since.",
 		capability: "vendor:write",
 		inputSchema: S.createCustomerInput,
 		outputSchema: S.createCustomerOutput,
@@ -427,7 +428,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "update_customer",
 		description:
-			"Update one of the caller's customers. Args: slug (required), plus any of name, domain, since, consent, features.",
+			"Update a customer on the caller's private list. Args: slug (required), plus any of name, domain, since, features.",
 		capability: "vendor:write",
 		inputSchema: S.updateCustomerInput,
 		outputSchema: S.updateCustomerOutput,
@@ -499,7 +500,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "list_observed",
 		description:
-			"Companies the caller's vendor has been observed serving in the publishing window, with what each one is blocked on. Args: none. Read-only — use record_customer to turn one into a customer record.",
+			"The company domains behind your attestation's counts, for your eyes only: each observed domain and how it counts (observed, paying, excluded). Args: none. Read-only. Nothing here is published by name.",
 		capability: "vendor:read",
 		inputSchema: S.listObservedInput,
 		outputSchema: S.listObservedOutput,
@@ -543,6 +544,7 @@ export const TOOLS: BoundTool[] = [
 					attributable: report.attributable,
 					awaiting: report.unpublishedEvidence,
 					published: report.published,
+					paying: report.paying,
 					domains: report.rows.map((row) => ({
 						domain: row.domain,
 						kind: row.kind,
@@ -972,7 +974,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "list_snapshots",
 		description:
-			"Attestation chain summaries for the caller's customers — chain length and current snapshot. Args: customer (slug, optional — every customer if omitted).",
+			"History of the retired per-customer chains (frozen up to 2026-10-13; nothing new is added — Letterprove now publishes one vendor attestation). Args: customer (slug, optional).",
 		capability: "vendor:read",
 		inputSchema: S.listSnapshotsInput,
 		outputSchema: S.listSnapshotsOutput,

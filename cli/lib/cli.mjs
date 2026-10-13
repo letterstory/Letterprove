@@ -40,8 +40,8 @@ Usage:
   letterprove support <message>                Send a support message to the team
 
   letterprove customers list                   List this vendor's customers
-  letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
-  letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
+  letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since>
+  letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--features a,b,c]
   letterprove customers delete <slug>
 
   letterprove staff tiers [--vendor <slug>]     Per-domain tier status (every vendor, or one)
@@ -396,7 +396,6 @@ async function cmdCustomers({ config, flags, io, positional }) {
 				name: flags.name,
 				domain: flags.domain,
 				since: flags.since,
-				...(flags.consent ? { consent: flags.consent } : {}),
 			};
 			const { customer } = await client.callTool("create_customer", args);
 			io.log(flags.json ? JSON.stringify(customer, null, 2) : `Created ${customer.slug}.`);
@@ -409,7 +408,6 @@ async function cmdCustomers({ config, flags, io, positional }) {
 			if (typeof flags.name === "string") args.name = flags.name;
 			if (typeof flags.domain === "string") args.domain = flags.domain;
 			if (typeof flags.since === "string") args.since = flags.since;
-			if (typeof flags.consent === "string") args.consent = flags.consent;
 			if (typeof flags.features === "string") args.features = flags.features.split(",").map((f) => f.trim());
 			const { customer } = await client.callTool("update_customer", args);
 			io.log(flags.json ? JSON.stringify(customer, null, 2) : `Updated ${customer.slug}.`);

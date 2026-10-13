@@ -15,16 +15,13 @@ import type { VendorProof } from "./proofs";
 
 const PROOF: VendorProof = {
 	vendor: { slug: "vantage", name: "Vantage", domain: "vantage.example", category: "customer data platforms", issuer_affiliation: null },
-	customers: [],
+	attestation: null,
 	summary: {
-		attested_customers: 12,
-		attested_unnamed: 4,
-		unverified_customers: 7,
-		features_stated: ["analytics", "api", "sso"],
+		tier: 3,
+		companies_observed: 31,
+		paying_companies: 12,
 		sessions_30d: 38_000,
 		last_attested: "2026-08-01T00:00:00.000Z",
-		tier: 2,
-		companies_observed: 31,
 	},
 };
 
@@ -71,9 +68,11 @@ describe("vendorJsonLd", () => {
 		const ld = vendorJsonLd(PROOF, ORIGIN);
 		const dataset = ld.subjectOf as Record<string, unknown>;
 
-		expect(dataset.description).toContain("12 customers whose observed usage is corroborated by a settled invoice");
-		expect(dataset.description).not.toMatch(/proven|independently attested features/);
-		expect(dataset.name).toBe("Letterprove attestations for Vantage");
+		expect(dataset.description).toContain("31 companies observed signing in over the last 30 days");
+		expect(dataset.description).toContain("12 of them paying through Vantage's own Stripe account");
+		expect(dataset.description).toContain("controls vantage.example (proven by DNS)");
+		expect(dataset.description).toContain("no customer is named");
+		expect(dataset.name).toBe("Letterprove attestation for Vantage");
 	});
 
 	it("dates the dataset by the vendor's last attestation, not by render time", () => {
@@ -82,21 +81,6 @@ describe("vendorJsonLd", () => {
 		const ld = vendorJsonLd(PROOF, ORIGIN);
 
 		expect((ld.subjectOf as Record<string, unknown>).dateModified).toBe("2026-08-01T00:00:00.000Z");
-	});
-
-	it("names nobody, even when the vendor has named customers", () => {
-		// Consent gates naming on EVERY surface. This one is injected into a
-		// third-party page and crawled by everything, so it is the worst place
-		// for a name to escape.
-		const ld = vendorJsonLd(
-			{
-				...PROOF,
-				customers: [{ current: { customer_name: "Acme Corp" }, chain: [] }] as never,
-			},
-			ORIGIN
-		);
-
-		expect(JSON.stringify(ld)).not.toContain("Acme Corp");
 	});
 
 	it("stays a discovery pointer rather than a second copy of the attestation", () => {
@@ -134,12 +118,12 @@ describe("vendorJsonLd", () => {
 	it("survives a vendor with nothing attested yet without emitting broken markup", () => {
 		const empty: VendorProof = {
 			...PROOF,
-			summary: { ...PROOF.summary, attested_customers: 0, features_stated: [], last_attested: "" },
+			summary: { tier: 0, companies_observed: 0, paying_companies: 0, sessions_30d: 0, last_attested: "" },
 		};
 
 		const dataset = vendorJsonLd(empty, ORIGIN).subjectOf as Record<string, unknown>;
 
-		expect(dataset.description).toContain("0 customers whose observed usage");
+		expect(dataset.description).toContain("0 companies observed");
 		expect(dataset.dateModified).toBe("");
 	});
 

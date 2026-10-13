@@ -55,8 +55,8 @@ evaluating agent can check rather than take on faith.
 | | | |
 |---|---|---|
 | **01** | **Install** | One script tag on the vendor's site. No SDK, no backend, no data warehouse. It begins observing real product usage the moment it loads. |
-| **02** | **Verify** | Letterprove confirms the vendor's headline customers actually use the product — real accounts, real activity — and records each observation with facts the vendor cannot forge. |
-| **03** | **Attest** | We publish dynamic, machine-readable customer success reports that agents can fetch, verify, and quote. Always current, always signed. |
+| **02** | **Verify** | Letterprove confirms the vendor is who it says it is — its domain by DNS, its Stripe account bound to that domain — and observes real usage directly, with facts the vendor cannot forge. |
+| **03** | **Attest** | One signed, hourly proof of the vendor: companies using it, sessions, and how many of those companies pay through its Stripe. Counts, never names. Agents fetch, verify and quote it. |
 
 ```html
 <script src="https://app.letterprove.com/attest.js" data-key="lp_live_9f2c…"></script>
@@ -73,24 +73,28 @@ at root, from the party who benefits from it looking good. A Letterprove
 signature proves *we observed this*. It does not, by itself, prove *this is
 true*. Those are different claims and the JSON must never blur them.
 
-We treat that as a feature. Every claim carries a **provenance tier**, so an
-agent can weigh it instead of trusting it:
+We treat that as a feature. What we publish is **one attestation per vendor**
+([decision 30](#decision-log)): who the vendor is (its DNS-proven domain, its
+Stripe account bound to that domain) and what backs it (companies observed
+signing in, how many of them pay, sessions), in counts. No customer is ever
+named or contacted. The attestation carries a **provenance tier**, so an agent
+can weigh it instead of trusting it:
 
 | Tier | Source | Forgeable by the vendor? |
 |:---:|---|---|
 | **0** | Vendor-asserted — the ordinary logo wall | Trivially |
 | **1** | Observed by our script, on a domain the vendor proved by DNS | With effort |
 | ~~**2**~~ | ~~Bound to network facts the vendor doesn't choose (ASN)~~ — **not issued** until the ASN binding is built; documents signed before 10-13 may carry it, read them as tier 1 | — |
-| **3** | Tier 1, plus a settled invoice in the vendor's own live Stripe | Only by paying themselves real money |
+| **3** | Tier 1, plus at least one observed company paying a settled invoice in the vendor's own (bound) live Stripe; `paying_companies` says how many | Only by paying themselves real money |
 | ~~**4**~~ | ~~Counter-signed by the customer themselves~~ — **retired 10-12**; old documents may still carry it, read them as tier 3 | — |
 
 **The tier comes from evidence alone** ([decision 29](#decision-log)). Nobody
 sets it, the vendor included: no DNS proof or nothing observed is tier 0,
-sign-ins observed on the DNS-proven domain are tier 1, and a settled invoice
-for that domain on top is tier 3. Fields that are the vendor's own statement —
-a customer's name, start date and features — are listed in every signed body
-under `vendor_stated`. Domain proof is re-checked daily, so a lapsed or
-removed record stops counting.
+companies observed signing in on the DNS-proven domain is tier 1, and at least
+one of those companies paying through the vendor's own Stripe is tier 3 — the
+strongest evidence class present, always published beside the counts
+([decision 30](#decision-log)). Domain proof is re-checked daily, so a lapsed
+or removed record stops counting.
 
 **Tier 2 is reserved, not issued.** The vendor can fabricate a payload, but not
 our server's receipt timestamp, not the observed origin, and not the ASN a
@@ -105,8 +109,9 @@ evidence class now earns one tier.
 because it is read from a third party's ledger: an invoice that actually
 settled in the vendor's live-mode Stripe account, for real money, recently.
 Note the honest limit — corroboration is not immunity. A vendor willing to pay
-themselves through their own Stripe account can still reach tier 3, and nothing
-binds that account to the vendor today. What changed is the price: from free to
+themselves through their own Stripe account can still reach tier 3. The
+account is bound to the vendor by the domain it publishes about itself (or a
+staff approval, signed as `stripe_binding: staff_override`). What changed is the price: from free to
 a real charge through a real processor, in an account Stripe has verified,
 leaving a record in the vendor's own books. Tier 3 is the top of the ladder:
 Letterprove attests from the vendor's DNS proof and the vendor's own Stripe
@@ -114,8 +119,7 @@ ledger, and does not contact the vendor's customers (see
 [Customer counter-signing — Retired](#customer-counter-signing--retired-10-12)).
 
 Rigor compounds. Ship tier 1, then 3, then the ASN binding for 2, and never
-print the word *verified* where the tier doesn't earn it. `verified` is true
-only at tier 3.
+print the word *verified* where the tier doesn't earn it.
 
 ---
 
@@ -604,8 +608,7 @@ What is gated is **publication and only publication**:
 | Every public route | **404** | ✅ |
 | Listed in discovery | ✗ | ✅ |
 
-That is the same split, for the same reason, as [consent](#how-it-is-enforced--built-08-13):
-history is built the whole time, it just doesn't leave the building. So
+History is built the whole time, it just doesn't leave the building. So
 publishing needs no backfill and no re-signing — a vendor who has been
 collecting for a month goes public with a chain that already reaches back to
 their first observation, rather than starting one on launch day.
@@ -617,20 +620,19 @@ to dogfood our own install — immediately served a signed aggregate of zeros at
 zeros into a public, signed count of how many companies use Letterstory, before
 Letterprove had launched. Every real vendor will want to install, watch it work
 for a few weeks, and go public deliberately. Publishing a customer count from
-minute one is the wrong default for a product whose entire subject is consent.
+minute one is the wrong default for a product whose entire subject is trust.
 
 **404, not a "this vendor is private" page.** An unpublished vendor has to be
 indistinguishable from one that does not exist, or guessing slugs confirms
 which companies have installed Letterprove and not launched yet — a fact about
-someone else's roadmap. Same rule the consent gate applies to a withheld
-customer.
+someone else's roadmap.
 
 **How it is enforced.** `findPublishedVendor()` in `src/lib/fixtures/vendors.ts`
 is the gated resolver, sitting beside the ungated `findVendor()` every internal
 caller keeps using; `publishedVendorProof`, `publishedVendorAggregate`,
 `publishedVendorAggregateChain` and `publishedVendorSlugs` are the gated doors
 in front of the composition functions of the same name. The two-function shape
-is deliberate: the consent rule once lived inside one function's body and only
+is deliberate: a gate once lived inside one function's body and only
 the route that happened to call it was protected ([#137](https://github.com/letterstory/Letterprove/pull/137)),
 so the gated door has a different name and the call site says which one it
 opened.
@@ -649,27 +651,16 @@ response says so.
 | Path | Serves |
 |---|---|
 | `/proofs/{vendor}` | Human-readable report and machine-readable JSON, content-negotiated |
-| `/attest/{vendor}` | The vendor's **aggregate** attestation — counts, no names |
-| `/attest/{vendor}/{customer}.json` | One customer's attestation |
-| `/attest/{vendor}/chain`, `/attest/{vendor}/{customer}/chain` | The full signed history behind either |
+| `/attest/{vendor}` | The **vendor attestation** — identity and evidence, counts, no names |
+| `/attest/{vendor}/chain` | Its full signed history |
 | `/.well-known/letterprove.json` | Discovery |
 | `/.well-known/letterprove-jwks.json` | Public signing keys |
-| `/verify/{vendor}[/{customer}]/{stamp}` | One snapshot's plain-language check — the figures signed, and whether the signature verifies. Every attestation since 2026-10-08 links to its own in a signed `verify` field |
+| `/verify/{vendor}/{stamp}` | One snapshot's plain-language check — the figures signed, and whether the signature verifies. Every attestation since 2026-10-08 links to its own in a signed `verify` field |
+| `/attest/{vendor}/{customer}[/chain]`, `/verify/{vendor}/{customer}/{stamp}` | **Retired 10-13 — 410**, with a statement and a link to the vendor attestation ([decision 30](#decision-log)) |
 
-The aggregate sits one segment above the per-customer route on purpose: it is a
-claim about the vendor rather than about any customer of theirs, it names
-nobody, and it is therefore the only signed claim most vendors can publish
-today — naming a customer needs that customer's consent, counting them does
-not.
-
-Every path in that table is publication-gated: they resolve only for a vendor
-whose proofs have been published (see above), and 404 identically otherwise.
-
-Both per-customer paths are additionally consent-gated, and `/chain` is not a
-way around that: a customer who has not agreed to be named 404s on the document *and* on
-its history, with the same 404 an unknown customer gets, so guessing slugs
-never confirms that a private customer exists. (`/chain` was ungated until
-[#137](https://github.com/letterstory/Letterprove/pull/137).)
+Every live path in that table is publication-gated: they resolve only for a
+vendor whose proofs have been published (see above), and 404 identically
+otherwise.
 
 Agents evaluating a vendor mostly crawl **the vendor's own domain**, and
 same-origin proof is what gets cited, so the route to that today is a vendor
@@ -682,24 +673,38 @@ future, not a shipped one.
 
 ### Shape
 
+The vendor attestation (`/attest/{vendor}.json`), keys in the reading order the
+routes serve them in:
+
 ```json
 {
-  "customer": "acme-corp",
-  "customer_name": "Acme Corp",
-  "customer_domain": "acme.com",
-  "verified": true,
-  "tier": 2,
-  "since": "2023-03",
-  "features": ["sso", "api", "analytics"],
-  "sessions_30d": 4182,
-  "seats_active": 148,
-  "observed_through": "2026-08-10T00:00:00Z",
-  "published_at": "2026-08-10T00:07:00Z",
-  "next_snapshot_at": "2026-08-10T01:05:00Z",
-  "key_id": "lp-2026-08",
+  "verify": "https://app.letterprove.com/verify/acme/20261013T030512770Z",
+  "vendor": "acme",
+  "kind": "aggregate",
+  "domain": "acme.com",
+  "domain_verified_since": "2026-09-02T14:11:08.000Z",
+  "stripe_account_bound": true,
+  "stripe_binding": "domain_match",
+  "tier": 3,
+  "companies_observed": 212,
+  "paying_companies": 41,
+  "vendor_stated": [],
+  "window_days": 30,
+  "sessions": 4182,
+  "signups": 37,
+  "logins": 1904,
+  "domains_excluded": 9,
+  "hosts": 1,
+  "paying_since": "2025-11-03T00:00:00.000Z",
+  "observed_since": "2026-09-02T15:05:11.000Z",
+  "payment_scope": { "mode": "selected", "products": 2 },
+  "observed_through": "2026-10-13T03:05:12.770Z",
+  "published_at": "2026-10-13T03:05:12.770Z",
+  "next_snapshot_at": "2026-10-13T04:05:00.000Z",
+  "method": "https://github.com/letterstory/Letterprove/blob/a1b2c3d/src/lib/attest/aggregate.ts",
   "prev_hash": "…",
-  "method": "https://github.com/letterstory/Letterprove/blob/a1b2c3d/src/rollup/sessions.ts",
-  "signature": "att_9f2c14…"
+  "key_id": "lp-d157ef400e",
+  "signature": "…"
 }
 ```
 
@@ -707,21 +712,11 @@ future, not a shipped one.
 numbers. An agent — or a competitor, or a customer — can read exactly how the
 count was reached. Nothing else in the file asks to be trusted.
 
-`customer_domain` is published for a narrower reason. The vendor picks the
-display name and the domain independently, and nothing ties one to the other,
-so a name alone identifies nobody: "Acme Corp" on `acme-hq.com` reads exactly
-like "Acme Corp" on `acme.com`. The domain is the field the evidence is
-actually joined on (observed sessions, Stripe invoices), so it is the one field that lets a reader judge whose claim this is rather than
-take the name on faith. It costs nothing in privacy that `customer_name` does
-not already cost, and only named customers are published at all.
-
-Adding it was additive, not a version bump. A signature covers whatever fields
-its own document carried, and `prev_hash` is taken over the predecessor's
-published bytes, which the freeze reads back from storage rather than
-recomputing, so snapshots frozen before 2026-09-10 still verify and still link.
-`scripts/verify.mjs` canonicalises whatever keys it is handed and needed no
-change to keep working; it now prints the name and domain together as the
-document's subject.
+The identity fields were added on 2026-10-13, additively. A signature covers
+whatever fields its own document carried, and `prev_hash` is taken over the
+predecessor's published bytes, so earlier snapshots in the same chain still
+verify and still link. `scripts/verify.mjs` canonicalises whatever keys it is
+handed and needed no change.
 
 ### Freshness
 
@@ -882,90 +877,46 @@ copy of the observations. The leaf keeps its data whole; the trunk stays small.
 
 ---
 
-## Consent — **Decided**
+## Customers are never named — **Decided (10-13)**
 
-Publishing *"Acme runs SSO, 148 seats, 92% adoption"* discloses **Acme's** data.
-Acme is our customer's customer.
+Letterprove attests the vendor and nothing else ([decision 30](#decision-log)).
+The public proof says *"this company is who it says it is, and it's backed by
+data"*: its DNS-proven domain, its Stripe account bound to that domain, how
+many companies were observed using it, how many of them pay, and since when.
+Counts, never names. No customer is named, published, or contacted, and a
+vendor never has to involve its customers.
 
-**Build for named, ship anonymized, flip as consent lands.**
-Aggregate proof (*"12 attested customers, 38k sessions/mo"*) carries almost no
-consent problem and is already meaningfully better than a logo wall. Named
-attestation is the part that needs Acme's say-so. This unblocks the entire
-pipeline today, and doesn't wait on the legal question below — that question
-decides when a given customer flips to named, not whether the system ships.
+Customer domains still exist inside Letterprove for one reason: they are the
+join key between observed sign-ins and Stripe invoices, so `paying_companies`
+counts only companies that both use and pay. The vendor can see the domains
+behind its own counts (`list_observed`, vendor-private) and keep a private
+customer list for its own bookkeeping; neither is published and neither changes
+a figure.
 
-**Since 10-12, naming is the vendor's statement.** The vendor marks a customer
-named, which is its representation (under the terms) that it holds that
-customer's permission. Letterprove does not contact the customer to check, and
-every signed body lists `customer_name` under `vendor_stated` so no reader
-mistakes the name for something we confirmed. Naming changes only whether the
-name appears, never the tier.
+### Per-customer attestations — **Retired (10-13)**
+
+From 08-13 to 10-13 Letterprove also published one attestation per customer,
+named when the vendor said it had the customer's permission. That is gone: the
+`/attest/{vendor}/{customer}` routes and their chains, the per-customer verify
+links, the hourly per-customer freeze, and the vendor-set `consent` field
+(`named | anonymous`). Their URLs answer **410** with a plain statement and a
+link to the vendor attestation — not 404, and never a forgery verdict. Frozen
+per-customer rows stay in `published_snapshots` (insert-only), still verify,
+and remain readable by the vendor through `list_snapshots`.
+
+The `vendor_customers.consent` column is no longer read or written; it is
+dropped in a follow-up migration once this has deployed.
 
 ### Customer counter-signing — **Retired (10-12)**
 
 From 08-21 to 10-12 a vendor could ask Letterprove to email a customer a link
 to approve their own attestation (`request_consent`), and an approval
 published tier 4. That flow is gone: the tool, the Resend email, the public
-`/attest/{vendor}/{customer}/consent` page, the 30-day decline cooldown, and
-the `countersigned_at`, `countersigned_by`, `consent_token*`,
-`consent_sent_to` and `consent_declined_at`/`consent_decline_count` columns.
-
-The decision (Casey, 10-12): Letterprove attests that the vendor is who it says
-it is, from evidence the vendor cannot cheaply fake — DNS control of its domain
-and its own live Stripe ledger, joined to observed usage. It does not email a
-vendor's customers. Asking a vendor's customers to sign off was a different
-product, and the strongest version of it still could not tell a real customer
-from a domain the vendor registered itself.
-
-`consent` (`named | anonymous`) stays, and is what it always was underneath:
-the vendor's statement that it holds the customer's permission to be named
-(terms §6). It decides only whether a name appears, never the tier.
-
-Already-signed snapshots carrying `"tier": 4` stay in their chains and still
-verify; `TIER_LADDER[4]` and `scripts/verify.mjs` describe the tier as retired
-so a reader of an old document is told to weigh it as tier 3.
-
-### How it is enforced — **Built (08-13)**
-
-`consent` on the customer record is `named | anonymous`, and **omitting it means
-`anonymous`**. Consent is opt-in, so the absent case has to be the private one:
-a customer added without anyone thinking about consent is silently withheld,
-never silently published.
-
-The gate sits at **publication only**, in `customerProof()`:
-
-| | Anonymous | Named |
-|---|---|---|
-| Chain computed | ✅ | ✅ |
-| Frozen to `published_snapshots` | ✅ | ✅ |
-| Counted in the vendor's aggregate | ✅ | ✅ |
-| `/attest/{vendor}/{customer}.json` | **404** | ✅ |
-| Named on the proof page | ✗ | ✅ |
-
-That split is what makes the slogan operational. History is *built named* the
-whole time — it just doesn't leave the building. So flipping a customer to
-`named` needs no backfill and no re-signing: their entire signed, chained
-history becomes publishable at once, which is the only reading of "flip as
-consent lands" that isn't a rewrite.
-
-Withheld customers get a **404, not a redacted document**. A pseudonymous
-attestation still says *"some customer of this vendor did X"*, and against a
-vendor with three customers that re-identifies immediately. They contribute to
-the aggregate and nothing else.
-
-The vendor summary publishes `attested_unnamed` alongside `attested_customers`,
-so an agent reading *"3 attested"* next to one named entry can tell the other
-two were **withheld**, not miscounted — and the proof page says so in words.
-`features_proven` and `sessions_30d` still cover every attested customer,
-because the aggregate is the consent-safe view and hiding from it would just
-make the numbers wrong.
-
-> [!IMPORTANT]
-> **Before pointing `attest.js` at a real site**, remember the customer domains
-> stop being fictional. Dogfooding on a Letter Company product means real
-> companies land in `hot_events`, and a vendor fixture that ships `consent:
-> "named"` would publish them. Add real vendors with consent omitted, and flip
-> individuals only once someone has actually asked them.
+consent page, the decline cooldown, and the columns behind them. Asking a
+vendor's customers to sign off was a different product, and the strongest
+version of it still could not tell a real customer from a domain the vendor
+registered itself. Already-signed snapshots carrying `"tier": 4` still verify;
+`TIER_LADDER[4]` and `scripts/verify.mjs` describe the tier as retired.
 
 ---
 
@@ -1073,7 +1024,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 6 | Letterprove owns its own vendor/customer/consent model; **Letterstory is the identity authority for every human** — one service secret, org resolved to vendor, staff named by an allowlist here | ✅ **Decided (revised 08-28, was: LP owns staff auth too and there is no SSO federation — itself a revision of 08-11's "staff federates via SSO")** — landed by [#124](https://github.com/letterstory/Letterprove/pull/124) and completed by [#130](https://github.com/letterstory/Letterprove/pull/130); see [Identity](#identity--decided-revised-08-28) |
 | 7 | Open computation, closed anti-fraud; attestations carry a commit-pinned `method` | ✅ **Decided (08-11)** — see [Open code, closed data](#open-code-closed-data--decided) |
 | 8 | Letterstory countersigns after fraud scoring — the key never moves to the leaf | ✅ **Decided** — see [The signing seam](#the-signing-seam) |
-| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Consent](#consent--decided), [How it is enforced](#how-it-is-enforced--built-08-13), [Customer counter-signing](#customer-counter-signing--retired-10-12), and [Why delivery is the binding](#customer-counter-signing--retired-10-12) — counter-signing **superseded (10-12)** by 28 |
+| 9 | Consent — build named, ship anonymized, flip as consent lands | ✅ **Decided**, and **built (08-13)**; customer counter-signing **built (08-21)**, delivery-bound to the customer's own domain **(08-23)** — see [Customer counter-signing](#customer-counter-signing--retired-10-12), and [Why delivery is the binding](#customer-counter-signing--retired-10-12) — counter-signing **superseded (10-12)** by 28; naming **superseded (10-13)** by 30 |
 | 10 | Event schema and config endpoint shapes — `POST /api/v1/observe` (`session\|signup\|login`), `GET /api/v1/config` | ✅ **Decided (08-11)** — see [Event schema](#event-schema--decided), [Configuration](#configuration--decided) |
 | 11 | Countersign RPC auth — scoped, independently-rotatable shared secret (`KERNEL_HEADLESS_KEY` shape) | ✅ **Decided (08-11)** — see [Event lifecycle, step 4](#processing--the-one-trunk-crossing) |
 | 12 | **Evidence gate** — the asserted tier is a ceiling; no observation means tier 0 and `verified: false` | ✅ **Decided (08-13)** — see [The evidence gate](#the-evidence-gate--decided-08-13) |
@@ -1094,6 +1045,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 27 | **A vendor's proof page may live on its own domain, but only under the domain it verified.** `set_custom_domain` attaches a subdomain such as `proof.acme.com` to this Vercel project, and `src/proxy.ts` serves that vendor's proof page at its root. It must share the registrable domain the vendor proved by DNS, so nobody can claim another company's hostname before that company points it at us. An unpublished vendor's domain answers 404. The page names the custom domain canonical once it is live, and its signatures and verify links still point at `app.letterprove.com`, which keeps a proof served from the vendor's own domain checkable | ✅ **Decided (10-12)**, Matthew + Casey — see `src/lib/vendors/custom-domain.ts` |
 | 28 | **Letterprove does not contact a vendor's customers; tier 3 is the top of the ladder.** The emailed customer counter-signature (tier 4, `request_consent`) is removed. Attestation rests on the vendor's DNS proof and its own Stripe ledger, joined to observed usage. Old tier-4 snapshots still verify and are described as retired. Supersedes the counter-signing half of 9, and 19 and 21 | ✅ **Decided (10-12)**, Casey — see [Customer counter-signing — Retired](#customer-counter-signing--retired-10-12) |
 | 29 | **The tier comes from evidence alone, and every field says whose word it is.** `earned()` reads only DNS proof, observation and Stripe evidence — the stored customer `tier` is ignored. Tier 2 is not issued until the ASN binding exists; the aggregate publishes tier 1 for the same evidence a customer claim does, and both are gated on DNS proof. Customer bodies list `vendor_stated` (`customer_name`, `since`, `features`); `features_proven` is renamed `features_stated`; naming is the vendor's statement of permission. Domain proof is re-checked daily and cleared after three misses over two days. `/llms.txt` is generated from the discovery document. Supersedes 14 and the asserted-tier ceiling in the evidence gate | ✅ **Decided (10-13)**, Casey — see `src/lib/attest/body.ts`, `src/lib/vendors/dns-recheck.ts` |
+| 30 | **Letterprove attests the vendor, in counts, and never names a customer.** One attestation per vendor: identity (`domain`, `domain_verified_since`, `hosts`, `stripe_account_bound`/`stripe_binding`) and evidence (`companies_observed`, `paying_companies`, `paying_since`, `sessions`, `observed_since`, `payment_scope`). Per-customer documents, their verify links, the per-customer freeze and the vendor-set `consent` field are retired; their URLs answer 410. **Vendor tier = the strongest evidence class present** — 3 when at least one observed company pays through the vendor's own bound Stripe account, 1 when companies are observed on the DNS-proven domain, 0 otherwise — published beside `paying_companies` so it is never read as "every company pays". A minimum share was rejected: any threshold is arbitrary and hides the number a reader needs; the count states it exactly. `paying_companies` joins payment evidence to the attestation's own observed domains (not to the vendor's customer list), and counts only while the Stripe account is bound | ✅ **Decided (10-13)**, Casey — see [Customers are never named](#customers-are-never-named--decided-10-13) |
 
 ### Open
 

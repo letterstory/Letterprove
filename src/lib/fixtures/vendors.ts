@@ -27,20 +27,6 @@
 import type { Tier } from "../attest/types";
 import { dbClient } from "../db/client";
 
-/**
- * Whether this customer has agreed to be named in public.
- *
- * Publishing *"Acme runs SSO, 148 seats, 92% adoption"* discloses **Acme's**
- * data, and Acme is our customer's customer — someone with no relationship to
- * us. README § Consent settles the rule: build named, ship anonymized, flip as
- * consent lands.
- *
- * `anonymous` is the default and must stay the default. A customer who has
- * never been asked has not agreed, and the failure mode of guessing wrong here
- * is a signed, immutable, public disclosure of a third party's usage.
- */
-export type Consent = "named" | "anonymous";
-
 export interface CustomerFixture {
 	slug: string;
 	name: string;
@@ -50,17 +36,6 @@ export interface CustomerFixture {
 	tier: Tier;
 	verified: boolean;
 	features: string[];
-	/**
-	 * Omitted means `anonymous`. Consent is opt-in, so the absent case is the
-	 * private one — a new customer added without thinking about consent is
-	 * silently withheld, never silently published.
-	 */
-	consent?: Consent;
-}
-
-/** Consent, with the safe default applied. The only way publication should ask. */
-export function consentOf(customer: CustomerFixture): Consent {
-	return customer.consent ?? "anonymous";
 }
 
 export interface VendorFixture {
@@ -84,6 +59,8 @@ export interface VendorFixture {
 	 * see lib/vendors/verification.ts. Caps everything at tier 0 when false.
 	 */
 	domainVerified: boolean;
+	/** When DNS control was last proven, or null. Published as `domain_verified_since`. */
+	domainVerifiedAt?: string | null;
 	/**
 	 * When this vendor's proofs became public, or null while they are private.
 	 *
@@ -127,7 +104,7 @@ const VENDOR_COLUMNS =
  * TOOL-facing shape: that one carries `id` and this one carries `vendor_id`.
  */
 const VENDOR_CUSTOMER_COLUMNS =
-	"vendor_id, slug, name, domain, since, tier, verified, features, consent";
+	"vendor_id, slug, name, domain, since, tier, verified, features";
 
 interface VendorRow {
 	id: string;
@@ -150,7 +127,6 @@ interface CustomerRow {
 	tier: Tier;
 	verified: boolean;
 	features: string[];
-	consent: Consent;
 }
 
 function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
@@ -162,6 +138,7 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 		category: row.category,
 		key: row.key,
 		domainVerified: Boolean(row.domain_verified_at),
+		domainVerifiedAt: row.domain_verified_at ?? null,
 		proofsPublishedAt: row.proofs_published_at ?? null,
 		issuerAffiliation: row.issuer_affiliation ?? null,
 		customers: customers.map((c) => ({
@@ -172,7 +149,6 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 			tier: c.tier,
 			verified: c.verified,
 			features: c.features,
-			consent: c.consent,
 		})),
 	};
 }
@@ -236,10 +212,8 @@ export async function findVendor(slug: string): Promise<VendorFixture | undefine
 /**
  * Whether this vendor's proofs are public.
  *
- * The only way publication should ask, the same way `consentOf` is the only
- * way it should ask about a customer. A vendor is private until someone
- * publishes it, and absent means private for the same reason it does for
- * consent: the failure mode of guessing wrong is a signed, public, permanently
+ * The only way publication should ask. A vendor is private until someone
+ * publishes it, and absent means private: the failure mode of guessing wrong is a signed, public, permanently
  * fetchable claim about a party who never agreed to make it.
  */
 export function isPublished(vendor: VendorFixture): boolean {
@@ -250,10 +224,8 @@ export function isPublished(vendor: VendorFixture): boolean {
  * `findVendor`, gated — **the resolution point every public surface goes
  * through.**
  *
- * The two-function shape is deliberate and is copied from `customerChain` /
- * `customerProof` next door in attest/proofs.ts, which exists because the
- * consent rule had lived inside one function's body and only the route that
- * happened to call it was protected. The same trap is here: `findVendor` is
+ * The two-function shape is deliberate. A gate that lives inside one
+ * function's body protects only the route that happens to call it. So: `findVendor` is
  * what the collector, the freeze, the countersigner and every vendor-scoped
  * tool call, and every one of them must keep working while a vendor is
  * private. So the gate is not inside `findVendor`; it is a second, differently
@@ -262,7 +234,7 @@ export function isPublished(vendor: VendorFixture): boolean {
  *
  * **Undefined, not a distinct "private" result.** Callers 404 on undefined
  * already, and an unpublished vendor must be indistinguishable from an unknown
- * one — exactly what the consent gate does for a withheld customer. A response
+ * one. A response
  * that said "this vendor exists but is private" would let anyone confirm, by
  * guessing slugs, that a company has installed Letterprove and not launched
  * yet. That is a commercial fact about someone else's roadmap, and it is not

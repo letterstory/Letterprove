@@ -66,7 +66,7 @@ async function customerRow(vendorId: string, slug: string): Promise<{ domain: st
 }
 
 describe("createCustomer against a real Postgres schema", () => {
-	it("lets an external vendor add The Letter Company as a real, consented customer", async () => {
+	it("lets an external vendor add The Letter Company to its private customer list", async () => {
 		const { createCustomer } = await import("./customers");
 		const supabase = pgliteSupabase();
 
@@ -75,7 +75,6 @@ describe("createCustomer against a real Postgres schema", () => {
 			name: "Letterbrace",
 			domain: "letterbrace.com",
 			since: "2024-01",
-			consent: "named",
 		});
 
 		expect(result.ok).toBe(true);
@@ -102,7 +101,6 @@ describe("createCustomer against a real Postgres schema", () => {
 			name: "Some Person",
 			domain: "gmail.com",
 			since: "2024-01",
-			consent: "named",
 		});
 
 		expect(result.ok).toBe(false);
@@ -121,7 +119,6 @@ describe("createCustomer against a real Postgres schema", () => {
 			name: "Letterbrace",
 			domain: "letterbrace.com",
 			since: "2024-01",
-			consent: "named",
 		});
 
 		expect(result.ok).toBe(false);

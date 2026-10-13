@@ -40,12 +40,12 @@ export interface TierDescription {
 export const TIER_LADDER: Record<Tier, TierDescription> = {
 	0: {
 		name: "vendor-asserted",
-		means: "The vendor stated this. Nothing corroborates it — either no usage was observed, or the vendor has not proven control of the domain events are pinned to.",
+		means: "Nothing corroborates a claim: no usage was observed, or the vendor has not proven control of its domain by DNS (or the daily re-check found the record gone).",
 		forgeable_by: "The vendor alone, trivially. Treat as a claim, not as evidence.",
 	},
 	1: {
 		name: "script-observed",
-		means: "Letterprove's script saw people from this company's email domain sign in, on a domain the vendor proved it controls by DNS. Letterprove stamps when each event arrived; the vendor never reports a number.",
+		means: "Letterprove's script saw people from company email domains sign in, on a domain the vendor proved it controls by DNS. `companies_observed` says how many companies; Letterprove stamps when each event arrived and the vendor never reports a number.",
 		forgeable_by:
 			"The vendor, with effort. The collector pins events to the vendor's verified origin, which a browser cannot forge — but a non-browser client can send whatever origin it likes, so a vendor could script sign-ins. Volume and burst anomalies are scored against it.",
 	},
@@ -57,7 +57,7 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 	},
 	3: {
 		name: "third-party confirmed",
-		means: "An invoice that actually settled for this company, read directly from the vendor's own live-mode Stripe account, alongside observed usage. A subscription on its own does not qualify: it says what the vendor meant to bill, and a free one reaches `active` for nothing.",
+		means: "Tier 1, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). `paying_companies` says how many; the tier is the strongest evidence present, not a claim that every company pays. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
 		forgeable_by:
 			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
 	},
@@ -76,7 +76,7 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
  */
 export function tierLadderDocument() {
 	return {
-		note: "Every attestation carries a `tier`. A valid signature proves only that this document is ours and unaltered — it says nothing about how good the underlying evidence is. The tier says that, and it is the claim. A signed tier-0 document asserts only that the vendor said so.",
+		note: "Every attestation carries a `tier`. A valid signature proves only that this document is ours and unaltered — it says nothing about how good the underlying evidence is. The tier says that, and it is the claim. A signed tier-0 document asserts nothing beyond the vendor existing. Since 2026-10-13 tiers describe the vendor's evidence as a whole (one attestation per vendor, counts only); older per-customer documents carry a tier for one customer.",
 		levels: (Object.keys(TIER_LADDER) as unknown as Tier[])
 			.map(Number)
 			.sort((a, b) => a - b)
