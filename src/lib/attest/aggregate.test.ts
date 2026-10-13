@@ -16,6 +16,7 @@ vi.mock("./geo-distribution", () => ({
 	geoDistribution: vi.fn().mockResolvedValue({ regions: {}, unknown: 0, distinctRegions: 0 }),
 }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
+vi.mock("./payment-evidence", () => ({ paymentScopeFor: vi.fn(async () => null) }));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
 	findVendor: vi.fn(),
@@ -88,6 +89,28 @@ describe("aggregateBody", () => {
 		expect(b.tier).toBe(1);
 		// Every figure here is counted, so nothing is listed as vendor-stated.
 		expect(b.vendor_stated).toEqual([]);
+	});
+
+	it("states its Stripe product scope as counts while Stripe is connected, and nothing otherwise", async () => {
+		await withRollups([row("globex.com", 2)]);
+		expect((await aggregateBody("lettertrace"))!).not.toHaveProperty("payment_scope");
+
+		const { findVendor } = await import("@/lib/fixtures/vendors");
+		const { paymentScopeFor } = await import("./payment-evidence");
+		vi.mocked(findVendor).mockResolvedValue({
+			id: "v-1",
+			slug: "lettertrace",
+			name: "Lettertrace",
+			domain: "lettertrace.com",
+			category: "x",
+			key: "k",
+			domainVerified: true,
+			customers: [],
+		} as never);
+		vi.mocked(paymentScopeFor).mockResolvedValueOnce({ mode: "selected", products: 3 });
+		const b = (await aggregateBody("lettertrace"))!;
+		expect(b.payment_scope).toEqual({ mode: "selected", products: 3 });
+		expect(paymentScopeFor).toHaveBeenCalledWith("v-1");
 	});
 
 	// The same DNS gate as a customer claim: an observation pinned to a domain

@@ -569,3 +569,34 @@ export const removeCustomDomainOutput = z.object({
 	removed: z.boolean().describe("False when there was no proof domain to remove."),
 	domain: z.string().nullable().describe("The hostname that stopped serving your proof page."),
 });
+
+// ------------------------------------------------------------- hosts
+
+export const hostStatus = z.object({
+	host: z.string().describe("A hostname events may come from, e.g. app.acme.com."),
+	proof: z
+		.enum(["under_verified_domain", "own_dns"])
+		.describe(
+			"under_verified_domain: sits below your verified domain, so the same DNS record proves it. own_dns: a sibling or parent on the same registrable domain, which needs its own record.",
+		),
+	accepted: z.boolean().describe("Whether /v1/observe accepts events from this host right now."),
+	verified_at: z.string().nullable().describe("When an own_dns host's record last checked out; null for hosts under your domain or still waiting."),
+	added_at: z.string(),
+	record: z.string().nullable().describe("The TXT value to add, while an own_dns host is still waiting on it."),
+	record_hosts: z.array(z.string()).describe("Where that record may go: on the host itself or on the registrable domain."),
+	message: z.string(),
+});
+export const addHostInput = z.object({
+	host: z
+		.string()
+		.min(1)
+		.describe("Another hostname on your verified registrable domain that runs attest.js, e.g. app.acme.com or www.acme.com. Re-run it to re-check a host's DNS record."),
+});
+export const addHostOutput = hostStatus;
+export const removeHostInput = z.object({ host: z.string().min(1) });
+export const removeHostOutput = z.object({ removed: z.boolean().describe("False when that host was not on the list."), host: z.string() });
+export const listHostsInput = empty;
+export const listHostsOutput = z.object({
+	domain: z.string().describe("Your verified domain. Always accepted while verified."),
+	hosts: z.array(hostStatus),
+});

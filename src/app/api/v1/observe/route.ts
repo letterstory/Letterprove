@@ -1,6 +1,7 @@
 import { hostnameOf } from "@/lib/vendors/domain";
 import { requestGeo } from "@/lib/telemetry/geo";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
+import { acceptedHosts } from "@/lib/vendors/hosts";
 import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { parseObservePayload } from "@/lib/telemetry/events";
@@ -75,7 +76,11 @@ export async function POST(request: Request) {
 	 * plumbing — not something to bolt on here piecemeal.
 	 */
 	const origin = hostnameOf(request.headers.get("origin"));
-	if (!origin || origin !== vendor.domain) return collectorResponse(false);
+	if (!origin) return collectorResponse(false);
+	// The vendor's domain, or one of the extra hosts its DNS proof covers
+	// (src/lib/vendors/hosts.ts holds the rule). Looked up only on a miss, so
+	// the common single-host vendor pays nothing for the feature.
+	if (origin !== vendor.domain && !(await acceptedHosts(vendor.id)).has(origin)) return collectorResponse(false);
 
 	/*
 	 * Refuse anything from a vendor who has not proven DNS control of the

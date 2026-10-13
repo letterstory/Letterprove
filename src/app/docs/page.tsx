@@ -213,6 +213,17 @@ export default async function DocsPage() {
               zero.
             </p>
             <p>
+              If people sign in on more than one host, add the others with{" "}
+              <code>add_host</code>. A host under the domain you verified (
+              <code>app.example.com</code> when you verified{" "}
+              <code>example.com</code>) is covered by the same DNS record and
+              accepted at once. A sibling or parent (<code>eu.example.com</code>{" "}
+              when you verified <code>app.example.com</code>) is not: control
+              of one subdomain says nothing about its neighbours, so it needs
+              your verification record on that host or on the registrable
+              domain, and is re-checked daily like your domain.
+            </p>
+            <p>
               Origin-pinning is a real constraint on a browser and no constraint
               at all on <code>curl</code>. That is a known, accepted limit
               rather than an oversight, and it is exactly why script-observed
@@ -594,6 +605,14 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               than falling back to the weaker evidence: a corroboration check
               you can switch off by removing a permission is not a corroboration
               check.
+            </p>
+            <p>
+              <strong>Scope is stated.</strong> If your Stripe account bills
+              more than this product, choose which products count with{" "}
+              <code>set_stripe_scope</code>. Your aggregate attestation carries{" "}
+              <code>payment_scope</code>: whether every product counts or only
+              the ones you chose, and how many. Counts only; product names are
+              never published.
             </p>
             <p>
               <strong>Evidence expires.</strong> The sync runs hourly, and
