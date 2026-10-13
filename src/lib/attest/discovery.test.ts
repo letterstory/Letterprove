@@ -62,13 +62,17 @@ describe("discoveryDocument", () => {
 		expect(doc.signing.crv).toBe("Ed25519");
 	});
 
-	it("builds every url from the origin it was asked for", async () => {
+	it("names the keys at app.letterprove.com whichever host answered", async () => {
+		// Keys named by the answering host would let a host that serves a
+		// forged proof (a vendor's custom domain pointed elsewhere) vouch for it.
+		const doc = await discoveryDocument("https://proof.acme.com");
+		expect(doc.signing.jwks_uri).toBe("https://app.letterprove.com/.well-known/letterprove-jwks.json");
+	});
+
+	it("builds proof urls from the origin it was asked for", async () => {
 		// A hardcoded host is how cdn.letterprove.com — which never existed —
 		// ended up in the install snippet.
 		const doc = await discoveryDocument("https://preview.example.com");
-		expect(doc.signing.jwks_uri).toBe(
-			"https://preview.example.com/.well-known/letterprove-jwks.json",
-		);
 		for (const p of doc.proofs) {
 			expect(p.url.startsWith("https://preview.example.com/")).toBe(true);
 			expect(p.aggregate.startsWith("https://preview.example.com/")).toBe(true);

@@ -425,7 +425,7 @@ if (DRY) {
 		console.log(c.content.replace(/^/gm, "  "));
 		console.log();
 	}
-	unavailable.length && console.log(`  (no key yet for: ${unavailable.join(", ")})\n`);
+	if (unavailable.length) console.log(`  (no key yet for: ${unavailable.join(", ")})\n`);
 	process.exit(0);
 }
 

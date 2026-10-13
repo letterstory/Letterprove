@@ -324,11 +324,6 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	);
 }
 
-/** `2026-08-09T02:05:00Z` → `2026-08-09 02:05Z`, which fits on one line. */
-function shortStamp(iso: string): string {
-	return iso.replace("T", " ").replace(/:\d{2}(\.\d+)?Z$/, "Z");
-}
-
 function Tile({
 	label,
 	value,

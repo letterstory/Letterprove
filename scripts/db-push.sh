@@ -12,6 +12,8 @@ if [ "${VERCEL_ENV:-}" != "production" ] || [ -z "${SUPABASE_DB_PASSWORD:-}" ]; 
 fi
 
 echo "db-push: applying pending Supabase migrations to production..."
-npx --yes supabase@latest link --project-ref "$SUPABASE_PROJECT_ID"
-npx --yes supabase@latest db push
+# Pinned, not @latest: this runs against the production database on every
+# build, and a CLI release that changes push behaviour must arrive by a PR.
+npx --yes supabase@2.120.0 link --project-ref "$SUPABASE_PROJECT_ID"
+npx --yes supabase@2.120.0 db push
 echo "db-push: done."

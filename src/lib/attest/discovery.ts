@@ -1,4 +1,4 @@
-import { isDemonstration, signingMode } from "./keys";
+import { isDemonstration, keyProblem, signingMode } from "./keys";
 import { methodUrl } from "./method";
 import { publishedVendorSlugs } from "./proofs";
 import { tierLadderDocument } from "./tiers";
@@ -57,7 +57,11 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		signing: {
 			alg: "EdDSA",
 			crv: "Ed25519",
-			jwks_uri: `${origin}/.well-known/letterprove-jwks.json`,
+			// Fixed, never the request's origin. Discovery is also reachable on
+			// other hosts (previews, and a vendor's custom domain before it was sent home);
+			// keys named by whichever host answered would let that host vouch
+			// for its own forgeries.
+			jwks_uri: `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`,
 			canonicalization: methodUrl("src/lib/attest/canonical.ts"),
 			// Stated positively, not only as a warning-when-bad: an agent
 			// deciding how much weight to give a signature should be able to
@@ -120,6 +124,11 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		...(isDemonstration() && {
 			warning:
 				"DEVELOPMENT DEPLOYMENT — signed with a published development key. These attestations are not evidence.",
+		}),
+		// The key endpoint refuses to serve when this is set (keys.ts); say so
+		// here too, so an agent whose key fetch failed knows it was deliberate.
+		...(keyProblem() && {
+			warning: `SIGNING KEYS UNAVAILABLE — ${keyProblem()} The key set is withheld rather than replaced with a key anyone could sign with; nothing can be verified until it is fixed.`,
 		}),
 	};
 }

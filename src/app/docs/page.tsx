@@ -6,6 +6,7 @@ import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { Mono } from "@/components/ui";
 import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
 import { tierLadderDocument } from "@/lib/attest/tiers";
+import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { ATTEST_SCRIPT_PATH, installSnippet, originFromHeaders } from "@/lib/vendors/install";
 import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
 
@@ -559,7 +560,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 						</p>
 						<p>Fetch what you want to check, and the keys it claims to be signed with:</p>
 						<Snippet>{`curl -s ${origin}/attest/<vendor>/chain > chain.json
-curl -s ${origin}/.well-known/letterprove-jwks.json > jwks.json`}</Snippet>
+curl -s ${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json > jwks.json`}</Snippet>
 						<p>Then run the verifier over them, from a checkout of the repository:</p>
 						<Snippet>{`git clone https://github.com/letterstory/Letterprove
 cd Letterprove
@@ -567,8 +568,10 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
 						<p>
 							There is nothing to install first. The script imports only Node built-ins, so a clone
 							is enough, and <code>node scripts/verify.mjs</code> works just as well as the npm
-							script. It also takes URLs directly, in which case it fetches the JWKS from the same
-							origin as the proof unless you pass <code>--jwks</code>:
+							script. It also takes URLs directly. Wherever the proof came from, it fetches the keys
+							from app.letterprove.com, never from the host that served the document, because a
+							host that can serve a forged proof can serve forged keys beside it. Pass{" "}
+							<code>--jwks</code> only to check against a copy you already hold:
 						</p>
 						<Snippet>{`npm run verify -- ${origin}/attest/<vendor>/chain`}</Snippet>
 						<p>

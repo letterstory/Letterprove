@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
-import { isDemonstration, jwks, signingMode } from "@/lib/attest/keys";
+import { isDemonstration, jwksResult, signingMode } from "@/lib/attest/keys";
 import { Badge, Card, Mono } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +22,8 @@ export const metadata: Metadata = {
  * have told the world is immutable.
  */
 export default function KeysPage() {
-	const { keys } = jwks();
-	const [active, ...retired] = keys;
+	const result = jwksResult();
+	const [active, ...retired] = result.ok ? result.jwks.keys : [];
 
 	return (
 		<>
@@ -45,6 +45,16 @@ export default function KeysPage() {
 				</a>
 
 				<div className="mt-10 grid gap-4">
+					{!result.ok && (
+						<Card title="Keys unavailable">
+							<p className="text-sm leading-relaxed text-amber-300">
+								The production signing key is not configured correctly, so no key is being
+								published and nothing here can be verified until it is fixed. This is
+								deliberate: the alternative would be serving a development key anyone can sign
+								with. ({result.error})
+							</p>
+						</Card>
+					)}
 					{active && (
 						<Card
 							title="Active key"
