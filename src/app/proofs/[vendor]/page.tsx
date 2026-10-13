@@ -130,7 +130,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								sub={
 									a.paying_since ? (
 										<span className="text-xs text-fog">
-											since <AttestedAt iso={a.paying_since} />
+											first verified payment <AttestedAt iso={a.paying_since} />
 										</span>
 									) : undefined
 								}

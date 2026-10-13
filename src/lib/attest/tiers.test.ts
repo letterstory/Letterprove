@@ -61,6 +61,11 @@ describe("the published tier ladder", () => {
 		expect(tiers).toEqual([...tiers].sort((a, b) => a - b));
 	});
 
+	it("never lists the retired tier 4 as a level, so nothing presents it as the top", () => {
+		expect(tierLadderDocument().levels.map((l) => l.tier)).toEqual([0, 1, 2, 3]);
+		expect(tierLadderDocument().retired.map((l) => l.tier)).toEqual([4]);
+	});
+
 	it("keeps tier 4 readable for old documents but says it is retired", () => {
 		// Old snapshots still carry tier 4; a reader must be told it is no
 		// longer issued rather than finding no description at all.

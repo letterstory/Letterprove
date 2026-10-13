@@ -57,7 +57,7 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 	},
 	3: {
 		name: "third-party confirmed",
-		means: "Tier 1, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). `paying_companies` says how many; the tier is the strongest evidence present, not a claim that every company pays. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
+		means: "Tier 1, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). The tier is the strongest evidence present, not a claim that every company pays; how many pay is private to the vendor. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
 		forgeable_by:
 			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
 	},
@@ -74,12 +74,16 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
  * stops the whole thing being misread: a valid signature is not the claim, the
  * tier is.
  */
+/** Tiers that no new document carries. Kept readable for old snapshots, never listed as a level. */
+const RETIRED: readonly Tier[] = [4];
+
 export function tierLadderDocument() {
+	const byTier = (tiers: Tier[]) => tiers.sort((a, b) => a - b).map((tier) => ({ tier, ...TIER_LADDER[tier] }));
 	return {
 		note: "Every attestation carries a `tier`. A valid signature proves only that this document is ours and unaltered — it says nothing about how good the underlying evidence is. The tier says that, and it is the claim. A signed tier-0 document asserts nothing beyond the vendor existing. Since 2026-10-13 tiers describe the vendor's evidence as a whole (one attestation per vendor, counts only); older per-customer documents carry a tier for one customer.",
-		levels: (Object.keys(TIER_LADDER) as unknown as Tier[])
-			.map(Number)
-			.sort((a, b) => a - b)
-			.map((tier) => ({ tier, ...TIER_LADDER[tier as Tier] })),
+		/** The ladder a new document is graded on. Tier 3 is the highest. */
+		levels: byTier((Object.keys(TIER_LADDER).map(Number) as Tier[]).filter((t) => !RETIRED.includes(t))),
+		/** No longer issued. Old snapshots may carry these and still verify. */
+		retired: byTier([...RETIRED]),
 	};
 }

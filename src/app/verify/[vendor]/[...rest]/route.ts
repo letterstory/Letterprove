@@ -147,7 +147,7 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 
 	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
 		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
-		tile("Payments, via Stripe", payments, payingSince ? `since ${payingSince}` : "") +
+		tile("Payments, via Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
 		tile("Sessions", num(f.sessions)) +
 		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
 		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope?.mode === "selected" ? ` Payments count from ${num(scope.products)} products the vendor chose.` : ""}</p></section>`;

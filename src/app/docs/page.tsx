@@ -542,6 +542,13 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 </div>
               ))}
             </div>
+            {tiers.retired.map((level) => (
+              <p key={level.tier} className="text-sm text-fog">
+                Retired: tier {level.tier}, {level.name}. {level.means}{" "}
+                <span className="text-fog/70">Forgeable by:</span>{" "}
+                {level.forgeable_by}
+              </p>
+            ))}
             <p>
               That list is rendered from the same definition the discovery
               document publishes, so this page cannot describe a ladder we do
@@ -609,11 +616,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               <strong>Tier 3 is the top of the ladder.</strong> Letterprove
               attests from two things a vendor cannot fake cheaply: control of
               their domain, proven by a DNS TXT record, and their own live
-              Stripe ledger. Tier 4, a customer counter-signature collected by
-              emailing the customer, was retired on 2026-10-12. Letterprove does
-              not contact a vendor&apos;s customers. Documents signed before
-              then may still carry tier 4 and still verify; read them no higher
-              than tier 3.
+              Stripe ledger. Letterprove does not contact a vendor&apos;s
+              customers. Older documents may carry tier 4, which was retired on
+              2026-10-12; read them as tier 3.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">

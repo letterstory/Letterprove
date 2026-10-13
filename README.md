@@ -85,8 +85,9 @@ can weigh it instead of trusting it:
 | **0** | Vendor-asserted — the ordinary logo wall | Trivially |
 | **1** | Observed by our script, on a domain the vendor proved by DNS | With effort |
 | ~~**2**~~ | ~~Bound to network facts the vendor doesn't choose (ASN)~~ — **not issued** until the ASN binding is built; documents signed before 10-13 may carry it, read them as tier 1 | — |
-| **3** | Tier 1, plus at least one observed company paying a settled invoice in the vendor's own (bound) live Stripe; `paying_companies` says how many | Only by paying themselves real money |
-| ~~**4**~~ | ~~Counter-signed by the customer themselves~~ — **retired 10-12**; old documents may still carry it, read them as tier 3 | — |
+| **3** | Tier 1, plus at least one observed company paying a settled invoice in the vendor's own (bound) live Stripe. The highest tier; how many pay is private to the vendor | Only by paying themselves real money |
+
+Tier 4 (a customer counter-signature) was retired on 10-12. Old documents may still carry it and still verify; read them as tier 3.
 
 **The tier comes from evidence alone** ([decision 29](#decision-log)). Nobody
 sets it, the vendor included: no DNS proof or nothing observed is tier 0,
