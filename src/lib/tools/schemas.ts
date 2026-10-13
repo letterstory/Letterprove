@@ -605,3 +605,57 @@ export const listHostsOutput = z.object({
 	domain: z.string().describe("Your verified domain. Always accepted while verified."),
 	hosts: z.array(hostStatus),
 });
+
+/*
+ * ----------------------------------------------------------------- posthog
+ *
+ * Read only. Letterprove never sends events into a vendor's PostHog; it reads
+ * which company domains the project has identified people from, as history.
+ */
+const posthogConnection = z.object({
+	connected: z.literal(true),
+	last4: z.string().describe("The personal API key's last four characters. Never more than that."),
+	api_host: z.string().describe("The PostHog instance read, e.g. https://us.posthog.com."),
+	project_id: z.string(),
+	connected_at: z.string(),
+	last_synced_at: z.string().nullable().describe("Null until sync_posthog has run once against this key. The sync also runs daily."),
+	last_sync_error: z.string().nullable().describe("PostHog's own message, or ours, from the last failed read."),
+	host_events_30d: z
+		.number()
+		.int()
+		.nullable()
+		.describe("Events in the last 30 days on your verified domain or accepted hosts. Zero means this project doesn't track your product, and its history is not published."),
+	companies: z.number().int().describe("Company domains PostHog has identified people from (free mail and unattributable domains excluded)."),
+	active_companies_30d: z.number().int().describe("Of those, how many had activity in the last 30 days."),
+	since: z.string().nullable().describe("When PostHog first saw a person from any of them."),
+	domains_excluded: z.number().int().nullable().describe("Identified domains that are not companies: free mail, ours, malformed."),
+	truncated: z.boolean().describe("True when the project has more identified domains than one read returns; counts are a floor."),
+	published: z
+		.boolean()
+		.describe("Whether this history appears on your proof as reported_history. It is labelled vendor-reported and never changes your tier."),
+	unpublished_reason: z.string().nullable().describe("Why it isn't published, when it isn't."),
+});
+
+export const connectPosthogInput = z.object({
+	personal_api_key: z
+		.string()
+		.min(1)
+		.describe("A PostHog PERSONAL API key (phx_…) with the query:read scope and access to the project. A project key (phc_) can only send events and is refused. Read only: Letterprove never writes to PostHog."),
+	project_id: z.string().regex(/^\d{1,12}$/).describe("The PostHog project id (the number in your project URL)."),
+	api_host: z
+		.string()
+		.optional()
+		.describe("Your PostHog instance: us.posthog.com (default), eu.posthog.com, or a self-hosted https host."),
+});
+export const connectPosthogOutput = posthogConnection;
+
+export const getPosthogConnectionInput = empty;
+export const getPosthogConnectionOutput = z.union([z.object({ connected: z.literal(false) }), posthogConnection]);
+
+export const syncPosthogInput = empty;
+export const syncPosthogOutput = posthogConnection;
+
+export const disconnectPosthogInput = empty;
+export const disconnectPosthogOutput = z.object({
+	disconnected: z.literal(true).describe("The key and all history read with it are gone."),
+});

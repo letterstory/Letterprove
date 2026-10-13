@@ -54,7 +54,15 @@ import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
 import { withDisclosure } from "./issuer";
-import { hostCount, observedSince, payingAmong, stripeBinding, type StripeBinding } from "./vendor-evidence";
+import {
+	hostCount,
+	observedSince,
+	payingAmong,
+	reportedHistory,
+	stripeBinding,
+	type ReportedHistory,
+	type StripeBinding,
+} from "./vendor-evidence";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
 const WINDOW_DAYS = 30;
@@ -96,12 +104,22 @@ export interface AggregateBody {
 	domains_excluded: number;
 	tier: Tier;
 	/**
-	 * Fields that are the vendor's statement rather than evidence. Always empty
-	 * here — every figure in the aggregate is counted from observed events — and
-	 * published anyway so the absence is stated, not inferred. Absent before
-	 * 2026-10-13.
+	 * Fields that are the vendor's statement rather than evidence. Empty unless
+	 * `reported_history` is present — every other figure is counted from
+	 * observed events — and published anyway so the absence is stated, not
+	 * inferred. Absent before 2026-10-13.
 	 */
 	vendor_stated?: string[];
+	/**
+	 * VENDOR-REPORTED. Company history from the vendor's own PostHog project,
+	 * as counts: how many companies it has identified people from, since when,
+	 * how many were active in the last 30 days, and how many of
+	 * `companies_observed` it also knows. Listed in `vendor_stated` and never
+	 * moves the tier: the vendor controls that project. Present only while
+	 * PostHog is connected, fresh, and sees the vendor's own hosts. Absent
+	 * before 2026-10-13.
+	 */
+	reported_history?: ReportedHistory;
 	/**
 	 * Which of the vendor's Stripe products its payment corroboration counts,
 	 * present only while Stripe is connected. Counts, never product names: a
@@ -224,11 +242,14 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		{ sessions: 0, signups: 0, logins: 0 }
 	);
 
-	const [scope, binding, hosts, firstObserved] = await Promise.all([
+	const [scope, binding, hosts, firstObserved, history] = await Promise.all([
 		vendor.id ? paymentScopeFor(vendor.id) : Promise.resolve(null),
 		vendor.id ? stripeBinding(vendor.id, vendor.domain) : Promise.resolve(null),
 		vendor.id ? hostCount(vendor.id) : Promise.resolve(0),
 		observedSince(vendor.slug),
+		// History is bound to the vendor's hosts, so it only means anything once
+		// the domain is proven.
+		vendor.id && vendor.domainVerified ? reportedHistory(vendor.id, attributable) : Promise.resolve(null),
 	]);
 	// Payment only counts from an account that is the vendor's own. The Stripe
 	// sync already clears evidence on a mismatch; this holds even if a row
@@ -252,7 +273,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		paying_since: paying.since,
 		observed_since: firstObserved ?? (observed ? now : null),
 		tier: earnedAggregateTier(observed, vendor.domainVerified, paying.companies),
-		vendor_stated: [],
+		vendor_stated: history ? ["reported_history"] : [],
+		...(history ? { reported_history: history } : {}),
 		...(scope ? { payment_scope: scope } : {}),
 		observed_through: now,
 		published_at: now,

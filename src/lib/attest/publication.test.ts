@@ -35,6 +35,7 @@ vi.mock("./vendor-evidence", () => ({
 	hostCount: vi.fn(async () => 0),
 	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
 	observedSince: vi.fn(async () => null),
+	reportedHistory: vi.fn(async () => null),
 }));
 vi.mock("@/lib/access/log", () => ({ logProofAccess: vi.fn() }));
 // Reached transitively through countersign -> fraudFeatures, against a query
