@@ -41,7 +41,7 @@ import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Docs — Letterprove",
+  title: "Docs · Letterprove",
   description:
     "How to install Letterprove, what a vendor attestation says, what the tiers mean, and how to verify any published attestation yourself.",
 };
@@ -79,21 +79,20 @@ export default async function DocsPage() {
           Documentation
         </h1>
         <p className="mt-6 leading-relaxed text-fog">
-          Letterprove publishes signed, machine-readable evidence that a
-          software vendor is who it says it is, backed by data: its domain,
-          proven by DNS; its Stripe account, bound to that domain; how many
-          companies were observed using it and how many of them pay. Counts,
-          never names. This page is the whole of it: how to install the
-          script, what it sends, what the attestation says, what the tiers
-          mean, and how to verify any of it without trusting us.
+          Letterprove publishes signed evidence of a software vendor&apos;s
+          customers. It covers the vendor&apos;s domain (verified by DNS), its
+          Stripe account (bound to that domain), the companies observed
+          signing in, and payments verified in Stripe. Figures are counts.
+          This page covers installing the script, what it sends, what the
+          attestation contains, what the tiers mean, and how to verify a
+          proof.
         </p>
         <p className="mt-4 leading-relaxed text-fog">
-          If you are here to check somebody else&apos;s claim rather than
-          publish your own, skip to{" "}
+          To check someone else&apos;s proof, go to{" "}
           <a href="#verify" className="text-mint hover:underline">
             verifying a proof yourself
           </a>
-          . That section is the point of the product.
+          .
         </p>
 
         <nav className="mt-10 rounded-lg border border-edge bg-panel p-5">
@@ -228,10 +227,9 @@ export default async function DocsPage() {
               fails silently.
             </p>
             <p>
-              Origin-pinning is a real constraint on a browser and no constraint
-              at all on <code>curl</code>. That is a known, accepted limit
-              rather than an oversight, and it is exactly why script-observed
-              evidence sits low on the ladder below.
+              A browser cannot fake the origin of an event. A script such as{" "}
+              <code>curl</code> can. This is a known limit, and it is why
+              script-observed evidence is tier 1.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -310,8 +308,8 @@ export default async function DocsPage() {
             </h3>
             <p>
               Installing the script publishes nothing. Until you publish, every
-              public URL about you — <code>/proofs/&lt;you&gt;</code>,{" "}
-              <code>/attest/&lt;you&gt;</code> and both chain paths — answers{" "}
+              public URL about you (<code>/proofs/&lt;you&gt;</code>,{" "}
+              <code>/attest/&lt;you&gt;</code> and both chain paths) returns{" "}
               <strong>404</strong>, the same 404 a vendor who does not exist
               gets, and you are absent from the discovery document. Nobody can
               tell from the outside that you are here.
@@ -330,10 +328,9 @@ export default async function DocsPage() {
               publish and unpublish from the same place. Publishing needs your
               domain verified, because nothing is collected for an unverified
               domain and the only document we could sign for you would be a
-              zero. Unpublishing takes every URL back to 404 — but it cannot
-              un-fetch: an attestation someone already retrieved while you were
-              public stays signed and stays verifiable, which is the whole point
-              of signing it.
+              zero. Unpublishing returns every URL to 404. An attestation
+              someone fetched while you were public stays signed and
+              verifiable.
             </p>
           </Section>
 
@@ -494,7 +491,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               </li>
               <li>
                 <code>vendor_stated</code> lists any field that is the
-                vendor&apos;s statement rather than evidence. It is empty
+                vendor&apos;s own statement. It is empty
                 unless <code>reported_history</code> is present, and then it
                 names that field.
               </li>
@@ -511,8 +508,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               <li>
                 <code>prev_hash</code> is the SHA-256 of the previous signed
                 snapshot for the same vendor, with 64 zeroes at the start of a
-                chain. This is what makes the history auditable rather than
-                merely signed.
+                chain. It lets anyone audit the full history.
               </li>
             </ul>
             <p>
@@ -608,42 +604,34 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               that met only the tier-1 bar; read them as tier 1.
             </p>
             <p>
-              An unmeasurable window fails toward the weaker claim rather than
-              the stronger one. A failed telemetry read, an unconfigured
-              datastore and a genuinely empty window all leave the same mark:
-              not observed, so tier 0.
+              When a window cannot be measured, the result is the weaker claim.
+              A failed telemetry read, a missing datastore and an empty window
+              all produce tier 0.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
               Tier 3 comes from a third party&apos;s ledger
             </h3>
             <p>
-              <strong>Tier 3 is read from your Stripe account</strong> rather
-              than from anything you typed. It still sits below the observation
-              and domain gates, because money proves a commercial relationship
-              and not that the product was used.
+              <strong>Tier 3 is read from your Stripe account.</strong> It also
+              requires observed sign-ins and a verified domain, because a
+              payment shows a commercial relationship, not product use.
             </p>
             <p>
-              <strong>Tier 3 is the top of the ladder.</strong> Letterprove
-              attests from two things a vendor cannot fake cheaply: control of
-              their domain, proven by a DNS TXT record, and their own live
-              Stripe ledger. Letterprove does not contact a vendor&apos;s
-              customers. Older documents may carry tier 4, which was retired on
-              2026-10-12; read them as tier 3.
+              <strong>Tier 3 is the highest tier.</strong> It rests on a DNS
+              TXT record on the vendor&apos;s domain and the vendor&apos;s live
+              Stripe account. Letterprove does not contact a vendor&apos;s
+              customers. Older documents may carry tier 4, retired on
+              2026-10-12. Read those as tier 3.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              What tier 3 actually requires
+              What tier 3 requires
             </h3>
             <p>
-              It used to require an <code>active</code> subscription, which was
-              not enough and was not honest. A subscription is what you
-              configured, not what anyone paid: a $0 recurring price reaches{" "}
-              <code>active</code> the moment it is created, with no payment
-              method attached and no money involved, and so does a 100%-off
-              coupon. A signed tier-3 attestation naming any company you like
-              cost nothing to manufacture in your own account. Every condition
-              below is now checked instead:
+              An <code>active</code> subscription is not enough. A $0 price or
+              a 100%-off coupon makes a subscription active with no payment.
+              Letterprove checks each of these instead:
             </p>
             <ul>
               <li>
@@ -654,19 +642,15 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               <li>
                 The subscription carries a{" "}
                 <strong>real recurring price above zero</strong> on a real
-                billing interval. The floor is simply &ldquo;above zero&rdquo;:
-                any larger figure would be denominated in one currency&apos;s
-                minor unit and would mean something different in yen, and it
-                would exclude small customers who are real customers. The cost
-                of forgery is the next bullet, not the size of the number.
+                billing interval. The minimum is any amount above zero, so the
+                rule works in every currency and includes small customers.
               </li>
               <li>
-                An <strong>invoice actually settled</strong> against it — paid,
-                for a non-zero amount, with a charge or payment intent behind
-                it. An invoice marked paid by hand (Stripe&apos;s{" "}
-                <code>paid_out_of_band</code>) is you asserting payment, so it
-                does not count, and it is reported back to you as such rather
-                than dropped.
+                An <strong>invoice settled</strong> against it, paid for a
+                non-zero amount, with a charge or payment intent behind it. An
+                invoice marked paid by hand (Stripe&apos;s{" "}
+                <code>paid_out_of_band</code>) does not count. It is reported to
+                you as not counted.
               </li>
               <li>
                 That payment is <strong>recent</strong> relative to the billing
@@ -677,9 +661,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               <li>
                 <code>paying_since</code> is dated from the{" "}
                 <strong>first settled invoice</strong>, never from the
-                subscription&apos;s start date. A start date is a field you set,
-                and Stripe accepts a backdated one, so tenure read from it was
-                settable to any year you liked.
+                subscription&apos;s start date, which can be backdated.
               </li>
             </ul>
             <p>
@@ -692,11 +674,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               because a parent company bills for you, use{" "}
               <strong>Request review</strong> in the Stripe panel and we will
               look at it. Products and Prices read are optional and only show
-              product names when you choose which products count. A key without
-              a required permission fails the sync with that instruction rather
-              than falling back to the weaker evidence: a corroboration check
-              you can switch off by removing a permission is not a corroboration
-              check.
+              product names when you choose which products count. If a required
+              permission is missing, the sync fails and says which permission
+              to add.
             </p>
             <p>
               <strong>Scope is stated.</strong> If your Stripe account bills
@@ -708,28 +688,20 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
             </p>
             <p>
               <strong>Evidence expires.</strong> The sync runs hourly, and
-              payment evidence older than a day stops being published — not as a
-              claim that the customer stopped paying, but as an honest refusal
-              to keep asserting something nothing has confirmed since yesterday.
-              Repeated sync failures clear the evidence outright. Both exist
-              because disconnecting Stripe is something you control: without
-              them, revoking your own key would freeze the last favourable
-              answer in place for ever, with nothing left in the system that
-              could ever contradict it.
+              payment evidence older than a day is no longer published.
+              Repeated sync failures clear the evidence. This stops a revoked
+              key from keeping old payment evidence on the proof.
             </p>
             <p>
-              The honest limit:{" "}
               <strong>
-                this raises the price of a forged tier 3 from nothing to a real
-                charge through a real processor, in a live Stripe account Stripe
-                has verified, leaving a record in your own books.
+                Faking tier 3 requires real charges through a live, Stripe-verified
+                account, recorded in the vendor&apos;s own books.
               </strong>{" "}
-              It does not make it impossible. A vendor willing to pay themselves
-              can still reach tier 3. The Stripe account is bound to the
+              A vendor willing to pay itself can still reach tier 3. The Stripe account is bound to the
               vendor by the domain it publishes about itself (or a staff
               approval, stated in <code>stripe_binding</code>), not granted
-              through Connect. Read tier 3 as corroboration by a third
-              party&apos;s ledger, not as immunity.
+              through Connect. Tier 3 is corroboration by Stripe&apos;s
+              records.
             </p>
             <p>
               Tier 3 first ran against a live-mode Stripe key in production on
@@ -740,11 +712,15 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 
           <Section n={5} id="customers" title="Your customers stay private">
             <p>
-              Letterprove never names, publishes or contacts your customers.
-              The attestation carries counts only. Company domains are used
-              inside Letterprove for one thing: joining the sign-ins the script
-              observed to the invoices in your Stripe account, so that tier 3
-              counts only companies that both use and pay.
+              Letterprove does not contact your customers. The attestation
+              carries counts. Company domains are used inside Letterprove to
+              join observed sign-ins to invoices in your Stripe account.
+            </p>
+            <p>
+              The one exception is your logo wall. If you list the companies on
+              your own public logo page, Letterprove names the ones it verified
+              (signed in, or paying through Stripe) and counts the rest. A
+              company not found on your page is never named.
             </p>
             <p>
               You can see the domains behind your own counts on the{" "}
@@ -787,26 +763,21 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               Nothing about the proof changes on your domain. It is the same
               page and the same signed documents, and every verify link still
               points at Letterprove, so a proof served from your domain stays
-              something a reader can check rather than something you published
-              about yourself. Until your proofs are public, the subdomain
+              something a reader can check. Until your proofs are public, the subdomain
               answers 404.
             </p>
           </Section>
 
           <Section n={7} id="verify" title="Verifying a proof yourself">
             <p>
-              Nothing on this site asks you to trust it. The verifier is a
-              single standalone script with no dependencies, using only Node
-              built-ins, short enough to read before you run it.
+              The verifier is one standalone script that uses only Node
+              built-ins.
             </p>
             <p>
-              It <strong>deliberately shares no code with this service</strong>.
-              It re-implements canonicalisation and signature checking from the
-              published description rather than importing ours, because a
-              verifier built on the producer&apos;s own canonicaliser cannot
-              detect the one bug that matters, which is the producer and the
-              specification disagreeing. Agreement between two independent
-              implementations is the only agreement worth anything here.
+              It <strong>shares no code with this service</strong>. It
+              implements canonicalisation and signature checking from the
+              published description, so it can detect a disagreement between
+              this service and the specification.
             </p>
             <p>
               Fetch what you want to check, and the keys it claims to be signed
@@ -833,18 +804,16 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
             </p>
             <Snippet>{`npm run verify -- ${origin}/attest/<vendor>/chain`}</Snippet>
             <p>
-              Point it at a <strong>chain</strong> rather than a single
-              document. A lone attestation is a window into a history, and its{" "}
-              <code>prev_hash</code> has nothing to be checked against; given
-              the chain, the verifier checks every link.
+              Point it at a <strong>chain</strong>, not a single document. With
+              the chain, the verifier checks every <code>prev_hash</code> link.
             </p>
             <p>For each entry in the chain it does three things:</p>
             <ul>
               <li>
                 Canonicalises every field except the signature. Object keys
                 sorted, array order preserved, integers only. A non-integer
-                number is a hard error rather than a rounding, because floats
-                would break byte agreement between two implementations.
+                number is an error, because floats would break byte agreement
+                between implementations.
               </li>
               <li>
                 Finds the published key whose id matches the document&apos;s{" "}

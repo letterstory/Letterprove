@@ -20,20 +20,20 @@ export function llmsTxt(doc: DiscoveryDocument, origin: string): string {
 	const lines: string[] = [];
 	lines.push("# Letterprove", "");
 	lines.push(
-		"> Signed, machine-checkable evidence that a software vendor is who it says it is, backed by data. The vendor proves it controls its domain with a DNS TXT record (re-checked daily); its connected Stripe account must publish that same domain; Letterprove's own script observes sign-ins on the domain; settled invoices are read directly from the vendor's Stripe. Each hourly snapshot is signed with Ed25519 and hash-chained to the one before it. Counts only: no customer is ever named. The vendor never reports a number and cannot set a tier.",
+		"> Signed evidence of a software vendor's customers, collected and verified by Letterprove. The vendor verifies its domain with a DNS TXT record, checked daily. Its Stripe account must publish the same domain. Letterprove's script observes sign-ins on that domain, and Letterprove reads settled invoices from Stripe directly. Each hourly snapshot is signed with Ed25519 and chained to the previous one. Figures are counts. The vendor does not report any figure and cannot set the tier.",
 		"",
 	);
 	if (doc.warning) lines.push(`WARNING: ${doc.warning}`, "");
 
 	lines.push("## How to read a proof", "");
-	lines.push(`- A valid signature proves a document is Letterprove's and unaltered. The \`tier\` says how strong the evidence is; weigh the tier, not the signature.`);
-	lines.push("- Every attestation carries `verify`, a link to a plain-language page showing exactly what was signed for that snapshot. Open it. A copy whose figures differ was altered; a `verify` link that 404s or points anywhere but app.letterprove.com was not issued by Letterprove.");
-	lines.push("- Identity: `domain` and `domain_verified_since` (DNS), `stripe_account_bound` and `stripe_binding` (whether the connected Stripe account is the vendor's own: `domain_match`, or `staff_override` for a related company's account approved by Letterprove staff).");
-	lines.push("- Evidence: `companies_observed` counts company domains seen signing in over `window_days`; it is not a customer count. At tier 3, at least one of those companies paid a settled invoice in the vendor's own Stripe account; `paying_since` is the earliest such invoice and `payment_scope` says whether all its products count or only those it chose. The number of paying companies is not published. `sessions`, `observed_since`.");
-	lines.push("- `reported_history` (when present) is VENDOR-REPORTED company history from the vendor's own PostHog project: `companies`, `since`, `active_companies_30d`, and `observed_also_reported` (how many of `companies_observed` it also knows). It is listed in `vendor_stated` and never moves the tier.");
-	lines.push("- `tier` is the strongest evidence class present: 3 when at least one observed company pays, 1 when companies are observed, 0 otherwise. Tier 3 never means every company pays.");
-	lines.push("- `logos` (when present) checks the vendor's own public logo wall (`page`): `listed` companies the vendor declared, `on_page` found on that page, and `verified`, the ones Letterprove observed signing in. Only verified companies are named, each with `status`: `active` (signed in, last 30 days) or `paying` (also a settled invoice in the bound Stripe account). It never moves the tier.");
-	lines.push("- `vendor_stated` lists any fields that are the vendor's own statement rather than evidence. It contains `reported_history` when that is present, and is empty otherwise.");
+	lines.push(`- A valid signature proves the document came from Letterprove and was not changed. The \`tier\` states how strong the evidence is.`);
+	lines.push("- Every attestation carries `verify`, a link to a page showing the signed figures for that snapshot. A copy with different figures was altered. A `verify` link to any host other than app.letterprove.com was not issued by Letterprove.");
+	lines.push("- Identity: `domain` and `domain_verified_since` (DNS). `stripe_account_bound` and `stripe_binding`: `domain_match` when the Stripe account publishes the vendor's domain, `staff_override` when Letterprove staff approved a related company's account.");
+	lines.push("- Evidence: `companies_observed` is the number of company email domains that signed in during `window_days`. At tier 3, at least one of those companies paid a settled invoice in the vendor's Stripe account. `paying_since` is the first such invoice. `payment_scope` states whether all of the vendor's Stripe products count or only those it chose. The number of paying companies is not published. Also: `sessions`, `observed_since`.");
+	lines.push("- `reported_history`, when present, is company history the vendor reports from its own PostHog project: `companies`, `since`, `active_companies_30d`, and `observed_also_reported` (how many of `companies_observed` also appear in PostHog). It is listed in `vendor_stated` and does not affect the tier.");
+	lines.push("- `tier`: 3 when at least one observed company pays, 1 when companies are observed, 0 otherwise. Tier 3 does not mean every company pays.");
+	lines.push("- `logos`, when present, checks the vendor's public logo wall at `page`. `listed` is the companies the vendor declared, `on_page` the ones found on that page, and `verified` the ones Letterprove verified. Only verified companies are named. `status` is `paying` (a settled invoice in the bound Stripe account) or `active` (signed in during the last 30 days). It does not affect the tier.");
+	lines.push("- `vendor_stated` lists fields that are the vendor's own statement. It contains `reported_history` when present, and is empty otherwise.");
 	lines.push(`- ${doc.freshness.note}`);
 	lines.push("");
 

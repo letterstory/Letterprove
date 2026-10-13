@@ -20,17 +20,17 @@ export const ISSUER_OPERATOR = "Letter Company";
 /** What a vendor decides. Kept to what the code actually lets a vendor do. */
 export const VENDOR_CONTROLS = [
 	"whether its proofs are public",
-	"which of its Stripe products count as this product — the attestation states how many (`payment_scope`), never which",
+	"which of its Stripe products count as this product (the attestation states how many, in `payment_scope`, never which)",
 	"which extra hosts on its own domain the collector accepts events from",
 ] as const;
 
 /** What a vendor cannot do, and why each holds. */
 export const VENDOR_CANNOT = [
-	"write, edit or delete any measured figure or tier — usage comes from Letterprove's own collector observing sign-ins on the vendor's DNS-proven domain, payment from settled invoices read directly from the vendor's Stripe, and the tier from that evidence alone",
-	"hold or use the signing key — it is kept by the issuer, never by a vendor",
-	"restate a past figure unnoticed — every hourly snapshot is hash-chained to the one before it",
-	"name or publish any customer — the attestation carries counts only, and customer domains never leave Letterprove",
-	"vouch for a Stripe account that isn't its own — the account must publish the vendor's verified domain, unless Letterprove staff approve a related company's account (`stripe_binding: staff_override`)",
+	"edit any figure or tier. Letterprove's collector observes sign-ins, Letterprove reads settled invoices from Stripe, and the tier follows from that evidence",
+	"use the signing key. Letterprove holds it",
+	"change a past figure unnoticed. Each hourly snapshot is hash-chained to the one before it",
+	"name a customer it does not already show on its own logo wall. Everything else is counts, and customer domains stay inside Letterprove",
+	"connect a Stripe account that is not its own. The account must publish the vendor's verified domain, or Letterprove staff must approve it (`stripe_binding: staff_override`)",
 ] as const;
 
 /**

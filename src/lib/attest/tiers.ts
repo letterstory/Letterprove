@@ -40,32 +40,32 @@ export interface TierDescription {
 export const TIER_LADDER: Record<Tier, TierDescription> = {
 	0: {
 		name: "vendor-asserted",
-		means: "Nothing corroborates a claim: no usage was observed, or the vendor has not proven control of its domain by DNS (or the daily re-check found the record gone).",
-		forgeable_by: "The vendor alone, trivially. Treat as a claim, not as evidence.",
+		means: "Nothing is verified. Either no sign-ins were observed, or the vendor's domain is not verified by DNS. The daily DNS check also drops a vendor to tier 0 when its record is removed.",
+		forgeable_by: "The vendor alone. Treat tier 0 as a claim.",
 	},
 	1: {
 		name: "script-observed",
-		means: "Letterprove's script saw people from company email domains sign in, on a domain the vendor proved it controls by DNS. `companies_observed` says how many companies; Letterprove stamps when each event arrived and the vendor never reports a number.",
+		means: "Letterprove's script observed sign-ins from company email domains on the vendor's DNS-verified domain. `companies_observed` is the number of companies. Letterprove timestamps each event on arrival. The vendor does not report any figure.",
 		forgeable_by:
-			"The vendor, with effort. The collector pins events to the vendor's verified origin, which a browser cannot forge — but a non-browser client can send whatever origin it likes, so a vendor could script sign-ins. Volume and burst anomalies are scored against it.",
+			"The vendor, with effort. Browsers cannot fake the origin of an event. A script outside a browser can, so a vendor could script sign-ins. Letterprove scores volume and burst anomalies against this.",
 	},
 	2: {
 		name: "infrastructure-bound",
-		means: "NOT YET ISSUED. Reserved for observed usage bound to network facts the vendor cannot choose (the spread of networks, by ASN, that sign-ins arrive from). That binding is not built, so no new document carries tier 2. Documents signed before 2026-10-13 may carry it for usage that met only the tier-1 bar: read those as tier 1.",
+		means: "Not issued. Reserved for observed usage tied to network facts the vendor cannot choose, such as the spread of networks (ASNs) that sign-ins come from. This check is not built, so no new document carries tier 2. Documents signed before 2026-10-13 may carry tier 2 for tier-1 evidence. Read those as tier 1.",
 		forgeable_by:
-			"When issued: a determined vendor running a distributed spoofing rig. For the historical documents that carry it: the same as tier 1.",
+			"When issued: a vendor running sign-ins from many networks on purpose. For older documents that carry it: the same as tier 1.",
 	},
 	3: {
 		name: "third-party confirmed",
-		means: "Tier 1, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). The tier is the strongest evidence present, not a claim that every company pays; how many pay is private to the vendor. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
+		means: "Tier 1, plus at least one observed company paid a settled invoice in the vendor's live Stripe account. The account must publish the vendor's verified domain, or be approved by Letterprove staff (`stripe_binding`). Letterprove reads the invoices from Stripe directly. A subscription alone does not count, because a free subscription can be active without payment. Tier 3 does not mean every company pays. The number of paying companies is private to the vendor.",
 		forgeable_by:
-			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
+			"A vendor willing to pay itself through its own Stripe account. Every check runs against Stripe's records, and real money must settle in a live, Stripe-verified account. Tier 3 is strong corroboration. It does not stop a vendor willing to spend money to fake it.",
 	},
 	4: {
 		name: "customer counter-signed (retired)",
-		means: "No longer issued; retired on 2026-10-12. Documents signed before then may carry it: it meant the customer approved that usage summary at a link emailed to an address on their own domain. Letterprove now attests from the vendor's DNS proof and the vendor's own Stripe ledger, so tier 3 is the highest tier a new document can carry.",
+		means: "No longer issued. Retired on 2026-10-12. Older documents may carry it. It meant a customer approved a usage summary from a link sent to their own domain. Tier 3 is the highest tier a new document can carry.",
 		forgeable_by:
-			"For the historical documents that carry it: anyone controlling a mailbox at the customer's domain, including a vendor who registered that domain themselves. Read it no higher than tier 3.",
+			"For older documents: anyone with a mailbox at the customer's domain, including a vendor who registered that domain. Read it as tier 3 at most.",
 	},
 };
 
@@ -80,7 +80,7 @@ const RETIRED: readonly Tier[] = [4];
 export function tierLadderDocument() {
 	const byTier = (tiers: Tier[]) => tiers.sort((a, b) => a - b).map((tier) => ({ tier, ...TIER_LADDER[tier] }));
 	return {
-		note: "Every attestation carries a `tier`. A valid signature proves only that this document is ours and unaltered — it says nothing about how good the underlying evidence is. The tier says that, and it is the claim. A signed tier-0 document asserts nothing beyond the vendor existing. Since 2026-10-13 tiers describe the vendor's evidence as a whole (one attestation per vendor, counts only); older per-customer documents carry a tier for one customer.",
+		note: "Every attestation carries a `tier`. A valid signature proves the document came from Letterprove and was not changed. The tier states how strong the evidence is. A signed tier-0 document only shows that the vendor exists. Since 2026-10-13 there is one attestation per vendor, in counts. Older per-customer documents carry a tier for one customer.",
 		/** The ladder a new document is graded on. Tier 3 is the highest. */
 		levels: byTier((Object.keys(TIER_LADDER).map(Number) as Tier[]).filter((t) => !RETIRED.includes(t))),
 		/** No longer issued. Old snapshots may carry these and still verify. */

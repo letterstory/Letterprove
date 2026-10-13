@@ -52,7 +52,7 @@ describe("GET /verify/{vendor}/{stamp}", () => {
 		expect(html).toContain("Verified");
 		expect(html).toContain("signature checks out");
 		expect(html).toContain("<th>companies_observed</th><td>52</td>");
-		expect(html).toContain("it was altered after signing");
+		expect(html).toContain("was altered after signing");
 		expect(html).toContain("most recent snapshot");
 	});
 

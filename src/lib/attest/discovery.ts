@@ -53,7 +53,7 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 	return {
 		name: "Letterprove",
 		description:
-			"Signed, hourly attestations that a software vendor is who it says it is (its domain, proven by DNS; its Stripe account, bound to that domain) and is backed by data (companies observed using it, and how many pay). Counts only; no customer is ever named.",
+			"Signed hourly evidence of a software vendor's customers, collected and verified by Letterprove. It covers the vendor's domain (verified by DNS), its Stripe account (bound to that domain), companies observed signing in, and payments verified in Stripe. Figures are counts. Customers are named only when the vendor already shows them on its own logo wall.",
 		signing: {
 			alg: "EdDSA",
 			crv: "Ed25519",
@@ -76,14 +76,14 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		freshness: {
 			cadence_seconds: SNAPSHOT_CADENCE_SECONDS,
 			note:
-				"A snapshot does not expire. It is a signed statement about the window ending `observed_through`, and it stays true and verifiable permanently. A newer snapshot supersedes it; `next_snapshot_at` says when one is due, and the latest is always at the vendor's `aggregate` URL. Judge how recent the evidence is from `observed_through`. Older snapshots carry `ttl` instead, which was only ever a cache hint.",
+				"A snapshot does not expire. It describes the window ending at `observed_through` and stays verifiable. A new snapshot is signed every hour; `next_snapshot_at` gives the time. The latest is always at the vendor's `aggregate` URL. Use `observed_through` to judge how recent the evidence is. Older snapshots carry `ttl`, which was a cache hint only.",
 		},
 		// The check an answer engine can actually perform: fetch a URL that is
 		// already in the document. See ./verify-link.ts.
 		verify_links: {
 			pattern: `${VERIFY_ORIGIN}/verify/{vendor}/{published_at as YYYYMMDDTHHMMSSmmmZ}`,
 			note:
-				"Every attestation signed since 2026-10-08 carries `verify`, a link to that exact snapshot on this host. Fetching it shows, in plain language, the figures Letterprove signed and whether the signature checks out. A copy whose figures differ from that page was altered. A `verify` link that points anywhere but this host was not issued by Letterprove. One that 404s means Letterprove cannot vouch for that copy (the vendor may no longer be public); only its signature, checked against `jwks_uri`, settles whether Letterprove issued it. Per-customer documents and their verify links (`/verify/{vendor}/{customer}/…`) were retired on 2026-10-13 and answer 410; copies signed before then still verify against `jwks_uri`.",
+				"Every attestation signed since 2026-10-08 carries `verify`, a link to that snapshot on this host. The page shows the signed figures and whether the signature is valid. A copy with different figures was altered. A `verify` link to any other host was not issued by Letterprove. A 404 means Letterprove has no public snapshot at that address, for example because the vendor unpublished. In that case, check the copy's signature against `jwks_uri`. Per-customer verify links (`/verify/{vendor}/{customer}/…`) were retired on 2026-10-13 and return 410. Copies signed before then still verify against `jwks_uri`.",
 		},
 		// Beside the verifier on purpose. Those two answer the two separate
 		// questions an agent has — "is this document genuine" and "how much is
@@ -101,7 +101,7 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 				.filter((v) => v.issuerAffiliation)
 				.map((v) => ({ vendor: v.slug, shared_owner: v.issuerAffiliation! })),
 			note:
-				"A vendor listed in `affiliated_vendors` shares an owner with Letterprove's operator, and every attestation for it carries a signed `issuer_affiliation` saying so. The same collector, code and signing apply to it as to any other vendor; weigh its proofs knowing the relationship.",
+				"Vendors in `affiliated_vendors` share an owner with Letterprove's operator. Each of their attestations carries a signed `issuer_affiliation`. The same collector, code and signing apply to them as to any other vendor.",
 		},
 		// `aggregate` is the vendor attestation, the one signed claim
 		// Letterprove makes about a vendor. `chain` is what makes it auditable
