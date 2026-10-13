@@ -659,3 +659,33 @@ export const disconnectPosthogInput = empty;
 export const disconnectPosthogOutput = z.object({
 	disconnected: z.literal(true).describe("The key and all history read with it are gone."),
 });
+
+// ---------------------------------------------------------------- agent visits
+
+export const getAgentVisitsInput = z.object({
+	days: z.number().int().min(1).max(90).optional().describe("How many days back, today included. Default 30."),
+});
+const agentVisitKind = z.enum(["ai_agent", "search_crawler", "automated_browser"]);
+export const getAgentVisitsOutput = z.object({
+	days: z.number().int(),
+	since: z.string().describe("First day counted, YYYY-MM-DD (UTC)."),
+	total: z.number().int(),
+	verified: z.number().int().describe("Visits from an address the claimed operator publishes for its agents."),
+	agents: z.array(
+		z.object({
+			agent: z.string().describe("chatgpt, claude, perplexity, google, bing, … or automated_browser."),
+			kind: agentVisitKind,
+			total: z.number().int(),
+			verified: z.number().int(),
+			claimed: z
+				.number()
+				.int()
+				.describe("Visits whose user-agent claimed this agent but whose address could not be checked or did not match."),
+			last_at: z.string(),
+		}),
+	),
+	top_paths: z.array(z.object({ path: z.string(), total: z.number().int() })).describe("Up to 20, query strings removed."),
+	daily: z
+		.array(z.object({ day: z.string(), total: z.number().int(), verified: z.number().int() }))
+		.describe("Days with visits only, oldest first."),
+});
