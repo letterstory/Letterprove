@@ -30,7 +30,7 @@ import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installRecipes, installSnippet, serverSnippets } from "@/lib/vendors/install";
 import { agentVisitsReport } from "@/lib/agents/visits";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
-import { acceptedHosts, MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, type HostRow } from "@/lib/vendors/hosts";
+import { acceptedHosts, MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, isOriginAccepted, type HostRow } from "@/lib/vendors/hosts";
 import {
 	attachDomain,
 	liveCustomDomain,
@@ -67,7 +67,7 @@ import {
 import { hogql } from "@/lib/posthog/fetch";
 import { posthogStatus } from "@/lib/posthog/status";
 import { syncVendorPosthog } from "@/lib/posthog/sync";
-import { clearLogoWall, parseLogoWallInput, saveLogoWall } from "@/lib/vendors/logo-wall";
+import { clearLogoWall, parseLogoWallInput, provenLogoDomain, saveLogoWall } from "@/lib/vendors/logo-wall";
 import { logoWallStatus } from "@/lib/vendors/logo-wall-status";
 import { agentKit } from "@/lib/vendors/agent-kit";
 import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
@@ -1822,9 +1822,27 @@ export const TOOLS: BoundTool[] = [
 			if (typeof vendorId !== "string") return vendorId;
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const { data: vendor } = await db.from("vendors").select("slug, domain").eq("id", vendorId).maybeSingle<{ slug: string; domain: string }>();
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("slug, domain, domain_verification_token")
+				.eq("id", vendorId)
+				.maybeSingle<{ slug: string; domain: string; domain_verification_token: string | null }>();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
-			const parsed = parseLogoWallInput(asRecord(args), vendor.domain, await acceptedHosts(vendorId));
+			const record = asRecord(args);
+			const extra = await acceptedHosts(vendorId);
+			// A page on a separate domain is accepted when that domain carries the
+			// vendor's own TXT record (provenLogoDomain).
+			const proven = new Set<string>();
+			try {
+				const host = new URL(String(record.page_url ?? "")).hostname.toLowerCase();
+				if (host && !isOriginAccepted(host, vendor.domain, extra)) {
+					const d = await provenLogoDomain(host, vendor.domain_verification_token);
+					if (d) proven.add(d);
+				}
+			} catch {
+				// parseLogoWallInput reports the bad URL.
+			}
+			const parsed = parseLogoWallInput(record, vendor.domain, extra, proven);
 			if (!parsed.ok) return { ok: false, status: 400, body: { error: parsed.error, detail: parsed.detail } };
 			if (!(await saveLogoWall(vendorId, parsed.pageUrl, parsed.companies))) {
 				return { ok: false, status: 503, body: { error: "storage_unavailable" } };

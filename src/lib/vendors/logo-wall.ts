@@ -26,7 +26,8 @@ import { dbClient } from "@/lib/db/client";
 import { readAllRows } from "@/lib/db/read-all";
 import { classifyDomain } from "@/lib/identity/domains";
 import { normalizeDomain } from "@/lib/vendors/domain";
-import { isOriginAccepted } from "@/lib/vendors/hosts";
+import { acceptedHosts, isOriginAccepted } from "@/lib/vendors/hosts";
+import { checkDomainVerification, type TxtResolver } from "@/lib/vendors/verification";
 import { registrableDomain } from "@/lib/vendors/custom-domain";
 
 export const MAX_LOGOS = 200;
@@ -60,6 +61,8 @@ export function parseLogoWallInput(
 	input: { page_url?: unknown; companies?: unknown },
 	vendorDomain: string,
 	extraHosts: ReadonlySet<string>,
+	/** Other registrable domains this vendor proved with its own TXT record (see provenLogoDomain). */
+	provenDomains: ReadonlySet<string> = new Set(),
 ): { ok: true; pageUrl: string; companies: { name: string; domain: string }[] } | ({ ok: false } & LogoInputError) {
 	let url: URL;
 	try {
@@ -71,11 +74,12 @@ export function parseLogoWallInput(
 		return { ok: false, error: "invalid_page_url", detail: "page_url must be a plain https URL." };
 	}
 	const host = url.hostname.toLowerCase();
-	if (!isOriginAccepted(host, vendorDomain, extraHosts)) {
+	const proven = [...provenDomains].some((d) => host === d || host.endsWith(`.${d}`));
+	if (!isOriginAccepted(host, vendorDomain, extraHosts) && !proven) {
 		return {
 			ok: false,
 			error: "page_not_yours",
-			detail: `The logo wall has to be on ${vendorDomain}, a host under it, or one of your accepted hosts.`,
+			detail: `The logo wall has to be on ${vendorDomain}, a host under it, one of your accepted hosts, or a domain that carries your Letterprove TXT record.`,
 		};
 	}
 	url.hash = "";
@@ -263,6 +267,13 @@ export async function checkLogoWall(vendorId: string, fetcher: Fetcher = fetch):
 	const db = dbClient();
 	const wall = await readLogoWall(vendorId);
 	if (!db || !wall) return { ok: false, detail: "No logo wall set." };
+	// A page on another domain stays only while that domain still carries the
+	// vendor's TXT record: the proof of control is re-checked with every read.
+	const control = await pageControl(vendorId, wall.page_url);
+	if (!control.ok) {
+		await db.from("vendor_logo_wall").update({ check_error: control.detail }).eq("vendor_id", vendorId);
+		return { ok: false, detail: control.detail };
+	}
 	const page = await fetchLogoPage(wall.page_url, fetcher);
 	if (!page.ok) {
 		await db.from("vendor_logo_wall").update({ check_error: page.detail }).eq("vendor_id", vendorId);
@@ -343,3 +354,37 @@ export function publicLogos(
 	return { page: wall.page_url, listed: wall.companies.length, on_page: onPage.length, verified: verified.length, companies: verified };
 }
 
+
+/**
+ * A logo wall may sit on a domain other than the verified one (Letter's is on
+ * letter.dev; its product runs on letterstory.com) when that domain carries
+ * the vendor's own Letterprove TXT record — the same proof of control the
+ * verified domain needed. Returns the registrable domain when proven.
+ */
+export async function provenLogoDomain(host: string, token: string | null, resolver?: TxtResolver): Promise<string | null> {
+	if (!token) return null;
+	const base = registrableDomain(host);
+	const outcome = await checkDomainVerification(base, token, resolver);
+	return outcome.verified ? base : null;
+}
+
+/** Whether the vendor still controls the page's host. */
+async function pageControl(vendorId: string, pageUrl: string): Promise<{ ok: true } | { ok: false; detail: string }> {
+	const db = dbClient();
+	if (!db) return { ok: false, detail: "No datastore configured." };
+	let host: string;
+	try {
+		host = new URL(pageUrl).hostname.toLowerCase();
+	} catch {
+		return { ok: false, detail: "The page URL is not valid." };
+	}
+	const { data: vendor } = await db
+		.from("vendors")
+		.select("domain, domain_verification_token")
+		.eq("id", vendorId)
+		.maybeSingle<{ domain: string; domain_verification_token: string | null }>();
+	if (!vendor) return { ok: false, detail: "Vendor not found." };
+	if (isOriginAccepted(host, vendor.domain, await acceptedHosts(vendorId))) return { ok: true };
+	if (await provenLogoDomain(host, vendor.domain_verification_token)) return { ok: true };
+	return { ok: false, detail: `${registrableDomain(host)} no longer carries your Letterprove TXT record.` };
+}
