@@ -62,7 +62,12 @@ export interface VendorProof {
 		 * (see the warning on its own doc comment).
 		 */
 		unverified_customers: number;
-		features_proven: string[];
+		/**
+		 * Features named on attested customers' records. VENDOR-STATED: no feature
+		 * event is observed today, so this is what the vendor typed, never proof.
+		 * Was `features_proven` before 2026-10-13.
+		 */
+		features_stated: string[];
 		sessions_30d: number;
 		/** The most recent `published_at` across all customers. */
 		last_attested: string;
@@ -195,8 +200,10 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 		all.push({ proof: { current: head(chain), chain }, named: consentOf(c) === "named" });
 	}
 
-	// Only attested customers count toward the headline. A tier-1 observation is
-	// published and readable, but it is not something to advertise as proven.
+	// Only attested customers count toward the headline: `verified` is true only
+	// at tier 3, where a settled Stripe invoice corroborates observed usage. A
+	// tier-1 observation is published and readable, but it is not something to
+	// advertise as proven.
 	const attested = all.filter((c) => c.proof.current.verified);
 	const features = new Set<string>();
 	for (const c of attested) for (const f of c.proof.current.features) features.add(f);
@@ -224,7 +231,7 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 			// tell that the other two were withheld, not that we miscounted.
 			attested_unnamed: attested.filter((c) => !c.named).length,
 			unverified_customers: tiers?.unpublishedEvidence ?? 0,
-			features_proven: [...features].sort(),
+			features_stated: [...features].sort(),
 			sessions_30d: attested.reduce((n, c) => n + c.proof.current.sessions_30d, 0),
 			last_attested: all.map((c) => c.proof.current.published_at).sort().at(-1) ?? "",
 			tier: attested.length ? (Math.max(...attested.map((c) => c.proof.current.tier)) as Tier) : 0,

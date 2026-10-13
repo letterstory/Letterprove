@@ -92,8 +92,10 @@ describe("the docs page", () => {
 		const text = await render("app.letterprove.com");
 		// seats_active is signed as a literal 0 for everyone (src/rollup/snapshots.ts).
 		expect(text).toMatch(/seats_active[\s\S]{0,40}always 0/);
-		// Tier 3 has never run against a live-mode Stripe key (README § Open).
-		expect(text).toMatch(/never run against a live-mode Stripe key/);
+		// Tier 2 is not issued: the ASN binding it describes is not built.
+		expect(text).toMatch(/Tier 2 is not issued/);
+		// Customer details are the vendor's word, and the docs say so.
+		expect(text).toMatch(/vendor_stated/);
 		// A valid signature is not the claim; the tier is.
 		expect(text).toMatch(/tier-0 body asserts only that the vendor said so/);
 	});

@@ -168,19 +168,18 @@ describe("classifyRow", () => {
 		consent: "named" as const,
 	};
 
+	// The stored tier (2 on this fixture) has no effect: tiers come from
+	// evidence alone, and observation without payment is tier 1.
 	it("publishes at the earned tier when a named customer has evidence", () => {
 		const r = classifyRow("acme.com", busy, customer, true);
 		expect(r.status).toBe("published");
-		expect(r.assertedTier).toBe(2);
-		expect(r.earnedTier).toBe(2);
+		expect(r.earnedTier).toBe(1);
+		expect(r).not.toHaveProperty("assertedTier");
 	});
 
-	// The asserted tier stays visible even when capped, because "what did the
-	// vendor claim" is the question someone is usually asking next.
-	it("caps a named customer with no evidence, keeping the asserted tier visible", () => {
+	it("reports a named customer with no evidence at tier 0", () => {
 		const r = classifyRow("acme.com", none, customer, true);
 		expect(r.status).toBe("no-observation");
-		expect(r.assertedTier).toBe(2);
 		expect(r.earnedTier).toBe(0);
 	});
 
@@ -225,6 +224,6 @@ describe("classifyRow", () => {
 	it("counts any event type as evidence, not just sessions", () => {
 		const signupOnly = classifyRow("acme.com", { sessions: 0, signups: 1, logins: 0 }, customer, true);
 		expect(signupOnly.status).toBe("published");
-		expect(signupOnly.earnedTier).toBe(2);
+		expect(signupOnly.earnedTier).toBe(1);
 	});
 });

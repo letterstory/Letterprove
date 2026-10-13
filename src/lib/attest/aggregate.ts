@@ -65,6 +65,13 @@ export interface AggregateBody {
 	/** Observed domains that can never name a company: free-mail, internal, malformed. */
 	domains_excluded: number;
 	tier: Tier;
+	/**
+	 * Fields that are the vendor's statement rather than evidence. Always empty
+	 * here — every figure in the aggregate is counted from observed events — and
+	 * published anyway so the absence is stated, not inferred. Absent before
+	 * 2026-10-13.
+	 */
+	vendor_stated?: string[];
 	observed_through: string;
 	published_at: string;
 	/** When a newer snapshot is due. Absent on snapshots signed before 2026-10-08 — see ./cadence.ts. */
@@ -88,18 +95,24 @@ interface Totals {
 }
 
 /**
- * What the evidence supports for a vendor-wide claim.
+ * What the evidence supports for a vendor-wide claim. The same rule as a
+ * customer claim in body.ts's earned(), minus payment: the aggregate makes no
+ * commercial claim, so it tops out at tier 1.
  *
- * Tier 2, not 1: every observation behind it was seen by our script in a real
- * browser AND bound to facts the vendor did not supply — our receipt
- * timestamp and the request origin (decision 14: two of the three
- * infrastructure facts are enough for now; ASN is still uncaptured).
+ * Tier 1, not 2. This used to claim tier 2 on the strength of two
+ * infrastructure facts (our receipt timestamp and the pinned origin, decision
+ * 14). Those are exactly what tier 1 already is — the per-customer path
+ * published the same evidence as tier 1 — and tier 2 is now reserved for the
+ * ASN binding that is not built (decision 29). One evidence class, one tier.
  *
- * Capped at 0 with nothing observed, for the same reason `earned()` caps a
- * customer claim: a tier is a statement about evidence, and there isn't any.
+ * Gated on DNS proof, like earned(). An observation pinned to a domain nobody
+ * has proven, or no longer proves (the daily re-check clears
+ * `domain_verified_at` when the TXT record is gone), is the vendor asserting.
+ * Capped at 0 with nothing observed: a tier is a statement about evidence,
+ * and there isn't any.
  */
-function earnedTier(observed: boolean): Tier {
-	return observed ? 2 : 0;
+export function earnedAggregateTier(observed: boolean, domainVerified: boolean): Tier {
+	return observed && domainVerified ? 1 : 0;
 }
 
 /** Every domain this vendor was observed for in the window, with its totals. */
@@ -176,7 +189,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		companies_observed: attributable.length,
 		...summed,
 		domains_excluded: excluded.length,
-		tier: earnedTier(attributable.length > 0),
+		tier: earnedAggregateTier(attributable.length > 0, vendor.domainVerified),
+		vendor_stated: [],
 		observed_through: now,
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),

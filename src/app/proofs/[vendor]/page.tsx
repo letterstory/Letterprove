@@ -61,7 +61,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 
 	const host = (await headers()).get("host") ?? "localhost";
 	const origin = `${host.startsWith("localhost") ? "http" : "https"}://${host}`;
-	/** A customer whose attestation is actually fetchable — i.e. one who consented. */
+	/** A customer whose attestation is actually fetchable — i.e. one the vendor has named. */
 	const example = proof.customers[0]?.current.customer;
 	/**
 	 * The current snapshot's own check page, first on the page. In the AEO
@@ -110,7 +110,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				    page finally see the same number from the same source. */}
 				<dl className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-4">
 					<Tile label="Attested customers" value={String(proof.summary.attested_customers)} />
-					<Tile label="Features proven" value={String(proof.summary.features_proven.length)} />
+					<Tile label="Features (stated by vendor)" value={String(proof.summary.features_stated.length)} />
 					<Tile label="Sessions / 30d" value={proof.summary.sessions_30d.toLocaleString("en-US")} />
 					<Tile
 						label="Last attested"
@@ -128,7 +128,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						<span className="font-semibold text-mint">{observedNotClaimed}</span> more{" "}
 						{observedNotClaimed === 1 ? "company has" : "companies have"} been observed using{" "}
 						{proof.vendor.name} but {observedNotClaimed === 1 ? "is" : "are"} not published as a
-						customer — either not yet recorded, or recorded without consent to be named. Not
+						customer — either not yet recorded, or recorded without the vendor stating it may name them. Not
 						counted above.
 					</p>
 				)}
@@ -146,16 +146,17 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					Published claims
 				</h2>
 				{/* An empty state, not an empty gap. This list only ever holds
-				    customers who consented to be NAMED, so a vendor with real
+				    customers the vendor has NAMED, so a vendor with real
 				    attested customers who have all stayed anonymous renders a
 				    heading over nothing — which reads as broken rather than as
-				    the deliberate consent behaviour it is. */}
+				    the deliberate naming default it is. */}
 				{proof.customers.length === 0 ? (
 					<p className="mt-4 rounded-lg border border-dashed border-edge px-6 py-8 text-center text-sm text-fog">
 						{proof.summary.attested_customers > 0 ? (
 							<>
-								No customer has agreed to be named publicly yet. Their attestations exist and
-								are counted in the totals above — naming is theirs to consent to.
+								No customer is named publicly yet. Their attestations exist and are counted in
+								the totals above. A customer is named only when {proof.vendor.name} states it has
+								that customer&rsquo;s permission.
 							</>
 						) : (
 							<>
@@ -180,20 +181,24 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					<p className="mt-4 rounded-lg border border-edge bg-panel px-4 py-3 text-sm text-fog">
 						<span className="text-mint">+{proof.summary.attested_unnamed}</span> further attested{" "}
 						{proof.summary.attested_unnamed === 1 ? "customer is" : "customers are"} counted in the
-						totals above but not named here. Their attestations exist and are signed; publishing
-						a customer&rsquo;s name is theirs to agree to, not the vendor&rsquo;s.
+						totals above but not named here. Their attestations exist and are signed; a customer
+						is named only when {proof.vendor.name} states it has that customer&rsquo;s permission.
 					</p>
 				)}
 
 				{/* The matrix names customers by definition, so it only ever covers the
-				    consenting ones. `features_proven` in the summary above still counts
+				    customers the vendor has named. `features_stated` in the summary above still counts
 				    every attested customer's features — the aggregate is the
-				    consent-safe view and stays complete. */}
+				    naming-safe view and stays complete. */}
 				{proof.customers.length > 0 && (
 				<>
 				<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
-					Feature-level proof
+					Features (stated by vendor)
 				</h2>
+				<p className="mt-2 text-sm text-fog">
+					The features on each customer record, as {proof.vendor.name} entered them. Letterprove
+					does not observe feature use yet, so these are the vendor&rsquo;s statement, not proof.
+				</p>
 				<div className="mt-4 overflow-x-auto rounded-lg border border-edge">
 					<table className="w-full text-left text-sm">
 						<thead className="bg-panel text-fog">
@@ -239,7 +244,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Who issued this</h2>
 					<p className="mt-4 text-sm text-fog">
 						Letterprove is operated by {ISSUER_OPERATOR}. {proof.vendor.name} decides only{" "}
-						{VENDOR_CONTROLS.join(", and ")}. It cannot:
+						{VENDOR_CONTROLS.slice(0, -1).join("; ")}; and {VENDOR_CONTROLS.at(-1)}. It cannot:
 					</p>
 					<ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-fog">
 						{VENDOR_CANNOT.map((line) => (
@@ -247,8 +252,9 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						))}
 					</ul>
 					<p className="mt-3 text-sm text-fog">
-						How strong the evidence is, the tier says: tier 2 is sign-ins observed on infrastructure the
-						vendor controls; tier 3 adds payments confirmed through the vendor&apos;s own Stripe account.
+						How strong the evidence is, the tier says: tier 1 is sign-ins observed by Letterprove on the
+						domain the vendor proved it controls; tier 3 adds invoices that settled in the vendor&apos;s own
+						Stripe account.
 					</p>
 					{affiliation && (
 						<p className="mt-4 rounded border border-edge px-4 py-3 text-sm">
@@ -270,7 +276,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							<span className="ml-3 text-fog">— this report</span>
 						</li>
 						{/* Listed before the per-customer endpoints, not after. Naming a
-						    customer needs that customer's consent, so for most vendors
+						    customer needs the vendor to state it has permission, so for most vendors
 						    these two are the ONLY signed things on offer — and the
 						    per-customer links below may not render at all. An agent that
 						    stopped at the report would miss what is actually attested. */}
@@ -286,7 +292,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							</a>
 							<span className="ml-3 text-fog">— its full signed history</span>
 						</li>
-						{/* Only linkable when someone has consented to be named. With no
+						{/* Only linkable when the vendor has named someone. With no
 						    named customer these rendered `/attest/vantage/undefined.json`
 						    — a broken link on the one surface whose entire job is being
 						    machine-fetchable. */}
@@ -375,7 +381,7 @@ function CustomerCard({ proof, vendor }: { proof: CustomerProof; vendor: string 
 			    lookalike registered on a domain the vendor owns. */}
 			<p className="mt-1 font-mono text-sm text-fog">{a.customer_domain}</p>
 
-			<p className="mt-1 text-sm text-fog">Active since {a.since}</p>
+			<p className="mt-1 text-sm text-fog">Customer since {a.since} (stated by vendor)</p>
 
 			<dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
 				<div>
@@ -388,7 +394,8 @@ function CustomerCard({ proof, vendor }: { proof: CustomerProof; vendor: string 
 				</div>
 			</dl>
 
-			<p className="mt-4 flex flex-wrap gap-1.5">
+			<p className="mt-4 flex flex-wrap items-center gap-1.5">
+				{a.features.length > 0 && <span className="text-xs text-fog">Features (stated by vendor):</span>}
 				{a.features.map((f) => (
 					<span key={f} className="rounded border border-edge px-1.5 py-0.5 font-mono text-xs text-fog">
 						{f}

@@ -392,7 +392,6 @@ describe("dispatchTool", () => {
 					signups: 1,
 					logins: 0,
 					customer: null,
-					assertedTier: null,
 					earnedTier: null,
 					consent: null,
 					status: "no-customer-record",

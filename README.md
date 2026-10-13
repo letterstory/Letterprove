@@ -79,16 +79,27 @@ agent can weigh it instead of trusting it:
 | Tier | Source | Forgeable by the vendor? |
 |:---:|---|---|
 | **0** | Vendor-asserted — the ordinary logo wall | Trivially |
-| **1** | Observed by our script in a real browser | With effort |
-| **2** | Bound to infrastructure facts the vendor doesn't control | Hard |
-| **3** | Corroborated by a third party — Stripe, IdP, DNS | Only by paying themselves real money |
+| **1** | Observed by our script, on a domain the vendor proved by DNS | With effort |
+| ~~**2**~~ | ~~Bound to network facts the vendor doesn't choose (ASN)~~ — **not issued** until the ASN binding is built; documents signed before 10-13 may carry it, read them as tier 1 | — |
+| **3** | Tier 1, plus a settled invoice in the vendor's own live Stripe | Only by paying themselves real money |
 | ~~**4**~~ | ~~Counter-signed by the customer themselves~~ — **retired 10-12**; old documents may still carry it, read them as tier 3 | — |
 
-**Tier 2 is the phase-one target.** The vendor can fabricate a payload, but not
+**The tier comes from evidence alone** ([decision 29](#decision-log)). Nobody
+sets it, the vendor included: no DNS proof or nothing observed is tier 0,
+sign-ins observed on the DNS-proven domain are tier 1, and a settled invoice
+for that domain on top is tier 3. Fields that are the vendor's own statement —
+a customer's name, start date and features — are listed in every signed body
+under `vendor_stated`. Domain proof is re-checked daily, so a lapsed or
+removed record stops counting.
+
+**Tier 2 is reserved, not issued.** The vendor can fabricate a payload, but not
 our server's receipt timestamp, not the observed origin, and not the ASN a
-request arrived from. Binding vendor-supplied facts to infrastructure-derived
-facts raises the cost of faking a month of usage from *editing a JSON file* to
-*running a distributed spoofing rig* — a real jump, and an auditable one.
+request arrived from. Binding all three raises the cost of faking a month of
+usage from *editing a JSON file* to *running a distributed spoofing rig*. The
+first two are captured; the ASN is not (`asn_distribution` is still null), so
+tier 2 waits for it. Until 10-13 the aggregate claimed tier 2 on the first two
+facts alone while the same evidence published as tier 1 per customer; one
+evidence class now earns one tier.
 
 **Tier 3 is where `"verified": true` stops resting on the vendor's own word**,
 because it is read from a third party's ledger: an invoice that actually
@@ -102,8 +113,9 @@ Letterprove attests from the vendor's DNS proof and the vendor's own Stripe
 ledger, and does not contact the vendor's customers (see
 [Customer counter-signing — Retired](#customer-counter-signing--retired-10-12)).
 
-Rigor compounds. Ship tier 1–2, then 3, and never print the
-word *verified* where the tier doesn't earn it.
+Rigor compounds. Ship tier 1, then 3, then the ASN binding for 2, and never
+print the word *verified* where the tier doesn't earn it. `verified` is true
+only at tier 3.
 
 ---
 
@@ -732,7 +744,7 @@ verify. See `src/lib/attest/cadence.ts`.
 *"Last attested 2m ago"* comes from publishing frequently, not from signing
 on the fly.
 
-### Signing — **Proposed**
+### Signing — **Decided (live since 08-13)**
 
 Ed25519, countersigned by Letterstory as described in [the signing
 seam](#the-signing-seam). The private key lives in Letterstory's server
@@ -808,6 +820,11 @@ So publication applies one rule, in
 > window, every fact we hold about that customer came from the vendor — which
 > is tier 0 by definition — and `verified` is false at any tier.
 
+*Superseded 10-13 by decision 29: there is no asserted tier any more. The tier
+is derived from evidence alone, and the stored `vendor_customers.tier` is a
+legacy column `earned()` does not read. The fail-toward-weaker rule below still
+holds.*
+
 It fails toward the weaker claim: a missing datastore or a failed query leaves
 `observed` false, so an outage degrades a proof to vendor-asserted rather than
 publishing a tier nothing backs. `observed` is evidence *about* the claim, not
@@ -817,9 +834,8 @@ Two things this deliberately does **not** decide, both trust-model calls rather
 than publishing ones:
 
 - **Tier 1 vs 2 from what a fact is bound to.** `receipt_ts` and `origin` are
-  captured; ASN is not yet (see `telemetry/record.ts`). Whether two of the
-  three infrastructure facts earn tier 2 is a judgement this gate leaves to the
-  customer record.
+  captured; ASN is not yet (see `telemetry/record.ts`). *Decided 10-13
+  (decision 29): two of the three facts are tier 1; tier 2 waits for the ASN.*
 - **What an observation is worth over time.** The gate asks whether the 30-day
   window contains anything at all, not whether it contains enough. A customer
   last seen on day 29 currently publishes the same tier as one seen hourly.
@@ -872,12 +888,18 @@ Publishing *"Acme runs SSO, 148 seats, 92% adoption"* discloses **Acme's** data.
 Acme is our customer's customer.
 
 **Build for named, ship anonymized, flip as consent lands.**
-Aggregate proof (*"12 attested customers, 4 features proven, 38k sessions/mo"*)
-carries almost no consent problem and is already meaningfully better than a logo
-wall. Named attestation is the part that needs Acme's say-so. This unblocks the
-entire pipeline today, and doesn't wait on the legal question below — that
-question decides when a given customer flips to named, not whether the system
-ships.
+Aggregate proof (*"12 attested customers, 38k sessions/mo"*) carries almost no
+consent problem and is already meaningfully better than a logo wall. Named
+attestation is the part that needs Acme's say-so. This unblocks the entire
+pipeline today, and doesn't wait on the legal question below — that question
+decides when a given customer flips to named, not whether the system ships.
+
+**Since 10-12, naming is the vendor's statement.** The vendor marks a customer
+named, which is its representation (under the terms) that it holds that
+customer's permission. Letterprove does not contact the customer to check, and
+every signed body lists `customer_name` under `vendor_stated` so no reader
+mistakes the name for something we confirmed. Naming changes only whether the
+name appears, never the tier.
 
 ### Customer counter-signing — **Retired (10-12)**
 
@@ -1071,14 +1093,15 @@ signing](#what-is-actually-signing--decided-08-13).
 | 26 | **Independence is shown, not claimed; affiliation is disclosed, not hidden.** A vendor that shares an owner with Letterprove's operator (`vendors.issuer_affiliation`, set by migration or staff, never by the vendor) signs an `issuer_affiliation` sentence into every attestation, and its proof page carries the disclosure. Every proof page says who operates Letterprove and what a vendor can and cannot do; the discovery document carries the same as `issuer`. Claude inferred the Letterprove/Lettertrace link from the names alone and discounted the proof — an objection an engine discovers costs more than a fact we state | ✅ **Decided (10-08)**, Casey — see `src/lib/attest/issuer.ts` |
 | 27 | **A vendor's proof page may live on its own domain, but only under the domain it verified.** `set_custom_domain` attaches a subdomain such as `proof.acme.com` to this Vercel project, and `src/proxy.ts` serves that vendor's proof page at its root. It must share the registrable domain the vendor proved by DNS, so nobody can claim another company's hostname before that company points it at us. An unpublished vendor's domain answers 404. The page names the custom domain canonical once it is live, and its signatures and verify links still point at `app.letterprove.com`, which keeps a proof served from the vendor's own domain checkable | ✅ **Decided (10-12)**, Matthew + Casey — see `src/lib/vendors/custom-domain.ts` |
 | 28 | **Letterprove does not contact a vendor's customers; tier 3 is the top of the ladder.** The emailed customer counter-signature (tier 4, `request_consent`) is removed. Attestation rests on the vendor's DNS proof and its own Stripe ledger, joined to observed usage. Old tier-4 snapshots still verify and are described as retired. Supersedes the counter-signing half of 9, and 19 and 21 | ✅ **Decided (10-12)**, Casey — see [Customer counter-signing — Retired](#customer-counter-signing--retired-10-12) |
+| 29 | **The tier comes from evidence alone, and every field says whose word it is.** `earned()` reads only DNS proof, observation and Stripe evidence — the stored customer `tier` is ignored. Tier 2 is not issued until the ASN binding exists; the aggregate publishes tier 1 for the same evidence a customer claim does, and both are gated on DNS proof. Customer bodies list `vendor_stated` (`customer_name`, `since`, `features`); `features_proven` is renamed `features_stated`; naming is the vendor's statement of permission. Domain proof is re-checked daily and cleared after three misses over two days. `/llms.txt` is generated from the discovery document. Supersedes 14 and the asserted-tier ceiling in the evidence gate | ✅ **Decided (10-13)**, Casey — see `src/lib/attest/body.ts`, `src/lib/vendors/dns-recheck.ts` |
 
 ### Open
 
-- **Tier 3 has never run against a live-mode Stripe key.** The publish half is
-  proven against the real schema (`src/lib/stripe/publish.schema.test.ts`, which
-  runs the real sync with `livemode: true` through real migrations), but
-  `livemode` has only ever been `false` in production, because a test-mode key
-  deliberately stores nothing. Closing that needs a real paying vendor.
+- **Tier 3 ran against a live-mode Stripe key for the first time on 10-12**
+  (Letterstory, Letter Company's own account), so this is no longer untested.
+  It is still a sample of one, and that account bills several products; see the
+  Stripe items below. The publish half is proven against the real schema
+  (`src/lib/stripe/publish.schema.test.ts`).
 
   The *connect* half was worse until 09-09, and quietly: `src/lib/stripe` had no
   caller at all outside its own tests, because the vendor dashboard that drove it
@@ -1099,15 +1122,6 @@ signing](#what-is-actually-signing--decided-08-13).
   would need another restricted-key scope while proving only what the account
   claims about itself. Connect is the answer; deciding to build it is not an
   engineering call.
-
-- **A zero-volume window passes every fraud threshold.** Decision 17 records
-  that scoring catches gross volume and burst anomalies and not a slow,
-  well-distributed rig. The sharper version: it also does not catch *no* rig at
-  all. `fraudFeatures` fails toward an all-zero window and a fabricated company
-  produces one honestly, so every threshold with a floor waves it through. That
-  is defensible for tiers 1-3, which are gated on observation anyway and drop to
-  tier 0 with nothing observed. A threshold that fires on an *empty*
-  window is the change, and it belongs on the countersigner, not here.
 
 - **Every fraud threshold is calibrated on one vendor's traffic shape.** There
   has only ever been one real vendor, so "normal" is a sample of one. The

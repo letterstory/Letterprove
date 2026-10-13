@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     "What Letterprove collects when its script runs on a customer's site, why it is company-level rather than personal, and what is published.",
 };
 
-const UPDATED = "October 12, 2026";
+const UPDATED = "October 13, 2026";
 
 /**
  * Written against what the code actually does, not against the sibling
@@ -85,12 +85,20 @@ export default function PrivacyPage() {
           </li>
         </ul>
         <p>
-          That is the complete list. We do not receive names, email addresses,
+          That is the complete list from the script. It does not send us names, email addresses,
           IP addresses, user identifiers, device fingerprints, page URLs, form
           contents, or behavioural data, and we set no cookies and no local
           storage. A domain like <code>gmail.com</code> tells us nothing about a
           person; a domain like <code>acme.com</code> identifies a{" "}
           <em>company</em>, which is the entire point of the product.
+        </p>
+        <p>
+          <strong>If a vendor connects Stripe</strong>, we read invoices and
+          customer records from the vendor&apos;s own Stripe account, with a
+          read-only key the vendor supplies. Those records include the billing
+          email address of each of the vendor&apos;s paying customers. We read
+          that address only to take its domain, in memory, during the sync; we
+          store the domain and the amount paid, never the address.
         </p>
         <p>
           <strong>If this changes, this page changes first.</strong> This is
@@ -155,11 +163,14 @@ export default function PrivacyPage() {
           sessions, how many signups. These name nobody.
         </p>
         <p>
-          <strong>A customer is only ever named with their consent.</strong>{" "}
-          Consent is opt-in and the default is anonymous: a customer added
-          without anyone considering the question is withheld from publication,
-          never published by accident. A named customer is counted in the totals
-          either way; consent controls whether their name appears.
+          <strong>A customer is named only when the vendor says it may be.</strong>{" "}
+          The default is anonymous: a customer added without anyone considering
+          the question is withheld from publication, never published by
+          accident. Naming is the vendor&apos;s statement that it holds that
+          customer&apos;s permission; Letterprove does not contact the
+          vendor&apos;s customers to confirm it, and every attestation lists the
+          name among the fields the vendor stated. A customer is counted in the
+          totals either way; naming controls only whether their name appears.
         </p>
         <p>
           We never publish individual events, individual visitors, or the raw
@@ -221,8 +232,8 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Stripe</strong> — reads a vendor&apos;s own connected
-            account, at their instruction, to corroborate a customer&apos;s paid
-            subscription for a higher provenance tier. We do not process
+            account, at their instruction, to corroborate a customer&apos;s
+            settled invoices for a higher provenance tier. We do not process
             payments and do not receive card data.
           </li>
           <li>

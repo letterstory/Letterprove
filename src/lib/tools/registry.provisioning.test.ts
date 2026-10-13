@@ -110,7 +110,7 @@ describe("get_proof_summary", () => {
 		vendorProof.mockResolvedValue({
 			vendor: { slug: "acme", name: "Acme", domain: "acme.com", category: "c" },
 			customers: [],
-			summary: { attested_customers: 3, attested_unnamed: 1, unverified_customers: 0, features_proven: [], sessions_30d: 106, last_attested: "2026-08-24T18:05:45.953Z", tier: 2, companies_observed: 52 },
+			summary: { attested_customers: 3, attested_unnamed: 1, unverified_customers: 0, features_stated: [], sessions_30d: 106, last_attested: "2026-08-24T18:05:45.953Z", tier: 2, companies_observed: 52 },
 		});
 		const o = await dispatchTool("get_proof_summary", {}, service({ vendorId: "v1" }));
 		expect(vendorProof).toHaveBeenCalledWith("acme");

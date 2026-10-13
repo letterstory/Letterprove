@@ -30,6 +30,7 @@ const LEAD = [
 	"kind",
 	"verified",
 	"tier",
+	"vendor_stated",
 ] as const;
 
 const TAIL = ["prev_hash", "key_id", "signature"] as const;

@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 		"The terms for using Letterprove, including what a signed attestation does and does not claim, and the obligations a vendor takes on by publishing one.",
 };
 
-const UPDATED = "October 12, 2026";
+const UPDATED = "October 13, 2026";
 
 /**
  * The clauses that carry real weight here are §4 (what a signature actually
@@ -75,15 +75,17 @@ export default function TermsPage() {
 				<p>
 					Every published claim therefore carries a <strong>provenance tier</strong> describing how
 					much independent corroboration stands behind it — from vendor-asserted at the bottom, to
-					observed by our script, to bound to infrastructure facts you do not control, to
-					corroborated by a third party. Anyone
+					observed by our script on a domain you proved by DNS, to corroborated by a third
+					party&apos;s ledger. The tier is derived from that evidence alone; you cannot set it.
+					Fields that are your own statement (a customer&apos;s name, start date and features) are
+					labelled as such in every attestation. Anyone
 					reading a proof is expected to weigh the tier rather than treat every claim as
 					equivalent.
 				</p>
 				<p>
-					One form of third-party corroboration: if you connect a Stripe account, we read your own
-					records of a named customer&apos;s active, paid subscription to raise that customer above
-					vendor-asserted. This evidence expires if it is not refreshed by a successful sync, so a
+					Third-party corroboration today means Stripe: if you connect your own live Stripe account,
+					we read invoices that actually settled there and join them to usage we observed from the
+					same customer domain, for any of your customers, named or not. This evidence expires if it is not refreshed by a successful sync, so a
 					stale Stripe connection reads as absent corroboration, not as proof the customer stopped
 					paying.
 				</p>

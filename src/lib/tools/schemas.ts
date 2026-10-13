@@ -34,8 +34,11 @@ const customer = z.object({
 	name: z.string(),
 	domain: z.string(),
 	since: z.string().describe("When the relationship started, as the vendor asserts it."),
-	tier: z.number().int().describe("What the VENDOR claims. A ceiling on published provenance, never a floor."),
-	verified: z.boolean(),
+	tier: z
+		.number()
+		.int()
+		.describe("LEGACY, ignored. Nobody sets a tier: the published tier is derived from evidence at publish time (DNS proof, observed sign-ins, settled Stripe invoices). Read it from the attestation or get_proof_summary."),
+	verified: z.boolean().describe("LEGACY, ignored, for the same reason as `tier`."),
 	features: z.array(z.string()),
 	consent,
 });
@@ -399,7 +402,6 @@ const tierRow = z.object({
 	signups: z.number().int(),
 	logins: z.number().int(),
 	customer: z.string().nullable(),
-	assertedTier: z.number().int().nullable().describe("What the vendor claims."),
 	earnedTier: z.number().int().nullable().describe("What the evidence supports right now."),
 	consent: consent.nullable(),
 	status: z.string(),

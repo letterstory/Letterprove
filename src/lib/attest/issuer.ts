@@ -20,12 +20,13 @@ export const ISSUER_OPERATOR = "Letter Company";
 /** What a vendor decides. Kept to what the code actually lets a vendor do. */
 export const VENDOR_CONTROLS = [
 	"whether its proofs are public",
-	"which customers are named, each only with that customer's consent",
+	"which customers are named — a customer is named only when the vendor states it holds that customer's permission",
+	"the customer details it states: each customer's name, start date and features, which every attestation lists under `vendor_stated`",
 ] as const;
 
 /** What a vendor cannot do, and why each holds. */
 export const VENDOR_CANNOT = [
-	"write, edit or delete any figure — the numbers come from Letterprove's own collector observing sign-ins on the vendor's domain",
+	"write, edit or delete any measured figure or tier — usage comes from Letterprove's own collector observing sign-ins on the vendor's DNS-proven domain, payment from settled invoices read directly from the vendor's Stripe, and the tier from that evidence alone",
 	"hold or use the signing key — it is kept by the issuer, never by a vendor",
 	"restate a past figure unnoticed — every hourly snapshot is hash-chained to the one before it",
 ] as const;

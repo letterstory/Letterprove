@@ -39,7 +39,7 @@ export type TierStatus =
 	| "no-customer-record"
 	/** Record exists, but consent to be named has not been given. */
 	| "consent-withheld"
-	/** Record exists and is publishable, but nothing was observed AND it isn't countersigned. */
+	/** Record exists and is publishable, but nothing was observed. */
 	| "no-observation"
 	/** Published, at the tier the evidence earned. */
 	| "published";
@@ -52,8 +52,6 @@ export interface DomainTierRow {
 	logins: number;
 	/** The customer record this domain maps to, when one exists. */
 	customer: string | null;
-	/** What the vendor claims. A ceiling, never a floor — see body.ts's earned(). */
-	assertedTier: Tier | null;
 	/** What the evidence actually supports right now. */
 	earnedTier: Tier | null;
 	consent: Consent | null;
@@ -137,7 +135,7 @@ export function classifyRow(
 	customer: CustomerFixture | undefined,
 	/**
 	 * The vendor's DNS-verified state. This report exists to tell an operator
-	 * why a customer isn't earning what it asserts, so it has to apply the
+	 * why a customer isn't earning a tier, so it has to apply the
 	 * same gate publishing does — otherwise it would report an earned tier
 	 * the proof will never actually carry.
 	 */
@@ -152,7 +150,6 @@ export function classifyRow(
 		kind,
 		...totals,
 		customer: customer?.slug ?? null,
-		assertedTier: customer?.tier ?? null,
 		earnedTier: customer ? earned(customer, observed, domainVerified).tier : null,
 		consent: customer ? consentOf(customer) : null,
 	};
@@ -186,9 +183,7 @@ export function classifyRow(
 	return {
 		...base,
 		status: "published",
-		detail: `published at tier ${base.earnedTier}${
-			base.earnedTier !== base.assertedTier ? ` (asserted ${base.assertedTier}, capped by evidence)` : ""
-		}`,
+		detail: `published at tier ${base.earnedTier}`,
 	};
 }
 
