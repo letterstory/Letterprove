@@ -24,6 +24,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import type { PaymentScope } from "./types";
 
 /**
  * How old evidence may be before it stops counting.
@@ -128,4 +129,18 @@ export async function paymentEvidenceCount(vendorId: string): Promise<number | n
 
 	if (error || typeof count !== "number") return null;
 	return count;
+}
+
+/**
+ * The product scope the vendor's payment evidence is counted under, for the
+ * aggregate's `payment_scope`. Null when Stripe isn't connected (or the row
+ * can't be read), and the aggregate then says nothing about scope.
+ */
+export async function paymentScopeFor(vendorId: string): Promise<PaymentScope | null> {
+	const db = dbClient();
+	if (!db) return null;
+	const { data, error } = await db.from("vendor_stripe_credentials").select("product_ids").eq("vendor_id", vendorId).maybeSingle();
+	if (error || !data) return null;
+	const ids = Array.isArray(data.product_ids) ? (data.product_ids as unknown[]) : [];
+	return ids.length > 0 ? { mode: "selected", products: ids.length } : { mode: "all_products", products: 0 };
 }

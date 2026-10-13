@@ -3,15 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/oauth/ratelimit", () => ({ oauthRateLimit: vi.fn(), oauthClientIp: vi.fn(() => "203.0.113.9") }));
 vi.mock("@/lib/fixtures/vendors", () => ({ findVendorByKey: vi.fn() }));
 vi.mock("@/lib/telemetry/record", () => ({ recordObservation: vi.fn() }));
+vi.mock("@/lib/vendors/hosts", () => ({ acceptedHosts: vi.fn(async () => new Set<string>()) }));
 
 import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { recordObservation } from "@/lib/telemetry/record";
+import { acceptedHosts } from "@/lib/vendors/hosts";
 import { POST } from "./route";
 
 // Verified, because every test below the refusal ones is about some other
 // rule and would otherwise be testing the verification gate by accident.
 const VENDOR = {
+	id: "v-1",
 	slug: "lettertrace",
 	name: "Lettertrace",
 	domain: "lettertrace.com",
@@ -140,6 +143,31 @@ describe("POST /api/v1/observe", () => {
 
 		expect(res.headers.get("x-letterprove")).toBe("off");
 		expect(recordObservation).not.toHaveBeenCalled();
+	});
+
+	it("accepts an extra host the vendor's DNS proof covers, and records its real origin", async () => {
+		vi.mocked(acceptedHosts).mockResolvedValueOnce(new Set(["app.lettertrace.com"]));
+		const res = await post(VALID_BODY, { origin: "https://app.lettertrace.com" });
+
+		expect(res.headers.get("x-letterprove")).not.toBe("off");
+		expect(acceptedHosts).toHaveBeenCalledWith("v-1");
+		expect(vi.mocked(recordObservation).mock.calls.at(-1)?.[0].origin).toBe("app.lettertrace.com");
+	});
+
+	it("rejects a host the vendor never added, or one whose proof is outstanding", async () => {
+		// acceptedHosts returns only hosts whose proof holds; an own-DNS host
+		// still waiting on its record is simply absent from the set.
+		vi.mocked(acceptedHosts).mockResolvedValueOnce(new Set(["app.lettertrace.com"]));
+		const res = await post(VALID_BODY, { origin: "https://eu.lettertrace.com" });
+
+		expect(res.headers.get("x-letterprove")).toBe("off");
+		expect(recordObservation).not.toHaveBeenCalled();
+	});
+
+	it("never looks up hosts for the vendor's own domain", async () => {
+		vi.mocked(acceptedHosts).mockClear();
+		await post(VALID_BODY, { origin: "https://lettertrace.com" });
+		expect(acceptedHosts).not.toHaveBeenCalled();
 	});
 
 	it("rejects a request over the size cap via Content-Length, before any DB work", async () => {

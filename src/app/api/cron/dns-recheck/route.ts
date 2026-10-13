@@ -1,5 +1,6 @@
 import { dbClient } from "@/lib/db/client";
 import { recheckAllDomains, type RecheckRunResult } from "@/lib/vendors/dns-recheck";
+import { recheckOwnDnsHosts } from "@/lib/vendors/hosts";
 import { sendAlert } from "@/lib/alerts/notify";
 
 /**
@@ -45,7 +46,25 @@ export async function GET(request: Request) {
 		}
 	}
 
+	// Extra hosts that needed their own record (src/lib/vendors/hosts.ts) are
+	// held to the same rule. Hosts under the verified domain lapse with it.
+	let hosts: Awaited<ReturnType<typeof recheckOwnDnsHosts>> = { checked: 0, unverified: [], errors: [] };
+	if (db) {
+		try {
+			hosts = await recheckOwnDnsHosts(db);
+		} catch (error) {
+			hosts.errors.push({ host: "*", detail: `threw: ${error instanceof Error ? error.message : String(error)}` });
+		}
+	}
+
 	if (run.detail) await sendAlert("dns recheck could not run", run.detail);
+	for (const h of hosts.unverified) {
+		await sendAlert(
+			`host verification cleared: ${h}`,
+			"its own verification TXT record was missing for three consecutive daily checks over two days; events from it are no longer accepted until it is re-added",
+		);
+	}
+	for (const e of hosts.errors) await sendAlert(`dns recheck host error: ${e.host}`, e.detail);
 
 	// A vendor losing verification changes what it publishes within the hour,
 	// so it is worth a person knowing — usually it is a DNS migration that
@@ -60,5 +79,5 @@ export async function GET(request: Request) {
 		await sendAlert(`dns recheck error: ${e.slug}`, e.detail);
 	}
 
-	return Response.json(run, { status: run.ok ? 200 : 500 });
+	return Response.json({ ...run, hosts }, { status: run.ok ? 200 : 500 });
 }

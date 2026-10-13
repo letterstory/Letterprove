@@ -29,6 +29,7 @@ import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installSnippet } from "@/lib/vendors/install";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
+import { MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, type HostRow } from "@/lib/vendors/hosts";
 import {
 	attachDomain,
 	checkCustomDomain,
@@ -959,6 +960,12 @@ export const TOOLS: BoundTool[] = [
 
 			const { error } = await db.from("vendors").update({ ...update, ...resetRecheck }).eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			// Extra hosts were proven relative to the old domain; none of them
+			// carries over to a new one.
+			if (update.domain_verified_at === null) {
+				await db.from("vendor_hosts").delete().eq("vendor_id", vendorId);
+				forgetAcceptedHosts(vendorId);
+			}
 			return { ok: true, body: { vendor: { ...vendor, ...update } } };
 		},
 	}),
@@ -1455,6 +1462,111 @@ export const TOOLS: BoundTool[] = [
 			// whatever Vercel says.
 			if (customDomainsConfigured()) await detachDomain(vendor.custom_domain);
 			return { ok: true, body: { removed: true, domain: vendor.custom_domain } };
+		},
+	}),
+	defineTool({
+		// See src/lib/vendors/hosts.ts for the trust rule: hosts under the
+		// verified domain ride its proof; siblings need their own record.
+		name: "add_host",
+		description:
+			"Accept events from another hostname on your verified domain, e.g. app.acme.com or www.acme.com. Hosts under your verified domain are accepted at once; a sibling (eu.acme.com when you verified app.acme.com) needs your TXT record on that host. Re-run to re-check. Args: host.",
+		capability: "vendor:write",
+		inputSchema: S.addHostInput,
+		outputSchema: S.addHostOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db
+				.from("vendors")
+				.select("domain, domain_verified_at, domain_verification_token")
+				.eq("id", vendorId)
+				.maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			// Every host's acceptance rests on DNS control of the domain.
+			if (!vendor.domain_verified_at) {
+				return { ok: false, status: 409, body: { error: "domain_not_verified", detail: "Verify your domain first; extra hosts are proven relative to it." } };
+			}
+			const check = classifyHost(String(asRecord(args).host ?? ""), vendor.domain);
+			if (!check.ok) return { ok: false, status: 400, body: { error: check.error, detail: check.detail } };
+
+			const { data: existing } = await db.from("vendor_hosts").select("vendor_id, host, proof, verified_at, created_at").eq("host", check.host).maybeSingle();
+			if (existing && existing.vendor_id !== vendorId) {
+				return { ok: false, status: 409, body: { error: "host_taken", detail: `${check.host} already belongs to another vendor.` } };
+			}
+			if (!existing) {
+				const { data: mine } = await db.from("vendor_hosts").select("host").eq("vendor_id", vendorId);
+				if ((mine ?? []).length >= MAX_HOSTS) return { ok: false, status: 409, body: { error: "too_many_hosts", detail: `At most ${MAX_HOSTS} extra hosts.` } };
+			}
+
+			let verifiedAt: string | null = existing?.verified_at ?? null;
+			if (check.proof === "own_dns" && vendor.domain_verification_token) {
+				const outcome = await checkHostVerification(check.host, vendor.domain_verification_token);
+				// A failed lookup never clears an earlier success; DNS may have a bad minute.
+				if (outcome.verified) verifiedAt = new Date().toISOString();
+			}
+			const row = {
+				vendor_id: vendorId,
+				host: check.host,
+				proof: check.proof,
+				verified_at: check.proof === "own_dns" ? verifiedAt : null,
+				...(verifiedAt && check.proof === "own_dns" ? { dns_failures: 0, dns_failing_since: null } : {}),
+			};
+			const { error } = await db.from("vendor_hosts").upsert(row, { onConflict: "vendor_id,host" });
+			if (error) return { ok: false, status: error.code === "23505" ? 409 : 400, body: { error: error.code === "23505" ? "host_taken" : error.message } };
+			forgetAcceptedHosts(vendorId);
+			const { data: saved } = await db
+				.from("vendor_hosts")
+				.select("host, proof, verified_at, created_at")
+				.eq("vendor_id", vendorId)
+				.eq("host", check.host)
+				.single();
+			return { ok: true, body: hostStatus(saved as HostRow, vendor.domain_verification_token) };
+		},
+	}),
+	defineTool({
+		name: "remove_host",
+		description: "Stop accepting events from one of your extra hosts. Events already recorded from it stay. Args: host.",
+		capability: "vendor:write",
+		inputSchema: S.removeHostInput,
+		outputSchema: S.removeHostOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const host = normalizeDomain(String(asRecord(args).host ?? "")) ?? String(asRecord(args).host ?? "");
+			const { data: held } = await db.from("vendor_hosts").select("host").eq("vendor_id", vendorId).eq("host", host).maybeSingle();
+			if (!held) return { ok: true, body: { removed: false, host } };
+			const { error } = await db.from("vendor_hosts").delete().eq("vendor_id", vendorId).eq("host", host);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			forgetAcceptedHosts(vendorId);
+			return { ok: true, body: { removed: true, host } };
+		},
+	}),
+	defineTool({
+		name: "list_hosts",
+		description: "Your verified domain plus every extra host events are accepted from, with whether each is accepted right now. No args.",
+		capability: "vendor:read",
+		inputSchema: S.listHostsInput,
+		outputSchema: S.listHostsOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("domain, domain_verification_token").eq("id", vendorId).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			const { data } = await db
+				.from("vendor_hosts")
+				.select("host, proof, verified_at, created_at")
+				.eq("vendor_id", vendorId)
+				.order("host", { ascending: true });
+			return {
+				ok: true,
+				body: { domain: vendor.domain, hosts: ((data ?? []) as HostRow[]).map((r) => hostStatus(r, vendor.domain_verification_token)) },
+			};
 		},
 	}),
 ];

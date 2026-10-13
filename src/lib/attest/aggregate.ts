@@ -44,7 +44,8 @@ import { findPublishedVendor, findVendor } from "@/lib/fixtures/vendors";
 import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { loadAggregateHistory } from "@/rollup/aggregate-history";
-import type { Tier } from "./types";
+import type { PaymentScope, Tier } from "./types";
+import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
 import { withDisclosure } from "./issuer";
@@ -72,6 +73,13 @@ export interface AggregateBody {
 	 * 2026-10-13.
 	 */
 	vendor_stated?: string[];
+	/**
+	 * Which of the vendor's Stripe products its payment corroboration counts,
+	 * present only while Stripe is connected. Counts, never product names: a
+	 * reader is owed whether "pays" means everything the account bills or only
+	 * the products the vendor said are this product. Absent before 2026-10-13.
+	 */
+	payment_scope?: PaymentScope;
 	observed_through: string;
 	published_at: string;
 	/** When a newer snapshot is due. Absent on snapshots signed before 2026-10-08 — see ./cadence.ts. */
@@ -181,6 +189,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		{ sessions: 0, signups: 0, logins: 0 }
 	);
 
+	const scope = vendor.id ? await paymentScopeFor(vendor.id) : null;
 	const now = new Date().toISOString();
 	return {
 		vendor: vendor.slug,
@@ -191,6 +200,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		domains_excluded: excluded.length,
 		tier: earnedAggregateTier(attributable.length > 0, vendor.domainVerified),
 		vendor_stated: [],
+		...(scope ? { payment_scope: scope } : {}),
 		observed_through: now,
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),

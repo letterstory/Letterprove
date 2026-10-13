@@ -101,8 +101,8 @@ const vendorUpdates: Record<string, unknown>[] = [];
 // that need the fallback set authUserRow = null.
 let authUserRow: { email?: string } | null = { email: "u1@example.com" };
 
-// Every db.from() call in registry.ts targets "vendors" — see get_install_snippet
-// et al. above.
+// Nearly every db.from() call in registry.ts targets "vendors" — see
+// get_install_snippet et al. above.
 const FAKE_DB = {
 	auth: { admin: { getUserById: vi.fn(async () => ({ data: { user: authUserRow } })) } },
 	from: vi.fn(() => ({
@@ -115,6 +115,8 @@ const FAKE_DB = {
 			vendorUpdates.push(patch);
 			return { eq: vi.fn(async () => ({ error: vendorUpdateError })) };
 		}),
+		// update_vendor drops a vendor's extra hosts when its domain changes.
+		delete: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
 	})),
 } as never;
 

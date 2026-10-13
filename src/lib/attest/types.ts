@@ -10,6 +10,13 @@
 export type Tier = 0 | 1 | 2 | 3 | 4;
 
 /** The unsigned body. Every field here is covered by the signature. */
+export interface PaymentScope {
+	/** "selected": only the products the vendor chose count. "all_products": everything the account bills. */
+	mode: "selected" | "all_products";
+	/** How many products were in scope; 0 with "all_products". */
+	products: number;
+}
+
 export interface AttestationBody {
 	/** Slug of the vendor who installed Letterprove. */
 	vendor: string;
