@@ -6,8 +6,10 @@ import { vendorJsonLd } from "@/lib/attest/jsonld";
 import { publishedVendorProof } from "@/lib/attest/proofs";
 import { AttestedAt, RelativeAge } from "./AttestedAt";
 import { findPublishedVendor } from "@/lib/fixtures/vendors";
-import { ISSUER_OPERATOR, VENDOR_CANNOT, VENDOR_CONTROLS } from "@/lib/attest/issuer";
+import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
+
+const METHODOLOGY = "https://github.com/letterstory/Letterprove/blob/main/src/lib/attest/aggregate.ts";
 
 /**
  * Per-vendor page title, replacing the generic site-wide one.
@@ -27,8 +29,8 @@ export async function generateMetadata({ params }: { params: Promise<{ vendor: s
 	// page, so search engines credit the vendor's domain rather than ours.
 	const customDomain = await liveCustomDomain(slug);
 	return {
-		title: `${vendor.name} — attested proof`,
-		description: `Signed, independently verifiable proof that ${vendor.name} is who it says it is, backed by observed usage and payments. Counts only; no customer is named.`,
+		title: `${vendor.name} · Letterprove`,
+		description: `Signed evidence of ${vendor.name}'s customers, collected and verified by Letterprove.`,
 		...(customDomain ? { alternates: { canonical: `https://${customDomain}/` } } : {}),
 	};
 }
@@ -62,78 +64,69 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 			<SiteHeader />
 
 			<main className="mx-auto max-w-5xl px-6 py-14">
-				<p className="font-mono text-sm text-mint">vendor proof · attested</p>
+				<p className="font-mono text-sm text-mint">Letterprove</p>
 				<h1 className="mt-3 text-4xl font-semibold tracking-tight">{proof.vendor.name}</h1>
-				<p className="mt-2 text-fog">
-					{proof.vendor.category} · {proof.vendor.domain}
-				</p>
+				<p className="mt-2 text-fog">{a?.domain ?? proof.vendor.domain}</p>
 				<p className="mt-4 max-w-2xl text-fog">
-					Signed evidence that {proof.vendor.name} is who it says it is, and that real companies use it.
-					Counts, never names: no customer is identified anywhere in this proof.
+					This is signed evidence of {proof.vendor.name}&apos;s customers, collected and verified by
+					Letterprove.{" "}
+					<a className="text-mint hover:underline" href={a?.method ?? METHODOLOGY}>
+						Open-source methodology
+					</a>
+					.
 				</p>
 
 				{checkUrl && (
-					<section className="mt-8 rounded-lg border border-edge bg-panel p-5">
-						<h2 className="font-semibold">Check this proof yourself</h2>
-						<p className="mt-2 text-sm text-fog">
-							Every figure on this page is signed by Letterprove. To confirm a copy hasn&apos;t been
-							changed, open its check page:{" "}
-							<a className="break-all text-mint hover:underline" href={checkUrl}>
-								{checkUrl.replace(/^https:\/\//, "")}
-							</a>
-							. It shows the exact figures signed and whether the signature holds. A copy showing
-							different numbers was altered.
-						</p>
-					</section>
+					<p className="mt-6 text-sm text-fog">
+						Verify:{" "}
+						<a className="break-all text-mint hover:underline" href={checkUrl}>
+							{checkUrl.replace(/^https:\/\//, "")}
+						</a>
+					</p>
 				)}
 
 				{!a ? (
 					<p className="mt-10 rounded-lg border border-dashed border-edge px-6 py-8 text-center text-sm text-fog">
-						The first signed snapshot is cut at five past the hour. Check back shortly.
+						No signed snapshot yet. The next one is cut at five past the hour.
 					</p>
 				) : (
 					<>
-						<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
-							Who {proof.vendor.name} is
-						</h2>
+						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Identity</h2>
 						<dl className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-3">
 							<Tile
-								label="Domain, proven by DNS"
-								value={verifiedSince ? (a.domain ?? proof.vendor.domain) : "Not proven"}
+								label="Domain"
+								value={verifiedSince ? "Verified by DNS" : "Not verified"}
 								sub={
 									verifiedSince ? (
 										<span className="text-xs text-fog">
-											since <AttestedAt iso={verifiedSince} /> · re-checked daily
+											since <AttestedAt iso={verifiedSince} />, checked daily
 										</span>
 									) : undefined
 								}
 							/>
 							<Tile
 								label="Stripe account"
-								value={binding ? "Bound to this domain" : "Not connected"}
+								value={binding ? "Bound to domain" : "Not connected"}
 								sub={
 									binding === "staff_override" ? (
-										<span className="text-xs text-fog">a related company&apos;s account, approved by Letterprove</span>
-									) : binding === "domain_match" ? (
-										<span className="text-xs text-fog">the account publishes {a.domain ?? proof.vendor.domain}</span>
+										<span className="text-xs text-fog">related company, approved by Letterprove</span>
 									) : undefined
 								}
 							/>
 							<Tile
-								label="Observed since"
+								label="First observed"
 								value={a.observed_since ? <AttestedAt iso={a.observed_since} /> : "—"}
-								sub={a.observed_since ? <RelativeAge iso={a.observed_since} /> : undefined}
 							/>
 						</dl>
 
-						<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
-							What backs it · last {a.window_days} days
+						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">
+							Last {a.window_days} days
 						</h2>
 						<dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-4">
-							<Tile label="Companies observed" value={String(a.companies_observed)} />
+							<Tile label="Companies" value={a.companies_observed.toLocaleString("en-US")} />
 							<Tile
 								label="Payments"
-								value={a.tier === 3 ? "Corroborated by Stripe" : binding ? "Not yet corroborated" : "Stripe not connected"}
+								value={a.tier === 3 ? "Verified by Stripe" : binding ? "Not verified" : "Not connected"}
 								sub={
 									a.paying_since ? (
 										<span className="text-xs text-fog">
@@ -144,33 +137,45 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							/>
 							<Tile label="Sessions" value={a.sessions.toLocaleString("en-US")} />
 							<Tile
-								label="Last attested"
+								label="Signed"
 								value={<AttestedAt iso={a.published_at} />}
 								sub={<RelativeAge iso={a.published_at} />}
 							/>
 						</dl>
-						<p className="mt-4 text-sm text-fog">
-							<span className="font-semibold text-mint">Tier {a.tier}.</span>{" "}
-							{a.tier === 3
-								? `Companies were observed signing in on ${proof.vendor.name}'s DNS-proven domain, and payments from them are corroborated by settled invoices in its own Stripe account.`
-								: a.tier === 1
-									? `Companies were observed signing in on ${proof.vendor.name}'s DNS-proven domain. None is corroborated by Stripe yet.`
-									: "Nothing is corroborated yet: no sign-ins observed, or the domain isn't proven by DNS."}{" "}
-							&ldquo;Companies observed&rdquo; counts company email domains seen signing in; it is not a
-							customer count. Free-mail and unattributable domains are excluded ({a.domains_excluded}{" "}
-							this window).
-							{a.payment_scope?.mode === "selected"
-								? ` Payments count from ${a.payment_scope.products} of ${proof.vendor.name}'s Stripe products, the ones it says are this product.`
-								: ""}
-						</p>
+						<dl className="mt-4 grid gap-1 text-sm text-fog">
+							<div>
+								<dt className="inline font-semibold text-mint">Tier {a.tier}. </dt>
+								<dd className="inline">
+									{a.tier === 3
+										? "Sign-ins observed on the verified domain. Payments verified in the bound Stripe account."
+										: a.tier === 1
+											? "Sign-ins observed on the verified domain."
+											: "No sign-ins observed on a verified domain."}
+								</dd>
+							</div>
+							<div>
+								<dt className="inline">Companies: </dt>
+								<dd className="inline">
+									distinct company email domains that signed in. {a.domains_excluded} free-mail or
+									unattributable domains excluded.
+								</dd>
+							</div>
+							{a.payment_scope?.mode === "selected" && (
+								<div>
+									<dt className="inline">Payments: </dt>
+									<dd className="inline">{a.payment_scope.products} Stripe products in scope.</dd>
+								</div>
+							)}
+						</dl>
+
 						{a.reported_history && (
 							<>
-								<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
-									History {proof.vendor.name} reports · from its own PostHog
+								<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">
+									Reported by {proof.vendor.name} · PostHog
 								</h2>
 								<dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-3">
 									<Tile
-										label="Companies in its analytics"
+										label="Companies"
 										value={a.reported_history.companies.toLocaleString("en-US")}
 										sub={
 											a.reported_history.since ? (
@@ -181,7 +186,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 										}
 									/>
 									<Tile
-										label="Active in the last 30 days"
+										label="Active, last 30 days"
 										value={a.reported_history.active_companies_30d.toLocaleString("en-US")}
 									/>
 									<Tile
@@ -190,69 +195,39 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									/>
 								</dl>
 								<p className="mt-4 text-sm text-fog">
-									Vendor-reported. {proof.vendor.name} controls its PostHog project, so these figures are its
-									statement, not Letterprove&apos;s evidence, and they never change the tier. Letterprove reads
-									the project directly (read only) and publishes it only while that project records traffic on{" "}
-									{a.domain ?? proof.vendor.domain}. The last figure is how far that history agrees with what
-									Letterprove observed itself.
+									Read from {proof.vendor.name}&apos;s PostHog project. Reported by the vendor; not used for
+									the tier.
 								</p>
 							</>
 						)}
 					</>
 				)}
 
-				<section className="mt-14 rounded-lg border border-edge bg-panel p-6">
-					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Who issued this</h2>
+				<section className="mt-12 rounded-lg border border-edge bg-panel p-6">
+					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Issuer</h2>
 					<p className="mt-4 text-sm text-fog">
-						Letterprove is operated by {ISSUER_OPERATOR}. {proof.vendor.name} decides only{" "}
-						{VENDOR_CONTROLS.slice(0, -1).join("; ")}; and {VENDOR_CONTROLS.at(-1)}. It cannot:
-					</p>
-					<ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-fog">
-						{VENDOR_CANNOT.map((line) => (
-							<li key={line}>{line}</li>
-						))}
-					</ul>
-					<p className="mt-3 text-sm text-fog">
-						How strong the evidence is, the tier says: tier 1 is sign-ins observed by Letterprove on the
-						domain the vendor proved it controls; tier 3 adds invoices that settled in the vendor&apos;s own
-						Stripe account.
+						Letterprove, operated by {ISSUER_OPERATOR}. {proof.vendor.name} cannot edit any figure, hold the
+						signing key, rewrite past snapshots, or name a customer.
 					</p>
 					{affiliation && (
-						<p className="mt-4 rounded border border-edge px-4 py-3 text-sm">
-							<span className="font-semibold">Disclosure:</span> {proof.vendor.name} is also a{" "}
-							{affiliation} product. Letterprove runs the same collector, code and signing for it as for any
-							other vendor, and every figure can be checked the same way, but weigh it knowing the issuer and
-							the vendor share an owner.
+						<p className="mt-3 text-sm text-fog">
+							<span className="font-semibold">Disclosure:</span> {proof.vendor.name} and Letterprove are both
+							operated by {affiliation}. The same collector, code and signing apply.
 						</p>
 					)}
 				</section>
 
-				<section className="mt-14 rounded-lg border border-edge bg-panel p-6">
-					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Agent-readable</h2>
-					<ul className="mt-4 space-y-2 font-mono text-sm">
-						<li>
-							<a className="text-mint hover:underline" href={`/attest/${slug}.json`}>
-								GET /attest/{slug}.json
-							</a>
-							<span className="ml-3 text-fog">— the signed vendor attestation</span>
-						</li>
-						<li>
-							<a className="text-mint hover:underline" href={`/attest/${slug}/chain`}>
-								GET /attest/{slug}/chain
-							</a>
-							<span className="ml-3 text-fog">— its full signed history</span>
-						</li>
-						<li>
-							<a className="text-mint hover:underline" href={`/proofs/${slug}.json`}>
-								GET /proofs/{slug}.json
-							</a>
-							<span className="ml-3 text-fog">— this page, with the tier ladder</span>
-						</li>
-					</ul>
-					<p className="mt-4 text-sm text-fog">
-						The same proof a buyer reads, at the same URL, in a form a machine can parse.
-					</p>
-				</section>
+				<footer className="mt-12 text-sm text-fog">
+					For agents:{" "}
+					<a className="font-mono text-mint hover:underline" href={`/attest/${slug}.json`}>
+						/attest/{slug}.json
+					</a>{" "}
+					(signed),{" "}
+					<a className="font-mono text-mint hover:underline" href={`/attest/${slug}/chain`}>
+						/attest/{slug}/chain
+					</a>{" "}
+					(history)
+				</footer>
 			</main>
 
 			<SiteFooter />
