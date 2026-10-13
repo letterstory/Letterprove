@@ -78,7 +78,12 @@ export interface AggregateBody {
 	domain?: string;
 	/** When DNS control was last proven (re-checked daily), or null when it isn't proven. */
 	domain_verified_since?: string | null;
-	/** How many extra hosts the collector accepts events from. A count, never the hosts. */
+	/**
+	 * How many extra hosts the vendor added for the collector to accept. A
+	 * count, never the hosts. Hosts beneath the verified domain are covered by
+	 * its DNS proof and accepted without being added (since 2026-10-13), so they
+	 * are not counted here unless the vendor added them explicitly.
+	 */
 	hosts?: number;
 	/** Whether the connected Stripe account is the vendor's own. False when Stripe isn't connected. */
 	stripe_account_bound?: boolean;

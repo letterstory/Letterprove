@@ -86,7 +86,7 @@ export function statusOf(row: Pick<VisitorRow, "visitor_identification_enabled" 
 			enabled,
 			tracking: "active",
 			registered_domains: registered,
-			message: "On. attest.js loads the Maverick pixel on your site; see who visited with get_visitors.",
+			message: "On. Your Letterprove script now loads Maverick on your site, and visitors show up here as they are identified.",
 		};
 	}
 	return {

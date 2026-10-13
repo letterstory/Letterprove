@@ -66,7 +66,8 @@ export const findVendorByOrgOutput = z.union([
 
 export const createVendorInput = z.object({
 	name: z.string().min(1),
-	domain: z.string().min(1).describe("Pinned by exact hostname. www.acme.com and acme.com are different answers."),
+	domain: z.string().min(1).describe("Your company domain. Sign-ins on it and on any host beneath it (app., www.) are counted."),
+	contact_email: z.string().optional().describe("Where Letterprove emails you if your proof breaks. Usually the person setting it up."),
 });
 export const createVendorOutput = z.object({
 	linked: z.literal(true),
@@ -98,6 +99,24 @@ export const getStatusOutput = z.object({
 	count: z.number().int(),
 	published: z.boolean().describe("Whether this vendor's proofs are public. Collection runs either way."),
 	published_at: z.string().nullable().describe("When they went public. Null while private."),
+	ever_received_at: z
+		.string()
+		.nullable()
+		.describe("The first event ever accepted. Use it, not `receiving`, to decide whether setup is done: a quiet day doesn't undo a working install."),
+	last_received_at: z.string().nullable().describe("The latest accepted event in the last 35 days."),
+	rejected_origins: z
+		.array(
+			z.object({
+				host: z.string().describe("Where dropped events came from, e.g. staging.acme.com."),
+				events_24h: z.number().int(),
+				last_at: z.string(),
+				addable: z.boolean().describe("True when adding this host (with its own DNS record) would accept it."),
+				reason: z
+					.enum(["development", "needs_proof", "other_company"])
+					.describe("development: localhost or a preview host, never counted. needs_proof: a sibling of your verified domain, add it as a host. other_company: a different domain."),
+			}),
+		)
+		.describe("Events dropped in the last 24h because of where they came from. Hosts beneath your verified domain are accepted automatically and never appear here."),
 });
 
 /**
@@ -135,6 +154,23 @@ export const getInstallSnippetOutput = z.object({
 			live: z.boolean().describe("True once the vendor is published. Before that the proof page is a 404, so do not show the badge."),
 		})
 		.describe("The footer badge a vendor adds to their site once published."),
+	server_snippet: z
+		.object({
+			endpoint: z.string(),
+			nextjs_middleware: z.string().describe("A Next.js proxy.ts (middleware.ts before Next 16) that forwards agent and crawler requests without slowing the page."),
+			generic: z.string().describe("The same forward for any Node server."),
+		})
+		.describe("Optional. Counts AI agents and crawlers that never run JavaScript, which the script tag can't see."),
+	recipes: z
+		.object({
+			stub: z.string().describe("Script tag plus the one-line stub that keeps identify calls made before the script loads."),
+			nextjs: z.string(),
+			plain_js: z.string(),
+			clerk: z.string(),
+			auth0: z.string(),
+			supabase: z.string(),
+		})
+		.describe("Where to call Letterprove.identify(email) after sign-in, per stack. Only the domain after the @ leaves the browser."),
 });
 
 export const rotateKeyInput = empty;
@@ -172,6 +208,11 @@ export const updateVendorInput = z
 		name: z.string().optional(),
 		domain: z.string().optional().describe("Changing this clears verification — the old proof does not transfer."),
 		category: z.string().optional(),
+		contact_email: z
+			.string()
+			.nullable()
+			.optional()
+			.describe("Where Letterprove emails you if your proof breaks. Empty or null clears it."),
 	})
 	.describe("At least one field is required.");
 export const updateVendorOutput = z.object({
@@ -182,6 +223,7 @@ export const updateVendorOutput = z.object({
 			domain: z.string(),
 			category: z.string(),
 			domain_verified_at: z.string().nullable(),
+			contact_email: z.string().nullable().optional(),
 		})
 		.describe("The account as it stands after the update, not only the fields that changed."),
 });

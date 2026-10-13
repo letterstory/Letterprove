@@ -1,5 +1,6 @@
 import { promises as dns } from "node:dns";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { incidentDay, notifyVendor } from "@/lib/notify/vendor-email";
 import { checkDomainVerification, type TxtResolver, type VerificationOutcome } from "./verification";
 
 /**
@@ -170,7 +171,11 @@ export async function recheckAllDomains(
 			result.errors.push({ slug: vendor.slug, detail: `write failed: ${writeError.message}` });
 			continue;
 		}
-		if (decision.kind === "missed" && decision.unverified) result.unverified.push(vendor.slug);
+		if (decision.kind === "missed" && decision.unverified) {
+			result.unverified.push(vendor.slug);
+			// The one incident here the vendor can fix: tell them, once.
+			await notifyVendor(vendor.id, "dns_lost", `${vendor.domain}@${incidentDay(now())}`);
+		}
 	}
 
 	return result;

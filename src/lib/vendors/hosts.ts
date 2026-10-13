@@ -75,6 +75,23 @@ export function classifyHost(input: string, vendorDomain: string): HostCheck {
 	return { ok: true, host, proof: isUnder(host, vendorDomain) ? "under_verified_domain" : "own_dns" };
 }
 
+/**
+ * Whether /v1/observe (and /v1/agent-visit) accepts an event from `origin`.
+ *
+ * The verified domain itself, ANY host beneath it (the same DNS proof covers
+ * it, see THE TRUST RULE above, so it needs no add_host step), and the
+ * explicit extra hosts a vendor proved separately. A sibling or parent of the
+ * verified domain is not covered and still has to be added and proven.
+ *
+ * Before 2026-10-13 a host beneath the verified domain also had to be added
+ * by hand, and the most common install (sign-in on app.acme.com, verified
+ * acme.com) silently dropped every event until it was.
+ */
+export function isOriginAccepted(origin: string, vendorDomain: string, extraHosts: ReadonlySet<string>): boolean {
+	if (origin === vendorDomain || isUnder(origin, vendorDomain)) return true;
+	return extraHosts.has(origin);
+}
+
 /** Where a host needing its own proof may carry the record: the host itself, or the registrable domain. */
 export function hostVerificationHosts(host: string): string[] {
 	const base = registrableDomain(host);
@@ -109,7 +126,7 @@ export function hostStatus(row: HostRow, token: string | null) {
 			? row.proof === "under_verified_domain"
 				? `Events from ${row.host} are accepted: it sits under the domain you verified.`
 				: `Events from ${row.host} are accepted: its own DNS record checks out.`
-			: `${row.host} isn't under the domain you verified, so it needs its own proof. Add the TXT record below at _letterprove.${row.host} (or on ${registrableDomain(row.host)}), then run add_host again to check.`,
+			: `${row.host} isn't under the domain you verified, so it needs its own proof. Add the TXT record below at _letterprove.${row.host} (or on ${registrableDomain(row.host)}), then check again.`,
 	};
 }
 

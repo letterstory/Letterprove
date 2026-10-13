@@ -54,7 +54,7 @@ export function evaluateAccount(
 	return {
 		ok: false,
 		error: "stripe_account_domain_mismatch",
-		detail: `This Stripe account (${account.id}) describes itself as ${shown}, not ${vendorBase}, the domain you verified. Payments only corroborate your customers when they come from your own Stripe account: set the account's business website or support email to your domain in Stripe, or contact support if your billing runs through a related company.`,
+		detail: `This Stripe account (${account.id}) describes itself as ${shown}, not ${vendorBase}, the domain you verified. Payments only count when they come from your own Stripe account. In Stripe, set the account's business website or support email to your domain and connect again. If your billing runs through a related company, ask us to review it and we'll approve that account.`,
 		account,
 	};
 }

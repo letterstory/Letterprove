@@ -38,7 +38,7 @@ function slugify(input: string): string {
 
 export async function provisionVendorForOrg(
 	orgId: string,
-	input: { name: string; domain: string },
+	input: { name: string; domain: string; contactEmail?: string | null },
 ): Promise<ProvisionResult> {
 	const db = dbClient();
 	if (!db) return { ok: false, status: 500, error: "Storage is not configured." };
@@ -69,7 +69,17 @@ export async function provisionVendorForOrg(
 		const id = randomUUID();
 		const { error } = await db
 			.from("vendors")
-			.insert({ id, slug, name, domain, category: DEFAULT_CATEGORY, key, letterstory_org_id: orgId, issuer_affiliation });
+			.insert({
+				id,
+				slug,
+				name,
+				domain,
+				category: DEFAULT_CATEGORY,
+				key,
+				letterstory_org_id: orgId,
+				issuer_affiliation,
+				contact_email: normalizeContactEmail(input.contactEmail),
+			});
 		if (!error) return { id };
 		// 23505 is unique_violation — could be the slug OR the org link. Either
 		// way the caller should not retry blindly, so it is surfaced as conflict.
@@ -92,4 +102,11 @@ export async function provisionVendorForOrg(
 	if (res === "error") return { ok: false, status: 500, error: "Could not create the vendor." };
 
 	return { ok: true, vendorId: res.id, slug, domain };
+}
+
+/** A plausible address, lowercased, or null. Where Letterprove emails a vendor when its proof breaks. */
+export function normalizeContactEmail(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const email = value.trim().toLowerCase();
+	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254 ? email : null;
 }
