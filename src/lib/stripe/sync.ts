@@ -152,6 +152,17 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 		vendorDomain: vendorRow?.domain,
 		productScope: new Set(credential.productIds),
 	});
+	// Every company with a settled, in-scope invoice, whether or not it signed
+	// in. The unobserved ones go to vendor_stripe_payers, NOT to evidence: they
+	// exist only so the logo wall can say "paying, verified by Stripe" for a
+	// company the vendor already shows publicly that pays without logging in
+	// (a managed account). Evidence stays observed-only, and so does every
+	// count on the proof.
+	const allPaying = mapPayments(fetched.subscriptions, observed, invoices.payments, {
+		vendorDomain: vendorRow?.domain,
+		productScope: new Set(credential.productIds),
+		allowUnobserved: true,
+	});
 
 	const syncedAt = new Date().toISOString();
 	const truncated = fetched.truncated || invoices.truncated;
@@ -181,6 +192,14 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 	// asserting a customer still pays when they stopped, which is the worst
 	// kind of wrong for a signed claim.
 	await clearEvidence(vendorId);
+
+	const observedPaying = new Set(mapping.matched.map((m) => m.domain));
+	const unobservedPayers = allPaying.matched.filter((m) => !observedPaying.has(m.domain));
+	if (unobservedPayers.length > 0) {
+		await db.from("vendor_stripe_payers").insert(
+			unobservedPayers.map((m) => ({ vendor_id: vendorId, domain: m.domain, since: m.since, synced_at: syncedAt })),
+		);
+	}
 
 	if (mapping.matched.length > 0) {
 		const { error } = await db.from("vendor_payment_evidence").insert(
@@ -225,6 +244,7 @@ async function clearEvidence(vendorId: string): Promise<void> {
 	if (!db) return;
 	await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
 	await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
+	await db.from("vendor_stripe_payers").delete().eq("vendor_id", vendorId);
 }
 
 async function recordSuccess(vendorId: string, syncedAt: string): Promise<void> {

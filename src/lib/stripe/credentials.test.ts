@@ -180,7 +180,7 @@ describe("disconnect", () => {
 		vi.mocked(dbClient).mockReturnValue(db as never);
 
 		expect(await disconnect("v1")).toBe(true);
-		expect(deleted).toEqual(["vendor_payment_evidence", "vendor_payment_unmatched", "vendor_stripe_credentials"]);
+		expect(deleted).toEqual(["vendor_payment_evidence", "vendor_payment_unmatched", "vendor_stripe_payers", "vendor_stripe_credentials"]);
 	});
 
 	it("clears evidence BEFORE the credential, so a half-failure is the safe half", async () => {
