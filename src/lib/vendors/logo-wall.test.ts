@@ -78,6 +78,8 @@ describe("publicLogos", () => {
 			listed: 4,
 			on_page: 3,
 			verified: 2,
+			paying: 1,
+			active: 1,
 			companies: [
 				{ name: "Globex", domain: "globex.com", status: "paying" },
 				{ name: "Initech", domain: "initech.io", status: "active" },

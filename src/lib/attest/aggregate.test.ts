@@ -333,6 +333,8 @@ describe("aggregateBody", () => {
 				listed: 3,
 				on_page: 2,
 				verified: 1,
+				paying: 1,
+				active: 0,
 				companies: [{ name: "Globex", domain: "globex.com", status: "paying" }],
 			});
 			// Observed but not on the page; on the page but not observed: neither is named.
@@ -400,6 +402,88 @@ describe("aggregateBody", () => {
 			expect(hidden.hidden_by_vendor).toEqual(["growth", "retention"]);
 			vi.mocked(g.growthFor).mockResolvedValue(null);
 			vi.mocked(g.retentionFor).mockResolvedValue(null);
+		});
+
+		it("publishes no paying count by default, and never lists it as hidden", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b).not.toHaveProperty("paying");
+			expect(b.hidden_by_vendor).toEqual([]);
+			expect(b.tier).toBe(3);
+		});
+
+		it("publishes the signed-in paying count when the vendor opts in", async () => {
+			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+			const display = await import("./display");
+			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, paying_count: "signed_in" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.paying).toEqual({ scope: "signed_in", companies: 1 });
+			expect(b.hidden_by_vendor).toEqual([]);
+			expect(b.tier).toBe(3);
+		});
+
+		it("counts every attributable Stripe payer for scope all, observed or not", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+			// globex observed and paying, umbrella pays without signing in, gmail is a person.
+			vi.mocked(ev.stripePayingDomains).mockResolvedValue(new Set(["globex.com", "umbrella.com", "gmail.com"]));
+			const display = await import("./display");
+			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, paying_count: "all" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.paying).toEqual({ scope: "all", companies: 2 });
+			expect(JSON.stringify(b)).not.toContain("umbrella");
+			vi.mocked(ev.stripePayingDomains).mockResolvedValue(new Set());
+		});
+
+		it("publishes no paying count from a Stripe account that isn't bound", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor({});
+			const display = await import("./display");
+			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, paying_count: "all" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b).not.toHaveProperty("paying");
+		});
+
+		it("keeps the logo counts but names no company when logo_names is off", async () => {
+			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			const lw = await import("@/lib/vendors/logo-wall");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+			vi.mocked(ev.stripePayingDomains).mockResolvedValueOnce(new Set(["globex.com"]));
+			vi.mocked(lw.readLogoWall).mockResolvedValueOnce({
+				page_url: "https://lettertrace.com/customers",
+				checked_at: new Date().toISOString(),
+				check_error: null,
+				companies: [
+					{ name: "Globex", domain: "globex.com", on_page: true },
+					{ name: "Initech", domain: "initech.com", on_page: true },
+				],
+			});
+			const display = await import("./display");
+			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, logo_names: false });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.logos).toEqual({ page: "https://lettertrace.com/customers", listed: 2, on_page: 2, verified: 2, paying: 1, active: 1 });
+			expect(JSON.stringify(b)).not.toContain("Globex");
+			expect(JSON.stringify(b)).not.toContain("Initech");
+			expect(b.hidden_by_vendor).toEqual([]);
 		});
 
 		it("states that nothing is hidden when the vendor shows everything", async () => {

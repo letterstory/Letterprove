@@ -8,6 +8,7 @@ import { AttestedAt, RelativeAge } from "./AttestedAt";
 import { findPublishedVendor } from "@/lib/fixtures/vendors";
 import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
+import { logoSplit, payingSentence } from "@/lib/attest/paying-copy";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
 
 function hostOf(url: string): string {
@@ -118,9 +119,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								</h2>
 								<p className="mt-4 text-sm text-fog">
 									<span className="font-semibold text-mint">
-										{a.logos.verified} of {a.logos.on_page} logos verified:{" "}
-										{a.logos.companies.filter((c) => c.status === "paying").length} paying (verified by Stripe),{" "}
-										{a.logos.companies.filter((c) => c.status === "active").length} signed in in the last 30 days.
+										{a.logos.verified} of {a.logos.on_page} logos verified: {logoSplit(a.logos).paying} paying
+										(verified by Stripe), {logoSplit(a.logos).active} signed in in the last 30 days.
 									</span>{" "}
 									Checked against{" "}
 									<a className="break-all text-mint hover:underline" href={a.logos.page}>
@@ -128,7 +128,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									</a>
 									. Verified means Letterprove observed the company signing in, or Stripe verified it pays.
 								</p>
-								{a.logos.companies.length > 0 && (
+								{a.logos.companies && a.logos.companies.length > 0 && (
 									<ul className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-2">
 										{a.logos.companies.map((c) => (
 											<li key={c.domain} className="flex items-baseline justify-between gap-3 bg-panel px-4 py-3">
@@ -218,6 +218,12 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									unattributable domains excluded.
 								</dd>
 							</div>
+							{a.paying && (
+								<div>
+									<dt className="inline">Paying: </dt>
+									<dd className="inline">{payingSentence(a.paying)}.</dd>
+								</div>
+							)}
 							{a.payment_scope && a.tier === 3 && (
 								<div>
 									<dt className="inline">Payments: </dt>

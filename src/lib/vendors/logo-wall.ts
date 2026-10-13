@@ -335,7 +335,11 @@ export interface PublicLogos {
 	listed: number;
 	on_page: number;
 	verified: number;
-	companies: { name: string; domain: string; status: "paying" | "active" }[];
+	/** Of `verified`, how many pay through the bound Stripe / were only observed signing in. */
+	paying: number;
+	active: number;
+	/** Absent when the vendor chose to show counts only (display `logo_names: false`). */
+	companies?: { name: string; domain: string; status: "paying" | "active" }[];
 }
 
 /**
@@ -357,7 +361,15 @@ export function publicLogos(
 		.map((c) => ({ name: c.name, domain: c.domain, status: statusOf(c.domain, observed, paying) }))
 		.filter((c): c is { name: string; domain: string; status: "paying" | "active" } => c.status !== "not_observed")
 		.sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === "paying" ? -1 : 1));
-	return { page: wall.page_url, listed: wall.companies.length, on_page: onPage.length, verified: verified.length, companies: verified };
+	return {
+		page: wall.page_url,
+		listed: wall.companies.length,
+		on_page: onPage.length,
+		verified: verified.length,
+		paying: verified.filter((c) => c.status === "paying").length,
+		active: verified.filter((c) => c.status === "active").length,
+		companies: verified,
+	};
 }
 
 

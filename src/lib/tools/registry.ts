@@ -890,7 +890,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_proof_display",
 		description:
-			"Which optional sections show on your public proof (sessions, reported_history, logos, payment_details, observed_since, hosts) and which items are always shown. Args: none.",
+			"Which optional sections show on your public proof (sessions, reported_history, logos, payment_details, observed_since, hosts, growth, retention), whether it states a paying count (paying_count: hidden / signed_in / all), whether logo names are shown (logo_names), and which items are always shown. Args: none.",
 		capability: "vendor:read",
 		inputSchema: S.getProofDisplayInput,
 		outputSchema: S.getProofDisplayOutput,
@@ -903,7 +903,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_proof_display",
 		description:
-			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, payment_details, observed_since, hosts (true shows, false hides). The domain, tier, companies observed and verify link are always shown. Hidden sections are named on the proof as hidden by you. Takes effect at the next hourly snapshot.",
+			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, payment_details, observed_since, hosts, growth, retention (true shows, false hides), paying_count (hidden, signed_in or all) and logo_names (true names verified logo companies, false shows counts only). The domain, tier, companies observed and verify link are always shown. Hidden sections are named on the proof as hidden by you. Takes effect at the next hourly snapshot.",
 		capability: "vendor:write",
 		inputSchema: S.setProofDisplayInput,
 		outputSchema: S.setProofDisplayOutput,
@@ -916,7 +916,13 @@ export const TOOLS: BoundTool[] = [
 				return { ok: false, status: 400, body: { error: "locked_section", detail: `${lockedTried.join(", ")} can't be hidden. The domain, tier, companies observed and verify link are always shown.` } };
 			}
 			const parsed = S.setProofDisplayInput.safeParse(args ?? {});
-			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_sections", detail: "sections must map section names to true or false." } };
+			if (!parsed.success) {
+				return {
+					ok: false,
+					status: 400,
+					body: { error: "invalid_sections", detail: "sections must map section names to true or false; paying_count is hidden, signed_in or all." },
+				};
+			}
 			const saved = await setDisplay(vendorId, parsed.data.sections);
 			if (!saved) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			return { ok: true, body: { sections: saved, locked: [...LOCKED_DISPLAY] } };
