@@ -104,6 +104,31 @@ export async function payingAmong(vendorId: string, observed: readonly string[])
 }
 
 /**
+ * Which of the given observed company domains carry fresh payment evidence.
+ * Same rule as payingAmong, returned as domains for the logo check, which
+ * names a company only when it is also on the vendor's own public logo wall.
+ * An empty set on any failure: that understates, it never invents a payer.
+ */
+export async function payingDomainsAmong(vendorId: string, observed: readonly string[]): Promise<Set<string>> {
+	if (observed.length === 0) return new Set();
+	const db = dbClient();
+	if (!db) return new Set();
+	const floor = new Date(Date.now() - MAX_EVIDENCE_AGE_MS).toISOString();
+	const { data, error } = await db
+		.from("vendor_payment_evidence")
+		.select("domain, monthly_amount")
+		.eq("vendor_id", vendorId)
+		.gte("synced_at", floor);
+	if (error || !data) return new Set();
+	const wanted = new Set(observed);
+	return new Set(
+		(data as { domain: string; monthly_amount: number | string }[])
+			.filter((r) => wanted.has(r.domain) && Number(r.monthly_amount) >= 1)
+			.map((r) => r.domain),
+	);
+}
+
+/**
  * When Letterprove first published observed usage for this vendor: the oldest
  * frozen vendor attestation that counted at least one company. Our own signed
  * record, not the vendor's claim, and it includes the weeks a vendor spends

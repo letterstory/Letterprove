@@ -36,6 +36,7 @@ const LEAD = [
 	"tier",
 	"companies_observed",
 	"paying_since",
+	"logos",
 	"vendor_stated",
 ] as const;
 

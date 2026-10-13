@@ -23,6 +23,11 @@ vi.mock("./vendor-evidence", () => ({
 	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
 	observedSince: vi.fn(async () => null),
 	reportedHistory: vi.fn(async () => null),
+	payingDomainsAmong: vi.fn(async () => new Set()),
+}));
+vi.mock("@/lib/vendors/logo-wall", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/vendors/logo-wall")>()),
+	readLogoWall: vi.fn(async () => null),
 }));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
@@ -295,6 +300,39 @@ describe("aggregateBody", () => {
 			expect(b.domain_verified_since).toBeNull();
 			expect(b.hosts).toBe(0);
 			expect(b.tier).toBe(0);
+		});
+
+		it("names a logo only when it is on the vendor's page and observed, without moving the tier", async () => {
+			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			const lw = await import("@/lib/vendors/logo-wall");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+			vi.mocked(ev.payingDomainsAmong).mockResolvedValueOnce(new Set(["globex.com"]));
+			vi.mocked(lw.readLogoWall).mockResolvedValueOnce({
+				page_url: "https://lettertrace.com/customers",
+				checked_at: new Date().toISOString(),
+				check_error: null,
+				companies: [
+					{ name: "Globex", domain: "globex.com", on_page: true },
+					{ name: "Initech", domain: "initech.com", on_page: false },
+					{ name: "Hooli", domain: "hooli.com", on_page: true },
+				],
+			});
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.logos).toEqual({
+				page: "https://lettertrace.com/customers",
+				listed: 3,
+				on_page: 2,
+				verified: 1,
+				companies: [{ name: "Globex", domain: "globex.com", status: "paying" }],
+			});
+			// Observed but not on the page; on the page but not observed: neither is named.
+			expect(JSON.stringify(b)).not.toContain("initech");
+			expect(JSON.stringify(b)).not.toContain("Hooli");
+			expect(b.tier).toBe(3);
 		});
 
 		it("publishes PostHog history as vendor-stated, without moving the tier", async () => {

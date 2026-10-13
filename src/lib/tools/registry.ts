@@ -30,9 +30,10 @@ import { TIER_LADDER } from "@/lib/attest/tiers";
 import { installRecipes, installSnippet, serverSnippets } from "@/lib/vendors/install";
 import { agentVisitsReport } from "@/lib/agents/visits";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
-import { MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, type HostRow } from "@/lib/vendors/hosts";
+import { acceptedHosts, MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, type HostRow } from "@/lib/vendors/hosts";
 import {
 	attachDomain,
+	liveCustomDomain,
 	checkCustomDomain,
 	customDomainStatus,
 	customDomainsConfigured,
@@ -66,6 +67,10 @@ import {
 import { hogql } from "@/lib/posthog/fetch";
 import { posthogStatus } from "@/lib/posthog/status";
 import { syncVendorPosthog } from "@/lib/posthog/sync";
+import { clearLogoWall, parseLogoWallInput, saveLogoWall } from "@/lib/vendors/logo-wall";
+import { logoWallStatus } from "@/lib/vendors/logo-wall-status";
+import { agentKit } from "@/lib/vendors/agent-kit";
+import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
 import { fetchVendorVisitors, setVisitorIdentification } from "@/lib/vendors/visitors";
@@ -746,8 +751,10 @@ export const TOOLS: BoundTool[] = [
 			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
 			const db = dbClient();
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			const { data: vendor } = await db.from("vendors").select("key, slug, proofs_published_at").eq("id", vendorId).maybeSingle();
+			const { data: vendor } = await db.from("vendors").select("key, slug, name, domain, proofs_published_at").eq("id", vendorId).maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			const customDomain = await liveCustomDomain(vendor.slug);
+			const kitProofUrl = customDomain ? `https://${customDomain}/` : `${VERIFY_ORIGIN}/proofs/${encodeURIComponent(vendor.slug)}`;
 			// publishable_key is returned alongside the snippet rather than left
 			// for the caller to recover. Letterstory was regex-ing it back out of
 			// the data-key attribute of the very HTML we build here — parsing our
@@ -764,6 +771,14 @@ export const TOOLS: BoundTool[] = [
 					// only sees agents that render pages; most never do.
 					server_snippet: serverSnippets(context.origin, vendor.key),
 					recipes: installRecipes(context.origin, vendor.key),
+					// So an AI assistant reading the vendor's own site finds the proof.
+					agent_kit: agentKit({
+						vendorName: vendor.name,
+						proofUrl: kitProofUrl,
+						jsonUrl: `${VERIFY_ORIGIN}/attest/${encodeURIComponent(vendor.slug)}.json`,
+						jwksUrl: `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`,
+						siteUrl: `https://${vendor.domain}`,
+					}),
 					// The footer badge rides the same call: it is the other thing a
 					// vendor pastes into their site. `live` is false until the vendor
 					// publishes, because until then the page it links to is a 404.
@@ -1786,6 +1801,66 @@ export const TOOLS: BoundTool[] = [
 			const result = await fetchVendorVisitors(vendorId, parsed.data);
 			if (!result) return { ok: false, status: 404, body: { error: "not_found" } };
 			return { ok: true, body: result };
+		},
+	}),
+	/*
+	 * --------------------------------------------------------------- logo wall
+	 *
+	 * The one opt-in exception to "no customer is named" (README decision 36):
+	 * companies the vendor already shows on its own public page, named on the
+	 * proof only when found on that page and observed. See logo-wall.ts.
+	 */
+	defineTool({
+		name: "set_logo_wall",
+		description:
+			"Verify the logos you already show publicly. Args: page_url (the https page on your own verified domain that shows them) and companies ([{name, domain}], up to 200). Letterprove fetches the page, keeps only companies actually on it, and names on your proof only those it has observed signing in (or paying). Everyone else is a count. Re-checked daily.",
+		capability: "vendor:write",
+		inputSchema: S.setLogoWallInput,
+		outputSchema: S.setLogoWallOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug, domain").eq("id", vendorId).maybeSingle<{ slug: string; domain: string }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			const parsed = parseLogoWallInput(asRecord(args), vendor.domain, await acceptedHosts(vendorId));
+			if (!parsed.ok) return { ok: false, status: 400, body: { error: parsed.error, detail: parsed.detail } };
+			if (!(await saveLogoWall(vendorId, parsed.pageUrl, parsed.companies))) {
+				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			}
+			const status = await logoWallStatus(vendorId, vendor.slug);
+			if (!status) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: status };
+		},
+	}),
+	defineTool({
+		name: "get_logo_wall",
+		description: "Your logo wall: every company you listed, whether it was found on your page, its status (paying / active / not observed), and whether the block is on your proof. No args.",
+		capability: "vendor:read",
+		inputSchema: S.getLogoWallInput,
+		outputSchema: S.getLogoWallOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle<{ slug: string }>();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body: (await logoWallStatus(vendorId, vendor.slug)) ?? { configured: false } };
+		},
+	}),
+	defineTool({
+		name: "clear_logo_wall",
+		description: "Stop verifying logos. Your proof stops naming any company at the next snapshot. No args.",
+		capability: "vendor:write",
+		inputSchema: S.clearLogoWallInput,
+		outputSchema: S.clearLogoWallOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!(await clearLogoWall(vendorId))) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: { cleared: true } };
 		},
 	}),
 ];

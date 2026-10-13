@@ -555,8 +555,9 @@ describe("dispatchTool", () => {
 	});
 
 	it("builds an install snippet from the caller's vendor key and the request's own origin", async () => {
-		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", proofs_published_at: null };
+		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", name: "Acme", domain: "acme.com", proofs_published_at: null };
 		const { dispatchTool } = await import("./registry");
+		const { agentKit } = await import("@/lib/vendors/agent-kit");
 		const { installRecipes, installSnippet, serverSnippets } = await import("@/lib/vendors/install");
 		const { badgeHtml } = await import("@/lib/vendors/badge");
 		const origin = "https://acme.example.com";
@@ -573,6 +574,13 @@ describe("dispatchTool", () => {
 					publishable_key: "lp_live_acme_9f2c",
 					server_snippet: serverSnippets(origin, "lp_live_acme_9f2c"),
 					recipes: installRecipes(origin, "lp_live_acme_9f2c"),
+					agent_kit: agentKit({
+						vendorName: "Acme",
+						proofUrl: "https://app.letterprove.com/proofs/acme",
+						jsonUrl: "https://app.letterprove.com/attest/acme.json",
+						jwksUrl: "https://app.letterprove.com/.well-known/letterprove-jwks.json",
+						siteUrl: "https://acme.com",
+					}),
 					badge: { html: badgeHtml(origin, "acme"), href: `${origin}/proofs/acme`, live: false },
 				},
 			},
