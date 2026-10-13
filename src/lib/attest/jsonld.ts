@@ -12,6 +12,7 @@
  * verifiable surface is our own JSON, and nothing here is signed. Don't grow
  * this into a second, weaker copy of the attestation.
  */
+import { leadSentence } from "./lead";
 
 import type { VendorProof } from "./proofs";
 
@@ -27,6 +28,7 @@ export function vendorJsonLd(proof: VendorProof, origin: string): Record<string,
 			"@type": "Dataset",
 			name: `Letterprove attestation for ${proof.vendor.name}`,
 			description:
+				`${leadSentence(Boolean(proof.vendor.issuer_affiliation))} ` +
 				`A signed, hourly attestation that ${proof.vendor.name} controls ${proof.vendor.domain} (proven by DNS) and is backed by ` +
 				`observed usage: ${proof.summary.companies_observed} companies observed signing in over the last 30 days, ` +
 				(proof.summary.payment_corroborated ? `with payment from them corroborated by ${proof.vendor.name}'s own Stripe account. ` : "") +

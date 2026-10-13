@@ -8,6 +8,7 @@ import { AttestedAt, RelativeAge } from "./AttestedAt";
 import { findPublishedVendor } from "@/lib/fixtures/vendors";
 import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
+import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
 
 function hostOf(url: string): string {
 	try {
@@ -17,7 +18,6 @@ function hostOf(url: string): string {
 	}
 }
 
-const METHODOLOGY = "https://github.com/letterstory/Letterprove/blob/main/src/lib/attest/aggregate.ts";
 
 /**
  * Per-vendor page title, replacing the generic site-wide one.
@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: { params: Promise<{ vendor: s
 	const customDomain = await liveCustomDomain(slug);
 	return {
 		title: `${vendor.name} · Letterprove`,
-		description: `Signed evidence of ${vendor.name}'s customers, collected and verified by Letterprove.`,
+		description: leadSentence(Boolean(vendor.issuerAffiliation)),
 		...(customDomain ? { alternates: { canonical: `https://${customDomain}/` } } : {}),
 	};
 }
@@ -76,9 +76,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				<h1 className="mt-3 text-4xl font-semibold tracking-tight">{proof.vendor.name}</h1>
 				<p className="mt-2 text-fog">{a?.domain ?? proof.vendor.domain}</p>
 				<p className="mt-4 max-w-2xl text-fog">
-					This is signed evidence of {proof.vendor.name}&apos;s customers, collected and verified by
-					Letterprove.{" "}
-					<a className="text-mint hover:underline" href={a?.method ?? METHODOLOGY}>
+					{leadSentence(Boolean(proof.vendor.issuer_affiliation))}{" "}
+					<a className="text-mint hover:underline" href={a?.method ?? METHODOLOGY_URL}>
 						Open-source methodology
 					</a>
 					.

@@ -5,6 +5,7 @@ import { jwksResult } from "@/lib/attest/keys";
 import type { SignedAttestation } from "@/lib/attest/types";
 import { methodUrl } from "@/lib/attest/method";
 import { verifyAttestation } from "@/lib/attest/verify";
+import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
 import { parseVerifyPath, snapshotStamp, VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { proofHtml, proofJson, retiredCustomerProof } from "@/lib/http";
 
@@ -141,7 +142,10 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	const scope = f.payment_scope as { mode?: string; products?: number } | undefined;
 	const history = f.reported_history as { companies?: number; since?: string; active_companies_30d?: number; observed_also_reported?: number } | undefined;
 
-	let html = `<section class="vendor"><div class="eyebrow">Snapshot of ${esc(vendor)}</div><h2 class="big">${esc(String(f.domain ?? vendor))}</h2>`;
+	const method = typeof f.method === "string" && f.method ? f.method : METHODOLOGY_URL;
+	const affiliated = typeof f.issuer_affiliation === "string" && f.issuer_affiliation !== "";
+	let html = `<p class="lead">${esc(leadSentence(affiliated))} <a href="${esc(method)}">Open-source methodology</a>.</p>`;
+	html += `<section class="vendor"><div class="eyebrow">Snapshot of ${esc(vendor)}</div><h2 class="big">${esc(String(f.domain ?? vendor))}</h2>`;
 	if (tier !== null) html += `<p class="tierline"><span class="tier">Tier ${tier}</span> ${esc(tierLine)}</p>`;
 	html += `</section>`;
 
@@ -276,6 +280,7 @@ td{word-break:break-all;color:var(--text)}
 @media (max-width:640px){.logos{grid-template-columns:minmax(0,1fr)}}
 .logos li{background:var(--panel);padding:10px 14px;display:flex;justify-content:space-between;gap:12px;font-size:14px}
 .logos .muted{margin:0;font-size:12px}
+.lead{color:var(--text);font-size:15px}
 footer{color:var(--fog);font-size:13px;border-top:1px solid var(--edge);padding-top:16px}
 footer a{word-break:break-all}
 `;
