@@ -366,9 +366,9 @@ describe("no public route ever emits a customer", () => {
 		await read("/.well-known/letterprove.json", (await import("@/app/api/well-known/letterprove/route")).GET(req("https://app.letterprove.com/.well-known/letterprove.json")));
 		await read("/llms.txt", (await import("@/app/llms.txt/route")).GET(req("https://app.letterprove.com/llms.txt", "text/plain")));
 
-		const attestation = JSON.parse(bodies[0][1]) as { verify: string; tier: number; paying_companies: number };
-		// The case is real: the attestation does count the paying customer.
-		expect(attestation.paying_companies).toBe(1);
+		const attestation = JSON.parse(bodies[0][1]) as { verify: string; tier: number };
+		// The case is real: the paying customer earns tier 3, and the count itself is never published (decision 35).
+		expect(attestation).not.toHaveProperty("paying_companies");
 		expect(attestation.tier).toBe(3);
 
 		const stamp = attestation.verify.split("/").pop()!;

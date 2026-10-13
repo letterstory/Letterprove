@@ -128,14 +128,14 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	const window = typeof f.window_days === "number" ? f.window_days : 30;
 	const tierLine =
 		tier === 3
-			? "Companies were observed signing in on the vendor's DNS-proven domain, and some of them paid a settled invoice in its own Stripe account."
+			? "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them are corroborated by settled invoices in its own Stripe account."
 			: tier === 1
 				? "Companies were observed signing in on the vendor's DNS-proven domain."
 				: tier === 0
 					? "Nothing is corroborated yet."
 					: "";
 	const tile = (k: string, v: string, sub = "") => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
-	const paying = typeof f.paying_companies === "number" ? f.paying_companies : null;
+	const payments = tier === 3 ? "Corroborated" : f.stripe_account_bound ? "Not yet" : "Not connected";
 	const payingSince = fmtDay(f.paying_since);
 	const binding = f.stripe_binding === "domain_match" ? "Bound to its domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : "Not connected";
 	const scope = f.payment_scope as { mode?: string; products?: number } | undefined;
@@ -147,7 +147,7 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 
 	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
 		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
-		tile("Paying via Stripe", paying === null ? "—" : num(paying), payingSince ? `since ${payingSince}` : "") +
+		tile("Payments, via Stripe", payments, payingSince ? `since ${payingSince}` : "") +
 		tile("Sessions", num(f.sessions)) +
 		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
 		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope?.mode === "selected" ? ` Payments count from ${num(scope.products)} products the vendor chose.` : ""}</p></section>`;

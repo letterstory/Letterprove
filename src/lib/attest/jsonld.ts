@@ -29,7 +29,7 @@ export function vendorJsonLd(proof: VendorProof, origin: string): Record<string,
 			description:
 				`A signed, hourly attestation that ${proof.vendor.name} controls ${proof.vendor.domain} (proven by DNS) and is backed by ` +
 				`observed usage: ${proof.summary.companies_observed} companies observed signing in over the last 30 days, ` +
-				`${proof.summary.paying_companies} of them paying through ${proof.vendor.name}'s own Stripe account. ` +
+				(proof.summary.payment_corroborated ? `with payment from them corroborated by ${proof.vendor.name}'s own Stripe account. ` : "") +
 				`Counts only; no customer is named. It links to the open-source logic that computed it.`,
 			url: proofUrl,
 			dateModified: proof.summary.last_attested,

@@ -255,7 +255,7 @@ describe("aggregateBody", () => {
 			expect(b.observed_since).toBe("2026-09-03T01:05:00.000Z");
 		});
 
-		it("is tier 3 when at least one observed company pays, and says how many", async () => {
+		it("is tier 3 when at least one observed company pays, and never publishes how many", async () => {
 			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
 			await asVendor();
 			const ev = await import("./vendor-evidence");
@@ -264,7 +264,7 @@ describe("aggregateBody", () => {
 
 			const b = (await aggregateBody("lettertrace"))!;
 			expect(b.tier).toBe(3);
-			expect(b.paying_companies).toBe(1);
+			expect(b).not.toHaveProperty("paying_companies");
 			expect(b.companies_observed).toBe(2);
 			expect(b.paying_since).toBe("2025-11-03T00:00:00.000Z");
 			expect(b.stripe_binding).toBe("staff_override");
@@ -280,7 +280,7 @@ describe("aggregateBody", () => {
 
 			const b = (await aggregateBody("lettertrace"))!;
 			expect(b.stripe_account_bound).toBe(false);
-			expect(b.paying_companies).toBe(0);
+			expect(b).not.toHaveProperty("paying_companies");
 			expect(b.tier).toBe(1);
 			expect(ev.payingAmong).not.toHaveBeenCalled();
 		});

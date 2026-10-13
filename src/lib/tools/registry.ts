@@ -343,14 +343,17 @@ export const TOOLS: BoundTool[] = [
 			if (!proof) return { ok: false, status: 404, body: { error: "not_found" } };
 
 			const { summary } = proof;
+			// The paying count is private since decision 35: computed live for the
+			// vendor, never read from (or written to) the public attestation.
+			const paying = (await tierReport(vendor.slug))?.paying ?? 0;
 			return {
 				ok: true,
 				body: {
 					slug: vendor.slug,
 					tier: summary.tier,
 					tier_name: TIER_LADDER[summary.tier].name,
-					attested_customers: summary.paying_companies,
-					paying_companies: summary.paying_companies,
+					attested_customers: paying,
+					paying_companies: paying,
 					companies_observed: summary.companies_observed,
 					sessions_30d: summary.sessions_30d,
 					last_attested: summary.last_attested || null,

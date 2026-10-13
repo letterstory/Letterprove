@@ -456,10 +456,10 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 <code>domains_excluded</code> rather than silently dropped.
               </li>
               <li>
-                <code>paying_companies</code> and <code>paying_since</code>: how
-                many of the observed companies paid an invoice that actually
-                settled in the vendor&apos;s own Stripe account, and the first
-                such invoice. <code>payment_scope</code> says whether every
+                <code>paying_since</code>: at tier 3, at least one observed
+                company paid an invoice that actually settled in the
+                vendor&apos;s own Stripe account; this is the first such
+                invoice. How many pay is kept private to the vendor. <code>payment_scope</code> says whether every
                 product the account bills counts or only the products the vendor
                 chose, as a count, never by name.
               </li>
@@ -577,9 +577,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               </li>
               <li>
                 If at least one of those companies also paid an invoice that
-                settled in your own, bound Stripe account, the tier is 3, and{" "}
-                <code>paying_companies</code> says how many. Tier 3 never means
-                every company pays.
+                settled in your own, bound Stripe account, the tier is 3. How
+                many pay is shown to you privately, not on your proof. Tier 3
+                never means every company pays.
               </li>
             </ul>
             <p>
@@ -727,9 +727,8 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               Letterprove never names, publishes or contacts your customers.
               The attestation carries counts only. Company domains are used
               inside Letterprove for one thing: joining the sign-ins the script
-              observed to the invoices in your Stripe account, so that{" "}
-              <code>paying_companies</code> counts only companies that both use
-              and pay.
+              observed to the invoices in your Stripe account, so that tier 3
+              counts only companies that both use and pay.
             </p>
             <p>
               You can see the domains behind your own counts on the{" "}

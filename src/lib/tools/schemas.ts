@@ -86,7 +86,7 @@ export const getProofSummaryOutput = z.object({
 		.number()
 		.int()
 		.describe("Same as paying_companies; kept for older callers. Companies whose observed use is corroborated by a settled invoice in your own Stripe account."),
-	paying_companies: z.number().int().describe("Observed companies paying through your own Stripe account. A count; never published by name."),
+	paying_companies: z.number().int().describe("Observed companies paying through your own Stripe account. Private to you: not on your public proof. A count; never published by name."),
 	companies_observed: z.number().int(),
 	sessions_30d: z.number().int(),
 	last_attested: z.string().nullable(),
