@@ -780,7 +780,12 @@ export const TOOLS: BoundTool[] = [
 			}
 
 			const verifiedAt = new Date().toISOString();
-			const { error } = await db.from("vendors").update({ domain_verified_at: verifiedAt }).eq("id", vendorId);
+			// A fresh proof also ends any run of misses the daily re-check was
+			// counting (src/lib/vendors/dns-recheck.ts).
+			const { error } = await db
+				.from("vendors")
+				.update({ domain_verified_at: verifiedAt, domain_dns_failures: 0, domain_dns_failing_since: null })
+				.eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return {
 				ok: true,
@@ -923,8 +928,11 @@ export const TOOLS: BoundTool[] = [
 			if (typeof update.domain === "string" && update.domain !== vendor.domain) {
 				update.domain_verified_at = null;
 			}
+			// And any run of re-check misses counted against the old domain.
+			const resetRecheck =
+				update.domain_verified_at === null ? { domain_dns_failures: 0, domain_dns_failing_since: null } : {};
 
-			const { error } = await db.from("vendors").update(update).eq("id", vendorId);
+			const { error } = await db.from("vendors").update({ ...update, ...resetRecheck }).eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
 			return { ok: true, body: { vendor: { ...vendor, ...update } } };
 		},

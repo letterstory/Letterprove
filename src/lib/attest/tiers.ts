@@ -45,15 +45,15 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 	},
 	1: {
 		name: "script-observed",
-		means: "Letterprove's script reported usage attributable to this company's email domain.",
+		means: "Letterprove's script saw people from this company's email domain sign in, on a domain the vendor proved it controls by DNS. Letterprove stamps when each event arrived; the vendor never reports a number.",
 		forgeable_by:
-			"The vendor, with effort. The collector pins events to a verified origin, which a browser cannot forge — but a non-browser client can send whatever origin it likes.",
+			"The vendor, with effort. The collector pins events to the vendor's verified origin, which a browser cannot forge — but a non-browser client can send whatever origin it likes, so a vendor could script sign-ins. Volume and burst anomalies are scored against it.",
 	},
 	2: {
 		name: "infrastructure-bound",
-		means: "Observed usage carrying a Letterprove-side receipt timestamp and an origin pinned to a domain the vendor proved control of by DNS.",
+		means: "NOT YET ISSUED. Reserved for observed usage bound to network facts the vendor cannot choose (the spread of networks, by ASN, that sign-ins arrive from). That binding is not built, so no new document carries tier 2. Documents signed before 2026-10-13 may carry it for usage that met only the tier-1 bar: read those as tier 1.",
 		forgeable_by:
-			"A determined vendor running a distributed spoofing rig. Volume and burst anomalies are scored against it; a slow, well-distributed rig is an accepted open gap.",
+			"When issued: a determined vendor running a distributed spoofing rig. For the historical documents that carry it: the same as tier 1.",
 	},
 	3: {
 		name: "third-party confirmed",

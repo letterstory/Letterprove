@@ -27,9 +27,10 @@ export function vendorJsonLd(proof: VendorProof, origin: string): Record<string,
 			"@type": "Dataset",
 			name: `Letterprove attestations for ${proof.vendor.name}`,
 			description:
-				`Cryptographically signed attestations of ${proof.summary.attested_customers} verified ` +
-				`customers of ${proof.vendor.name}, covering ${proof.summary.features_proven.length} ` +
-				`independently attested features. Each attestation links to the open-source logic that computed it.`,
+				`Cryptographically signed attestations for ${proof.vendor.name}: ${proof.summary.attested_customers} ` +
+				`customers whose observed usage is corroborated by a settled invoice in ${proof.vendor.name}'s own Stripe account, ` +
+				`out of ${proof.summary.companies_observed} companies observed. Each attestation says which of its fields are ` +
+				`the vendor's own statement and links to the open-source logic that computed it.`,
 			url: proofUrl,
 			dateModified: proof.summary.last_attested,
 			isAccessibleForFree: true,

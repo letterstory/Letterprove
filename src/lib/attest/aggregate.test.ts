@@ -51,7 +51,7 @@ function row(domain: string, sessions: number, signups = 0, logins = 0) {
 	return { domain, sessions, signups, logins };
 }
 
-async function withRollups(rows: unknown[]) {
+async function withRollups(rows: unknown[], domainVerified = true) {
 	const { dbClient } = await import("@/lib/db/client");
 	const { findVendor } = await import("@/lib/fixtures/vendors");
 	const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
@@ -63,6 +63,7 @@ async function withRollups(rows: unknown[]) {
 		domain: "lettertrace.com",
 		category: "x",
 		key: "k",
+		domainVerified,
 		customers: [],
 	} as never);
 	vi.mocked(dbClient).mockReturnValue(mockDb({ data: rows, error: null }) as never);
@@ -82,7 +83,21 @@ describe("aggregateBody", () => {
 		expect(b.signups).toBe(1);
 		expect(b.logins).toBe(4);
 		expect(b.domains_excluded).toBe(0);
-		expect(b.tier).toBe(2);
+		// Tier 1: observed on a DNS-proven domain. Tier 2 waits on the ASN
+		// binding and is not issued (decision 29).
+		expect(b.tier).toBe(1);
+		// Every figure here is counted, so nothing is listed as vendor-stated.
+		expect(b.vendor_stated).toEqual([]);
+	});
+
+	// The same DNS gate as a customer claim: an observation pinned to a domain
+	// nobody has proven, or no longer proves, is the vendor asserting.
+	it("publishes tier 0 when the vendor's domain is not DNS-verified, however much was observed", async () => {
+		await withRollups([row("tenevents.com", 30), row("globex.com", 20)], false);
+
+		const b = (await aggregateBody("lettertrace"))!;
+		expect(b.companies_observed).toBe(2);
+		expect(b.tier).toBe(0);
 	});
 
 	// Free-mail is a person and our own domains are us. Counting either as a

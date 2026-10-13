@@ -42,6 +42,13 @@ export interface AttestationBody {
 	verified: boolean;
 	tier: Tier;
 	/**
+	 * The fields in this document that are the vendor's statement rather than
+	 * Letterprove's evidence: `customer_name`, `since`, `features`. Absent on
+	 * snapshots signed before 2026-10-13; the fields it names were
+	 * vendor-asserted then too.
+	 */
+	vendor_stated?: string[];
+	/**
 	 * VENDOR-ASSERTED, `YYYY-MM`. Copied from the customer record the vendor
 	 * maintains, not derived from the event stream. Nothing here observes a
 	 * first-activity date, so do not read it as one.

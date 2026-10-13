@@ -104,8 +104,8 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 				"A vendor listed in `affiliated_vendors` shares an owner with Letterprove's operator, and every attestation for it carries a signed `issuer_affiliation` saying so. The same collector, code and signing apply to it as to any other vendor; weigh its proofs knowing the relationship.",
 		},
 		// The aggregate is listed beside the report on purpose. It is the only
-		// claim most vendors will ever publish — naming a customer needs that
-		// customer's consent — so an agent that only found `report` would miss
+		// claim most vendors will ever publish — a customer is named only when
+		// the vendor states it has permission — so an agent that only found `report` would miss
 		// the one thing that is actually signed for them. `chain` is what makes
 		// it auditable rather than merely signed: walk it and you can prove no
 		// earlier figure was restated.

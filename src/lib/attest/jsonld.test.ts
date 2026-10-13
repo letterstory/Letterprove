@@ -20,7 +20,7 @@ const PROOF: VendorProof = {
 		attested_customers: 12,
 		attested_unnamed: 4,
 		unverified_customers: 7,
-		features_proven: ["analytics", "api", "sso"],
+		features_stated: ["analytics", "api", "sso"],
 		sessions_30d: 38_000,
 		last_attested: "2026-08-01T00:00:00.000Z",
 		tier: 2,
@@ -71,8 +71,8 @@ describe("vendorJsonLd", () => {
 		const ld = vendorJsonLd(PROOF, ORIGIN);
 		const dataset = ld.subjectOf as Record<string, unknown>;
 
-		expect(dataset.description).toContain("12 verified");
-		expect(dataset.description).toContain("3 ");
+		expect(dataset.description).toContain("12 customers whose observed usage is corroborated by a settled invoice");
+		expect(dataset.description).not.toMatch(/proven|independently attested features/);
 		expect(dataset.name).toBe("Letterprove attestations for Vantage");
 	});
 
@@ -134,12 +134,12 @@ describe("vendorJsonLd", () => {
 	it("survives a vendor with nothing attested yet without emitting broken markup", () => {
 		const empty: VendorProof = {
 			...PROOF,
-			summary: { ...PROOF.summary, attested_customers: 0, features_proven: [], last_attested: "" },
+			summary: { ...PROOF.summary, attested_customers: 0, features_stated: [], last_attested: "" },
 		};
 
 		const dataset = vendorJsonLd(empty, ORIGIN).subjectOf as Record<string, unknown>;
 
-		expect(dataset.description).toContain("0 verified");
+		expect(dataset.description).toContain("0 customers whose observed usage");
 		expect(dataset.dateModified).toBe("");
 	});
 

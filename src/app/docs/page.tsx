@@ -28,9 +28,9 @@ import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
  *      do not publish. The cooldown, the script path and the DNS hosts come
  *      from their own modules for the same reason.
  *
- * What is deliberately NOT dressed up: seats_active is always 0, `features`
- * and `since` are vendor-asserted, tier 3 has never run against a live-mode
- * Stripe key, and the tier-3 section says out loud what a determined vendor
+ * What is deliberately NOT dressed up: seats_active is always 0, the
+ * customer's name, `features` and `since` are vendor-stated, tier 2 is not
+ * issued, and the tier-3 section says out loud what a determined vendor
  * can still do. A page that reads better than the system behaves is the one
  * failure this product cannot afford.
  */
@@ -40,7 +40,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
 	title: "Docs — Letterprove",
 	description:
-		"How to install Letterprove, what the tiers mean, how consent works, and how to verify any published attestation yourself.",
+		"How to install Letterprove, what the tiers mean, how naming a customer works, and how to verify any published attestation yourself.",
 };
 
 const SECTIONS = [
@@ -48,7 +48,8 @@ const SECTIONS = [
 	{ id: "client-api", title: "The client API" },
 	{ id: "published", title: "What a published attestation says" },
 	{ id: "tiers", title: "The tier ladder" },
-	{ id: "consent", title: "Consent and naming a customer" },
+	{ id: "consent", title: "Naming a customer" },
+	{ id: "showing", title: "Badge and your own domain" },
 	{ id: "verify", title: "Verifying a proof yourself" },
 	{ id: "endpoints", title: "Endpoint reference" },
 ];
@@ -73,7 +74,7 @@ export default async function DocsPage() {
 					Letterprove publishes signed, machine-readable evidence that the companies a vendor names
 					really use their product, so an evaluating agent can check a logo wall instead of
 					believing it. This page is the whole of it: how to install the script, what it sends, what
-					the tiers mean, how a customer consents to being named, and how to verify any of it
+					the tiers mean, when a customer is named, and how to verify any of it
 					without trusting us.
 				</p>
 				<p className="mt-4 leading-relaxed text-fog">
@@ -107,7 +108,8 @@ export default async function DocsPage() {
 							proof; it does not hold a session of yours.
 						</p>
 						<p>
-							Installation is one script tag on the pages where people sign in. It has no
+							Installation is one script tag on the pages where people sign in, and on any page where
+							signed-in people use the product. It has no
 							dependencies, no build step, and nothing to configure beyond its <code>data-key</code>{" "}
 							attribute.
 						</p>
@@ -301,9 +303,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 							vendor and names nobody: how many distinct company domains were observed in the last
 							30 days, and the session, signup and login totals behind that. The{" "}
 							<strong>per-customer attestation</strong> names one company and reports what was
-							observed for its domain. The aggregate is the only signed claim most vendors can
-							publish, because naming a customer needs that customer&apos;s consent and counting
-							them does not.
+							observed for its domain. The aggregate is the only signed claim most vendors publish,
+							because a customer is named only once you state you have their permission, and
+							counting them needs no one&apos;s.
 						</p>
 						<p>
 							The aggregate says <code>companies_observed</code>, and it means it. A session from an
@@ -325,8 +327,10 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 								&ldquo;not yet measured&rdquo; rather than as a measurement of zero.
 							</li>
 							<li>
-								<code>features</code> and <code>since</code> are vendor-asserted. Named feature
-								events are a later phase and are not wired, so nothing observes feature use today.
+								<code>customer_name</code>, <code>features</code> and <code>since</code> are your
+								statement, and every body says so in its <code>vendor_stated</code> list. Named
+								feature events are a later phase and are not wired, so nothing observes feature use
+								today.
 							</li>
 							<li>
 								<code>contract_currency</code>, <code>contract_monthly</code> and{" "}
@@ -385,31 +389,39 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 						</p>
 
 						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-							Your asserted tier is a ceiling, never a floor
+							The tier comes from evidence, never from you
 						</h3>
 						<p>
-							A customer record carries a tier you set. Setting it to 2 does not make a claim tier
-							2. It caps what the evidence is allowed to publish, and the evidence decides the rest.
-							Concretely, and in this order:
+							Nobody sets a tier, you included. It is derived each hour from the evidence, in this
+							order:
 						</p>
 						<ul>
 							<li>
-								If the vendor&apos;s domain is not DNS-verified, the published tier is 0, whatever
-								you asserted and whatever was observed. Without domain control, an observation is
-								only the vendor asserting.
+								If your domain is not DNS-verified, the published tier is 0, whatever was observed.
+								Without domain control, an observation is only the vendor asserting. Domain proof is
+								re-checked daily: if the TXT record is gone for three days running, the domain is
+								no longer verified and every tier falls to 0 until you verify again.
 							</li>
 							<li>
 								If nothing at all was observed for that domain in the window, the published tier is
 								0. A tier is a statement about evidence, and there is none.
 							</li>
 							<li>
-								Otherwise the published tier is the one you asserted. Tiers 1 and 2 are therefore
-								your own claim, released only once observation and domain control back it. The{" "}
-								<code>verified</code> boolean comes from the same record and is released by the same
-								two gates, so at those tiers it is your word, gated, rather than an independent
-								finding.
+								If sign-ins were observed on your verified domain, the tier is 1, and{" "}
+								<code>verified</code> is false: it is evidence, but evidence you could fabricate
+								with effort.
+							</li>
+							<li>
+								If, on top of that, an invoice for that domain settled in your own live Stripe
+								account, the tier is 3 and <code>verified</code> is true.
 							</li>
 						</ul>
+						<p>
+							Tier 2 is not issued. It is reserved for observations bound to network facts you do
+							not choose (the spread of networks, by ASN, that sign-ins arrive from), and that
+							binding is not built. Documents signed before 2026-10-13 may carry tier 2 for evidence
+							that met only the tier-1 bar; read them as tier 1.
+						</p>
 						<p>
 							An unmeasurable window fails toward the weaker claim rather than the stronger one. A
 							failed telemetry read, an unconfigured datastore and a genuinely empty window all
@@ -417,12 +429,11 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 						</p>
 
 						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-							Tier 3 is not capped by your assertion
+							Tier 3 comes from a third party&apos;s ledger
 						</h3>
 						<p>
-							<strong>Tier 3 is read from a third party&apos;s ledger</strong> rather than from
-							anything you typed, so a vendor understating their own tier does not suppress it. It
-							still sits below the observation and domain gates, because money proves a commercial
+							<strong>Tier 3 is read from your Stripe account</strong> rather than from anything you
+							typed. It still sits below the observation and domain gates, because money proves a commercial
 							relationship and not that the product was used.
 						</p>
 						<p>
@@ -498,26 +509,24 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 							Connect. Read tier 3 as corroboration by a third party&apos;s ledger, not as immunity.
 						</p>
 						<p>
-							One more caveat.{" "}
-							<strong>Tier 3 has never run against a live-mode Stripe key in production.</strong> The
-							publishing half is tested against the real schema with a live-mode flag, but a
-							test-mode key deliberately stores nothing, so no production attestation has ever
-							carried real payment evidence.
+							Tier 3 first ran against a live-mode Stripe key in production on 2026-10-12, for
+							Letterstory. A test-mode key deliberately stores nothing.
 						</p>
 						<p>
-							The aggregate document uses a narrower rule of its own: tier 2 when anything at all
-							was observed, tier 0 when nothing was.
+							The aggregate document follows the same gates without the payment step: tier 1 when
+							anything was observed on your verified domain, tier 0 otherwise. It makes no
+							commercial claim, so it never reaches tier 3.
 						</p>
 					</Section>
 
-					<Section n={5} id="consent" title="Consent and naming a customer">
+					<Section n={5} id="consent" title="Naming a customer">
 						<p>
 							<strong>Anonymous is the default, and the default is applied on read.</strong> A
-							customer record added without a consent decision is treated as anonymous, so a
-							customer nobody thought about is withheld rather than published. Consent governs what
-							leaves the building, not what we store: an unconsented customer still has snapshots
+							customer record added without a naming decision is treated as anonymous, so a
+							customer nobody thought about is withheld rather than published. Naming governs what
+							leaves the building, not what we store: an unnamed customer still has snapshots
 							computed and chained, and the per-customer endpoint simply refuses to serve them. That
-							is what &ldquo;the moment consent lands, the history is already there&rdquo; has to
+							is what &ldquo;the moment a customer is named, the history is already there&rdquo; has to
 							mean to be more than a slogan.
 						</p>
 						<p>
@@ -525,7 +534,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 							Everything below follows from taking that seriously.
 						</p>
 
-						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">You hold the consent</h3>
+						<h3 className="pt-2 text-lg font-medium text-[#e9efed]">You hold the permission</h3>
 						<p>
 							Marking a customer as named is your statement that you have their permission to be
 							identified publicly (see the terms). Letterprove does not contact your customers to
@@ -544,7 +553,32 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
 						</p>
 					</Section>
 
-					<Section n={6} id="verify" title="Verifying a proof yourself">
+					<Section n={6} id="showing" title="Badge and your own domain">
+						<p>
+							<strong>The footer badge.</strong> Once your proofs are public, the Proofs tab (or{" "}
+							<code>get_install_snippet</code>) gives you a small &ldquo;Attested and proven by
+							Letterprove&rdquo; badge to paste into your site&apos;s footer. It is self-contained
+							HTML that loads nothing, inherits your footer&apos;s colour, and links to your public
+							proof page. Until your proofs are published it would link to a page that answers 404,
+							so the tool reports <code>live: false</code> and you should hold off.
+						</p>
+						<p>
+							<strong>Your proof page on your own domain.</strong> You can serve the same page at a
+							subdomain of the domain you verified, such as <code>proof.yourcompany.com</code>. Set
+							it in the Proofs tab (or <code>set_custom_domain</code>), add the one CNAME record it
+							shows you at your DNS provider, then check again. It has to sit under your verified
+							domain, so nobody can claim a hostname that belongs to another company, and it cannot
+							be the bare domain itself, because a CNAME cannot sit there.
+						</p>
+						<p>
+							Nothing about the proof changes on your domain. It is the same page and the same
+							signed documents, and every verify link still points at Letterprove, so a proof served
+							from your domain stays something a reader can check rather than something you
+							published about yourself. Until your proofs are public, the subdomain answers 404.
+						</p>
+					</Section>
+
+					<Section n={7} id="verify" title="Verifying a proof yourself">
 						<p>
 							Nothing on this site asks you to trust it. The verifier is a single standalone script
 							with no dependencies, using only Node built-ins, short enough to read before you run
@@ -634,7 +668,7 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
 						</p>
 					</Section>
 
-					<Section n={7} id="endpoints" title="Endpoint reference">
+					<Section n={8} id="endpoints" title="Endpoint reference">
 						<p>
 							Every proof endpoint is public, unauthenticated and CORS-open, answers JSON as UTF-8,
 							and carries <Mono>x-letterprove: on</Mono>. A proof nobody can fetch cross-origin is
@@ -759,7 +793,7 @@ function Endpoints({ origin }: { origin: string }) {
 		},
 		{
 			path: "/attest/<vendor>/<customer>",
-			serves: "One customer's current attestation, if they consented to be named",
+			serves: "One customer's current attestation, if the vendor has named them",
 		},
 		{
 			path: "/attest/<vendor>/<customer>/chain",

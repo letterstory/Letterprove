@@ -17,27 +17,52 @@ import { withDisclosure } from "./issuer";
 const METHOD_PATH = "src/lib/attest/proofs.ts";
 
 /**
- * What the evidence supports, which is not always what the vendor asserts.
+ * Fields of a customer attestation that come from the vendor's customer
+ * record, not from anything Letterprove observed or read from a third party.
+ * The name and the start date are typed by the vendor; `features` are strings
+ * the vendor put on the record (no feature event is observed today). Naming
+ * permission is likewise the vendor's statement. Published in every body as
+ * `vendor_stated` (decision 29).
+ */
+export const VENDOR_STATED = ["customer_name", "since", "features"] as const;
+
+/**
+ * What the evidence supports — and nothing else.
  *
- * The asserted tier is a CEILING, never a floor. A customer record can say
- * tier 2; only an observation can earn it. With nothing observed in the
- * window, every fact we hold about that customer came from the vendor —
- * which is tier 0 in the README's trust model, and cannot be `verified` at
- * any tier.
+ * The tier is derived from evidence alone. There is no vendor-asserted tier
+ * any more: `vendor_customers.tier` is a legacy column this function does not
+ * read (decision 29). A vendor can say who its customers are; it cannot say
+ * how strong the evidence is.
  *
- * The ceiling is tier 3. Tier 4 (a customer counter-signing their own
- * attestation via an emailed link) was retired on 2026-10-12: Letterprove
- * attests from the vendor's DNS proof and the vendor's own Stripe ledger, and
- * does not email the vendor's customers. Old snapshots that carry tier 4 stay
- * in their chains and still verify; nothing new earns it.
+ *   0  nothing observed, or the vendor's domain is not proven by DNS
+ *   1  sign-ins observed by the script on the vendor's DNS-proven domain
+ *   3  tier 1, plus a settled invoice for this domain in the vendor's own
+ *      live Stripe account
+ *
+ * Tier 2 (infrastructure-bound) is NOT ISSUED. It describes observations bound
+ * to network facts the vendor cannot choose (ASN distribution), and that
+ * binding is not built — fraud-features.ts still sends `asn_distribution:
+ * null`. Until it is, claiming tier 2 would describe evidence we do not hold.
+ *
+ * Tier 4 (a customer counter-signing via an emailed link) was retired on
+ * 2026-10-12. Old snapshots that carry 2 or 4 stay in their chains and still
+ * verify; nothing new earns either.
+ *
+ * `verified` means "corroborated by a third party", which today is only
+ * tier 3. A tier-1 observation is evidence, but evidence the vendor could
+ * fabricate with effort (a non-browser client can send any Origin), so it is
+ * published as observed, not verified.
+ *
+ * `customer` is accepted so every call site keeps one shape; nothing on it
+ * affects the result.
  */
 export function earned(
-	customer: CustomerFixture,
+	_customer: CustomerFixture,
 	observed: boolean,
 	domainVerified: boolean,
 	payment?: PaymentEvidence | null,
 ): { tier: Tier; verified: boolean } {
-	// Same ceiling, one step earlier. An observation is only evidence if we
+	// An observation is only evidence if we
 	// know who the origin it was pinned to belongs to — and `Origin` binds a
 	// browser, not curl (see /v1/observe). Until DNS control of the vendor's
 	// domain is proven, every observation is the vendor asserting, so it earns
@@ -47,11 +72,6 @@ export function earned(
 
 	/*
 	 * Tier 3 — payment corroborated by Stripe.
-	 *
-	 * Deliberately NOT capped by `customer.tier`. The asserted tier is a ceiling on VENDOR-ORIGINATED evidence,
-	 * because a vendor claiming more than they can show is the failure that
-	 * ceiling exists to stop. Capping this would mean a vendor's own
-	 * understatement suppressing third-party corroboration, which is backwards.
 	 *
 	 * WHAT THIS TIER IS AND IS NOT. It used to be described here as impossible
 	 * to fabricate without defrauding someone. That was wrong, and cheaply so:
@@ -75,9 +95,7 @@ export function earned(
 	 */
 	if (payment && payment.monthlyAmount > 0) return { tier: 3, verified: true };
 
-	// Capped at 3 so a stored row still asserting the retired tier 4 can never
-	// publish it.
-	return { tier: Math.min(customer.tier, 3) as Tier, verified: customer.verified };
+	return { tier: 1, verified: false };
 }
 
 /**
@@ -111,6 +129,10 @@ export async function attestationBody(
 		customer_domain: customer.domain,
 		verified,
 		tier,
+		// Which fields in this document are the vendor's word rather than our
+		// evidence. Signed, so an agent never has to infer it — and so no page
+		// or summary can quietly present one of these as proven.
+		vendor_stated: [...VENDOR_STATED],
 		since: customer.since,
 		features: [...customer.features].sort(),
 		sessions_30d: snapshot.sessions_30d,

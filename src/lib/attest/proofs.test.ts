@@ -14,6 +14,16 @@ vi.mock("./keys", async (importOriginal) => {
 	const real = await importOriginal<typeof import("./keys")>();
 	return { ...real, isDemonstration: vi.fn(real.isDemonstration) };
 });
+// acme-corp and northwind pay (tier 3, verified); globex is only observed.
+// Attestation now comes from evidence alone, so "attested" means a settled
+// invoice in the fixture, not a tier typed on the record.
+vi.mock("@/lib/attest/payment-evidence", () => ({
+	paymentEvidenceFor: vi.fn(async (_vendorId: string, domain: string) =>
+		domain === "acme-corp.example" || domain === "northwind.example"
+			? { currency: "usd", monthlyAmount: 120000, since: "2024-01-01T00:00:00.000Z", subscriptionCount: 1 }
+			: null,
+	),
+}));
 
 // Vendor/customer identity is DB-backed now (supabase/migrations/
 // 20260814230000_vendor_accounts.sql), but this suite is exercising chain
@@ -266,24 +276,28 @@ describe("customerProof", () => {
 });
 
 describe("earned", () => {
-	const asserted = { slug: "x", name: "X", domain: "x.example", since: "2023-01", features: [] };
-	const tier2 = { ...asserted, tier: 2 as const, verified: true };
-	const tier1 = { ...asserted, tier: 1 as const, verified: false };
+	const base = { slug: "x", name: "X", domain: "x.example", since: "2023-01", features: [] };
+	// A legacy stored tier must have no effect whatever: the tier comes from
+	// evidence alone (decision 29).
+	const storedHigh = { ...base, tier: 2 as const, verified: true };
+	const storedLow = { ...base, tier: 1 as const, verified: false };
 
-	it("publishes the asserted tier once something has been observed", () => {
-		expect(earned(tier2, true, true)).toEqual({ tier: 2, verified: true });
+	it("publishes tier 1, unverified, once sign-ins were observed on a verified domain", () => {
+		expect(earned(storedLow, true, true)).toEqual({ tier: 1, verified: false });
 	});
 
-	it("refuses every asserted tier when nothing was observed", () => {
-		expect(earned(tier2, false, true)).toEqual({ tier: 0, verified: false });
-		expect(earned(tier1, false, true)).toEqual({ tier: 0, verified: false });
+	it("ignores whatever tier is stored on the customer record", () => {
+		expect(earned(storedHigh, true, true)).toEqual({ tier: 1, verified: false });
+		expect(earned({ ...base, tier: 0 as const, verified: false }, true, true)).toEqual({ tier: 1, verified: false });
 	});
 
-	// The ceiling half of the rule. Observation earns the asserted tier; it
-	// never grants a higher one, however much traffic there is — tier 2 is
-	// about what a fact is bound to, not how much of it there is.
-	it("never raises a claim above what the vendor asserted", () => {
-		expect(earned(tier1, true, true)).toEqual({ tier: 1, verified: false });
+	it("never issues tier 2, which waits on the ASN binding", () => {
+		for (const c of [storedHigh, storedLow]) expect(earned(c, true, true).tier).not.toBe(2);
+	});
+
+	it("refuses every tier when nothing was observed", () => {
+		expect(earned(storedHigh, false, true)).toEqual({ tier: 0, verified: false });
+		expect(earned(storedLow, false, true)).toEqual({ tier: 0, verified: false });
 	});
 
 	// The gate one step earlier: an observation only counts as evidence if we
@@ -291,23 +305,19 @@ describe("earned", () => {
 	// without DNS control of the vendor's domain the traffic is the vendor
 	// asserting — and asserting earns tier 0.
 	it("refuses every tier while the vendor's domain is unverified, however much was observed", () => {
-		expect(earned(tier2, true, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(tier1, true, false)).toEqual({ tier: 0, verified: false });
+		expect(earned(storedHigh, true, false)).toEqual({ tier: 0, verified: false });
+		expect(earned(storedLow, true, false)).toEqual({ tier: 0, verified: false });
 	});
 
 	it("needs both verification and observation, not either", () => {
-		expect(earned(tier2, false, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(tier2, true, true)).toEqual({ tier: 2, verified: true });
+		expect(earned(storedHigh, false, false)).toEqual({ tier: 0, verified: false });
+		expect(earned(storedHigh, true, true)).toEqual({ tier: 1, verified: false });
 	});
 
-	// Tier 4 is the one evidence path that doesn't run through the vendor at
-	// all — a customer counter-signing directly is why it's the tier a vendor
-	// can't forge. It has to win over every other gate here, since those gates
-	// exist to police the vendor's own observation pipeline, not this one.
 	it("never earns tier 4, which was retired, even from a row that still carries a counter-signature", () => {
-		const legacy = { ...tier1, tier: 4, countersignedAt: "2026-08-21T00:00:00.000Z" } as never;
+		const legacy = { ...storedLow, tier: 4, countersignedAt: "2026-08-21T00:00:00.000Z" } as never;
 		expect(earned(legacy, false, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(legacy, true, true).tier).toBeLessThan(4);
+		expect(earned(legacy, true, true)).toEqual({ tier: 1, verified: false });
 	});
 });
 
@@ -338,7 +348,7 @@ describe("consent-gated publication", () => {
 	it("withholds one for a customer who has not, even though the chain exists", async () => {
 		vi.setSystemTime(new Date("2026-08-20T01:00:00.000Z"));
 
-		// northwind is attested and tier 2 — withheld for consent, not for lack
+		// northwind is attested at tier 3 — withheld for naming, not for lack
 		// of evidence. The chain is still computed and still frozen; only
 		// publication is gated, which is what makes flipping consent a no-op.
 		await expect(customerProof("vantage", "northwind")).resolves.toBeNull();
@@ -365,7 +375,7 @@ describe("consent-gated publication", () => {
 
 		// The aggregate is the consent-safe view, so it stays complete: sla comes
 		// only from northwind, who is never named anywhere on the page.
-		expect(proof!.summary.features_proven).toContain("sla");
+		expect(proof!.summary.features_stated).toContain("sla");
 		expect(proof!.summary.sessions_30d).toBe(200);
 	});
 
