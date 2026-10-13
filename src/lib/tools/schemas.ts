@@ -292,13 +292,36 @@ const stripeConnection = z.object({
 		.int()
 		.nullable()
 		.describe("Customer domains carrying payment evidence fresh enough to publish. Null when the count could not be read, because a failed read is not a zero. Evidence older than a day stops counting here as well as in the attestation, since nothing has confirmed it since."),
+	product_scope: z
+		.object({
+			mode: z
+				.enum(["all_products", "selected"])
+				.describe("all_products: every subscription in the Stripe account counts. selected: only money spent on the listed products counts."),
+			product_ids: z.array(z.string()).describe("The Stripe product ids that count as this product. Empty when mode is all_products."),
+		})
+		.describe("Which Stripe products are this product. Set with set_stripe_scope; list candidates with list_stripe_products."),
+	account: z
+		.object({
+			id: z.string().describe("The Stripe account the key belongs to."),
+			domains: z.array(z.string()).describe("Domains the account publishes about itself: business website, support URL or email, account email."),
+			checked_at: z.string().nullable(),
+		})
+		.nullable()
+		.describe("The account behind the key, as last read. Null until it has been read. Payments only count when one of these domains is yours, or staff approved the account."),
 });
+
+const productIds = z
+	.array(z.string().regex(/^prod_[A-Za-z0-9]+$/, "Stripe product ids look like prod_…"))
+	.max(200);
 
 export const connectStripeInput = z.object({
 	restricted_key: z
 		.string()
 		.min(1)
-		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…), read scope on Subscriptions, Customers AND Invoices. Invoices is required: payment evidence is built from invoices that actually settled, because a subscription only says what you meant to bill. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
+		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…) with read access to Subscriptions, Invoices and Accounts. Invoices is required because evidence is built from invoices that actually settled; Accounts (connected_account_read) because the account has to be yours — one of the domains it publishes must share your verified domain. Products and Prices read are optional and let list_stripe_products show product names. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
+	product_ids: productIds
+		.optional()
+		.describe("Optional. The Stripe products that are this product, when the account bills more than one. Omitted keeps the current scope (every product, for a first connect)."),
 });
 /**
  * The connection, never an echo of the argument.
@@ -323,6 +346,42 @@ export const disconnectStripeOutput = z.object({
 	disconnected: z
 		.literal(true)
 		.describe("The key and every payment evidence row it produced are gone. Customers corroborated only by Stripe drop back to what observed usage alone earns."),
+});
+
+export const listStripeProductsInput = empty;
+export const listStripeProductsOutput = z.object({
+	products: z.array(
+		z.object({
+			id: z.string(),
+			name: z.string().nullable().describe("Null when the key cannot read Products; the id is still valid to choose."),
+			recurring: z.boolean().nullable().describe("Whether the product has an active recurring price. Null when the key cannot read Prices."),
+		}),
+	),
+	names_available: z.boolean().describe("False when the key lacks Products read, so the list came from the products seen on subscriptions."),
+	product_scope: stripeConnection.shape.product_scope,
+});
+
+export const setStripeScopeInput = z.object({
+	product_ids: productIds.describe("The Stripe products that are this product. An empty list means every product in the account counts."),
+});
+export const setStripeScopeOutput = stripeConnection;
+
+export const setStripeAccountOverrideInput = z.object({
+	vendor: z.string().min(1).describe("Vendor slug."),
+	clear: z.boolean().optional().describe("Remove the override. The account is then checked against the vendor's domain again."),
+	stripe_account_id: z
+		.string()
+		.regex(/^acct_[A-Za-z0-9]+$/)
+		.optional()
+		.describe("The Stripe account to approve. Defaults to the account behind the vendor's connected key, as last read."),
+	reason: z.string().min(10).max(500).optional().describe("Required when setting: why this account may corroborate a vendor on a different domain."),
+});
+export const setStripeAccountOverrideOutput = z.object({
+	vendor: z.string(),
+	override: z
+		.object({ stripe_account_id: z.string(), at: z.string(), by: z.string().nullable(), reason: z.string().nullable() })
+		.nullable()
+		.describe("The approved account, who approved it and why. Null after clearing: the account is checked against the vendor's domain again from the next sync."),
 });
 
 export const syncStripePaymentsInput = empty;

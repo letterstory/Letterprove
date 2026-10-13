@@ -2,10 +2,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { syncVendorPayments } from "./sync";
 import { credentialFor } from "./credentials";
 import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
+import { checkStripeAccount } from "./account";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("./credentials", () => ({ credentialFor: vi.fn() }));
 vi.mock("./fetch", () => ({ fetchSubscriptions: vi.fn(), fetchPaidInvoices: vi.fn() }));
+vi.mock("./account", () => ({ checkStripeAccount: vi.fn(), recordAccount: vi.fn() }));
+
+const ACCOUNT = { id: "acct_1", domains: ["acme-vendor.com"] };
 
 /**
  * Records every table touched and what was written to it. `vendorDomain`
@@ -68,15 +72,23 @@ function mockDb(observed: string[] = ["acme.com"], vendorDomain = "acme-vendor.c
 	return { db, inserts, deletes, updates };
 }
 
+/** The billing email and amount each test's subscriptions settled with, keyed by subscription id. */
+const billed = new Map<string, { email: string | null; amount: number }>();
+
+/**
+ * A subscription, and — registered alongside it — what its settled invoices
+ * carry. The billed identity and the amount live on the invoices now, frozen
+ * when each one settled, so a test's "who pays" travels to paid() through here.
+ */
 function sub(id: string, email: string | null, amount = 400000) {
+	billed.set(id, { email, amount });
 	return {
 		id,
 		status: "active",
 		start_date: 1_770_000_000,
 		currency: "usd",
-		amount,
 		interval: "month" as const,
-		customerEmail: email,
+		productIds: ["prod_core"],
 	};
 }
 
@@ -87,21 +99,34 @@ function sub(id: string, email: string | null, amount = 400000) {
  */
 function paid(ids: string[]) {
 	const recent = Math.floor(Date.now() / 1000) - 3 * 24 * 60 * 60;
+	const invoice = (id: string, paidAt: number) => {
+		const { email, amount } = billed.get(id) ?? { email: "billing@acme.com", amount: 400000 };
+		return {
+			id: `in_${id}_${paidAt}`,
+			paidAt,
+			amountPaid: amount,
+			currency: "usd",
+			customerEmail: email,
+			billingReason: "subscription_cycle",
+			lines: [{ product: "prod_core", net: amount }],
+			linesComplete: true,
+		};
+	};
 	return {
 		ok: true as const,
 		truncated: false,
 		payments: new Map(
-			ids.map((id) => [
-				id,
-				{ firstSettledAt: recent - 90 * 24 * 60 * 60, lastSettledAt: recent, settledCount: 4, markedPaidCount: 0 },
-			])
+			ids.map((id) => [id, { settled: [invoice(id, recent - 90 * 24 * 60 * 60), invoice(id, recent)], markedPaidCount: 0 }]),
 		),
 	};
 }
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	vi.mocked(fetchPaidInvoices).mockResolvedValue(paid(["sub_1"]));
+	billed.clear();
+	// Built at call time, so it sees the billing each test registered via sub().
+	vi.mocked(fetchPaidInvoices).mockImplementation(async () => paid(["sub_1"]));
+	vi.mocked(checkStripeAccount).mockResolvedValue({ ok: true, account: ACCOUNT, overridden: false });
 });
 
 describe("syncVendorPayments", () => {
@@ -121,7 +146,7 @@ describe("syncVendorPayments", () => {
 		const { db, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -145,7 +170,7 @@ describe("syncVendorPayments", () => {
 		const { db, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -167,7 +192,7 @@ describe("syncVendorPayments", () => {
 		const { db, deletes, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -186,7 +211,7 @@ describe("syncVendorPayments", () => {
 		const { db, inserts } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -206,7 +231,7 @@ describe("syncVendorPayments", () => {
 		const { db, inserts } = mockDb([]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -225,7 +250,7 @@ describe("syncVendorPayments", () => {
 		const { db, deletes } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, truncated: false, subscriptions: [] });
 
 		await syncVendorPayments("v1", "lettertrace");
@@ -238,7 +263,7 @@ describe("syncVendorPayments", () => {
 		const { db, updates } = mockDb();
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: false,
 			status: 401,
@@ -255,7 +280,7 @@ describe("syncVendorPayments", () => {
 		const { db, updates } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -271,7 +296,7 @@ describe("syncVendorPayments", () => {
 		const { db } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, truncated: true, subscriptions: [] });
 
 		expect(await syncVendorPayments("v1", "lettertrace")).toMatchObject({ truncated: true });
@@ -285,7 +310,7 @@ describe("syncVendorPayments", () => {
 		const { db } = mockDb(["acme.com"]);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, truncated: false, subscriptions: [] });
 		vi.mocked(fetchPaidInvoices).mockResolvedValue({ ...paid([]), truncated: true });
 
@@ -297,7 +322,7 @@ describe("syncVendorPayments — corroboration by what settled, not by what was 
 	async function wire(db: unknown) {
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -368,7 +393,7 @@ describe("syncVendorPayments — corroboration by what settled, not by what was 
 		// can act on.
 		const { db, inserts, updates } = mockDb(["acme.com"]);
 		await wire(db);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false, productIds: [] });
 		vi.mocked(fetchPaidInvoices).mockResolvedValue({
 			ok: false,
 			status: 403,
@@ -394,7 +419,7 @@ describe("syncVendorPayments — a failed sync cannot freeze a favourable claim"
 		const { db, updates } = mockDb();
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: false, status: 401, error: "Expired API Key provided" });
 
 		await syncVendorPayments("v1", "lettertrace");
@@ -407,7 +432,7 @@ describe("syncVendorPayments — a failed sync cannot freeze a favourable claim"
 		const { db, deletes } = mockDb(["acme.com"], "acme-vendor.com", 0);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: false, status: 500, error: "Stripe returned 500" });
 
 		await syncVendorPayments("v1", "lettertrace");
@@ -422,7 +447,7 @@ describe("syncVendorPayments — a failed sync cannot freeze a favourable claim"
 		const { db, deletes } = mockDb(["acme.com"], "acme-vendor.com", 2);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: false, status: 401, error: "Expired API Key provided" });
 
 		await syncVendorPayments("v1", "lettertrace");
@@ -435,7 +460,7 @@ describe("syncVendorPayments — a failed sync cannot freeze a favourable claim"
 		const { db, updates } = mockDb(["acme.com"], "acme-vendor.com", 2);
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(db as never);
-		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true });
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
 		vi.mocked(fetchSubscriptions).mockResolvedValue({
 			ok: true,
 			truncated: false,
@@ -445,5 +470,66 @@ describe("syncVendorPayments — a failed sync cannot freeze a favourable claim"
 		await syncVendorPayments("v1", "lettertrace");
 
 		expect(updates.at(-1)).toMatchObject({ consecutive_sync_failures: 0, last_sync_failed_at: null });
+	});
+});
+
+describe("syncVendorPayments — the account and the scope", () => {
+	const MISMATCH = {
+		ok: false as const,
+		error: "stripe_account_domain_mismatch" as const,
+		detail: "This Stripe account (acct_2) describes itself as other.com, not acme-vendor.com",
+		account: { id: "acct_2", domains: ["other.com"] },
+	};
+
+	it("clears evidence at once, and fails, when a live key belongs to someone else's account", async () => {
+		// Not a transient failure counted toward the threshold: a ledger that
+		// is not the vendor's corroborates none of their customers, from now.
+		const { db, deletes, updates } = mockDb(["acme.com"]);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
+		vi.mocked(checkStripeAccount).mockResolvedValue(MISMATCH);
+
+		const result = await syncVendorPayments("v1", "lettertrace");
+
+		expect(result).toEqual({ ok: false, error: MISMATCH.detail });
+		expect(deletes).toContain("vendor_payment_evidence");
+		expect(fetchSubscriptions).not.toHaveBeenCalled();
+		expect(updates.some((u) => u.last_sync_error === MISMATCH.detail)).toBe(true);
+	});
+
+	it("warns rather than fails for a test key with an account problem", async () => {
+		const { db } = mockDb(["acme.com"]);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_test_x", livemode: false, productIds: [] });
+		vi.mocked(checkStripeAccount).mockResolvedValue(MISMATCH);
+
+		expect(await syncVendorPayments("v1", "lettertrace")).toMatchObject({ ok: true, testMode: true, scopeWarning: MISMATCH.detail });
+	});
+
+	it("counts an unreachable account read as an ordinary failure, without clearing early", async () => {
+		const { db, deletes } = mockDb(["acme.com"]);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: [] });
+		vi.mocked(checkStripeAccount).mockResolvedValue({ ok: false, error: "stripe_account_unreadable", detail: "Couldn't reach Stripe." });
+
+		expect(await syncVendorPayments("v1", "lettertrace")).toEqual({ ok: false, error: "Couldn't reach Stripe." });
+		expect(deletes).not.toContain("vendor_payment_evidence");
+	});
+
+	it("applies the vendor's product scope", async () => {
+		const { db, inserts } = mockDb(["acme.com"]);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		vi.mocked(credentialFor).mockResolvedValue({ key: "rk_live_x", livemode: true, productIds: ["prod_elsewhere"] });
+		vi.mocked(fetchSubscriptions).mockResolvedValue({ ok: true, truncated: false, subscriptions: [sub("sub_1", "billing@acme.com")] });
+
+		const result = await syncVendorPayments("v1", "lettertrace");
+
+		expect(result).toMatchObject({ ok: true, matched: 0, unmatched: 1 });
+		expect(inserts["vendor_payment_evidence"]).toBeUndefined();
+		expect(inserts["vendor_payment_unmatched"]).toEqual([expect.objectContaining({ reason: "out_of_scope" })]);
 	});
 });

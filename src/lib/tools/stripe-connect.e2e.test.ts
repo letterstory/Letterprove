@@ -5,6 +5,13 @@ import type { OAuthPrincipal } from "@/lib/oauth/scopes";
 import { bootstrapPglite, pgliteSupabase } from "@/lib/test-support/pglite-supabase";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
+// The one network call connect makes: which Stripe account the key belongs to.
+// The account publishes the vendor's own domain, so the binding check passes
+// and everything downstream runs against real Postgres.
+vi.mock("@/lib/stripe/fetch", async () => ({
+	...(await vi.importActual<typeof import("@/lib/stripe/fetch")>("@/lib/stripe/fetch")),
+	fetchAccount: vi.fn(async () => ({ ok: true, account: { id: "acct_e2e", domains: ["stripe-connect-e2e.example"] } })),
+}));
 
 /**
  * connect_stripe / get_stripe_connection / disconnect_stripe against a real
@@ -91,12 +98,40 @@ describe("stripe connect/disconnect, against a real Postgres schema", () => {
 		expect(rows[0].encrypted_key).not.toContain("rk_test_e2eProbeKeyValue123");
 		expect(rows[0].key_last4).toBe("e123");
 		expect(rows[0].livemode).toBe(false);
+		// The account the key was checked against is recorded alongside it.
+		const { rows: account } = await pg.query(
+			"select stripe_account_id, stripe_account_domains, product_ids from vendor_stripe_credentials where vendor_id = $1",
+			[VENDOR_ID],
+		);
+		expect(account[0]).toEqual({ stripe_account_id: "acct_e2e", stripe_account_domains: ["stripe-connect-e2e.example"], product_ids: [] });
 
 		const readOutcome = await dispatchTool("get_stripe_connection", {}, serviceCallerFor(VENDOR_ID));
 		expect(readOutcome).toMatchObject({
 			kind: "result",
-			result: { ok: true, body: { connected: true, livemode: false, last4: "e123" } },
+			result: {
+				ok: true,
+				body: {
+					connected: true,
+					livemode: false,
+					last4: "e123",
+					product_scope: { mode: "all_products", product_ids: [] },
+					account: { id: "acct_e2e", domains: ["stripe-connect-e2e.example"] },
+				},
+			},
 		});
+	});
+
+	it("keeps the product scope through a reconnect that doesn't restate it", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		await dispatchTool("connect_stripe", { restricted_key: "rk_test_firstKeyABCD1111", product_ids: ["prod_core"] }, serviceCallerFor(VENDOR_ID));
+		await dispatchTool("connect_stripe", { restricted_key: "rk_test_secondKeyEFGH2222" }, serviceCallerFor(VENDOR_ID));
+
+		const { rows } = await pg.query("select product_ids from vendor_stripe_credentials where vendor_id = $1", [VENDOR_ID]);
+		expect(rows[0]).toEqual({ product_ids: ["prod_core"] });
+
+		const scoped = await dispatchTool("set_stripe_scope", { product_ids: [] }, serviceCallerFor(VENDOR_ID));
+		expect(scoped).toMatchObject({ kind: "result", result: { ok: true, body: { product_scope: { mode: "all_products" } } } });
 	});
 
 	it("reconnecting (upsert) replaces the old credential rather than duplicating it", async () => {

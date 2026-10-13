@@ -85,6 +85,12 @@ export interface StripeConnection {
 	connectedAt: string;
 	lastSyncedAt: string | null;
 	lastSyncError: string | null;
+	/** Stripe products that count as this vendor's product. Empty = every product. */
+	productIds: string[];
+	/** The account the key belongs to, as last read. Null before the first read. */
+	stripeAccountId: string | null;
+	stripeAccountDomains: string[];
+	accountCheckedAt: string | null;
 }
 
 /** What a dashboard may see. Deliberately no key material of any kind. */
@@ -94,7 +100,9 @@ export async function connectionFor(vendorId: string): Promise<StripeConnection 
 
 	const { data } = await db
 		.from("vendor_stripe_credentials")
-		.select("key_last4, livemode, connected_at, last_synced_at, last_sync_error")
+		.select(
+			"key_last4, livemode, connected_at, last_synced_at, last_sync_error, product_ids, stripe_account_id, stripe_account_domains, account_checked_at",
+		)
 		.eq("vendor_id", vendorId)
 		.maybeSingle();
 
@@ -105,6 +113,10 @@ export async function connectionFor(vendorId: string): Promise<StripeConnection 
 		connectedAt: data.connected_at,
 		lastSyncedAt: data.last_synced_at,
 		lastSyncError: data.last_sync_error,
+		productIds: data.product_ids ?? [],
+		stripeAccountId: data.stripe_account_id ?? null,
+		stripeAccountDomains: data.stripe_account_domains ?? [],
+		accountCheckedAt: data.account_checked_at ?? null,
 	};
 }
 
@@ -112,7 +124,14 @@ export type SaveResult =
 	| { ok: true; livemode: boolean; last4: string }
 	| { ok: false; reason: KeyRejection | "not_configured" | "storage_unavailable" };
 
-export async function saveCredential(vendorId: string, rawKey: string): Promise<SaveResult> {
+export interface SaveOptions {
+	/** Replace the product scope. Omitted keeps whatever scope the vendor already chose. */
+	productIds?: string[];
+	/** The account the key was just checked against, recorded with it. */
+	account?: { id: string; domains: string[] };
+}
+
+export async function saveCredential(vendorId: string, rawKey: string, options: SaveOptions = {}): Promise<SaveResult> {
 	const classified = classifyKey(rawKey);
 	if (!classified.ok) return { ok: false, reason: classified.reason };
 
@@ -134,6 +153,14 @@ export async function saveCredential(vendorId: string, rawKey: string): Promise<
 			// key's error forward would blame the new one for the old one's fault.
 			last_synced_at: null,
 			last_sync_error: null,
+			...(options.productIds ? { product_ids: options.productIds } : {}),
+			...(options.account
+				? {
+						stripe_account_id: options.account.id,
+						stripe_account_domains: options.account.domains,
+						account_checked_at: new Date().toISOString(),
+					}
+				: {}),
 		},
 		{ onConflict: "vendor_id" }
 	);
@@ -149,25 +176,43 @@ export async function saveCredential(vendorId: string, rawKey: string): Promise<
  */
 export async function credentialFor(
 	vendorId: string
-): Promise<{ key: string; livemode: boolean } | null> {
+): Promise<{ key: string; livemode: boolean; productIds: string[] } | null> {
 	const db = dbClient();
 	if (!db || !stripeEncryptionConfigured()) return null;
 
 	const { data } = await db
 		.from("vendor_stripe_credentials")
-		.select("encrypted_key, livemode")
+		.select("encrypted_key, livemode, product_ids")
 		.eq("vendor_id", vendorId)
 		.maybeSingle();
 
 	if (!data) return null;
 	try {
-		return { key: decryptStripeKey(data.encrypted_key), livemode: data.livemode };
+		return { key: decryptStripeKey(data.encrypted_key), livemode: data.livemode, productIds: data.product_ids ?? [] };
 	} catch {
 		// Wrong key, or a rotated one. Null rather than throwing: the caller's
 		// job is to report "reconnect Stripe", not to crash a dashboard render.
 		console.error("[letterprove:stripe] could not decrypt stored credential");
 		return null;
 	}
+}
+
+/** Stripe product ids look like `prod_…`. Anything else is refused rather than stored. */
+export const PRODUCT_ID = /^prod_[A-Za-z0-9]+$/;
+
+/**
+ * Replace which Stripe products count as this vendor's product. Empty means
+ * every product. Takes effect at the next sync, which replaces evidence
+ * wholesale, so narrowing the scope can only remove evidence, never strand it.
+ */
+export async function setProductScope(vendorId: string, productIds: string[]): Promise<boolean> {
+	const db = dbClient();
+	if (!db) return false;
+	const { error } = await db
+		.from("vendor_stripe_credentials")
+		.update({ product_ids: [...new Set(productIds)].sort() })
+		.eq("vendor_id", vendorId);
+	return !error;
 }
 
 /**

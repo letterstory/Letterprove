@@ -34,7 +34,7 @@
  */
 
 import { classifyDomain } from "@/lib/identity/domains";
-import type { PaidInvoiceIndex } from "./fetch";
+import type { PaidInvoiceIndex, SettledInvoice } from "./fetch";
 
 /** The subset of a Stripe subscription this mapping needs. */
 export interface StripeSubscriptionLike {
@@ -43,11 +43,10 @@ export interface StripeSubscriptionLike {
 	/** Unix seconds, as Stripe sends them. */
 	start_date: number;
 	currency: string;
-	/** Recurring amount in the currency's minor unit, per interval. */
-	amount: number | null;
+	/** The billing interval every item shares. Null when unreadable. */
 	interval: "day" | "week" | "month" | "year" | null;
-	/** The billing email on the attached customer, if any. */
-	customerEmail: string | null;
+	/** The Stripe products this subscription bills, for the vendor's product scope. */
+	productIds: string[];
 }
 
 export interface DomainPayment {
@@ -61,17 +60,26 @@ export interface DomainPayment {
 }
 
 export type UnmatchedReason =
-	/** No email on the customer at all — nothing to join on. */
+	/** No billing email frozen on the settled invoices — nothing to join on. */
 	| "no_email"
+	/**
+	 * The settled invoices were billed to more than one domain. The billed
+	 * identity is the one thing a vendor could move onto a bigger company, so
+	 * a subscription whose invoices disagree about who paid is not attributed
+	 * to any of them.
+	 */
+	| "email_changed"
+	/** None of this subscription's products are in the vendor's chosen scope. */
+	| "out_of_scope"
 	/** A person's mailbox, or otherwise not a company identity. */
 	| "not_a_company"
 	/** A company domain, but one this vendor has never been observed serving. */
 	| "no_observed_traffic"
 	/** Mixed currencies for one domain — see below. */
 	| "currency_conflict"
-	/** No readable recurring price or interval, so there is no figure to publish. */
+	/** No readable billing interval, so there is no monthly figure to publish. */
 	| "no_recurring_amount"
-	/** The recurring price is zero, or rounds to nothing per month. */
+	/** What settled for the scoped products rounds to nothing per month. */
 	| "zero_amount"
 	/** Nothing has ever settled against this subscription. */
 	| "no_settled_invoice"
@@ -165,6 +173,15 @@ export interface MapOptions {
 	 * file keeps having no dependency of its own on the clock.
 	 */
 	now?: number;
+
+	/**
+	 * The Stripe products that are this vendor's product. Null or empty means
+	 * every product in the account counts — the behaviour before scopes
+	 * existed, and the reason the connection reports which mode it is in.
+	 * With a scope, a subscription counts only for the money its invoices
+	 * spent on in-scope products.
+	 */
+	productScope?: ReadonlySet<string> | null;
 }
 
 /**
@@ -182,43 +199,85 @@ export function mapPayments(
 	subscriptions: StripeSubscriptionLike[],
 	observedDomains: ReadonlySet<string>,
 	paidInvoices: PaidInvoiceIndex,
-	{ allowUnobserved = false, vendorDomain, now = Date.now() }: MapOptions = {}
+	{ allowUnobserved = false, vendorDomain, now = Date.now(), productScope = null }: MapOptions = {}
 ): PaymentMapping {
 	const unmatched: UnmatchedPayment[] = [];
-	const byDomain = new Map<string, StripeSubscriptionLike[]>();
+	const byDomain = new Map<string, Attributed[]>();
+	const scope = productScope && productScope.size > 0 ? productScope : null;
 
 	for (const sub of subscriptions) {
 		if (!PAYING_STATUSES.has(sub.status)) continue;
 
-		if (!sub.customerEmail) {
-			unmatched.push({ subscriptionId: sub.id, reason: "no_email", domain: null });
+		if (scope && !sub.productIds.some((id) => scope.has(id))) {
+			unmatched.push({ subscriptionId: sub.id, reason: "out_of_scope", domain: null });
+			continue;
+		}
+		if (sub.interval === null) {
+			unmatched.push({ subscriptionId: sub.id, reason: "no_recurring_amount", domain: null });
 			continue;
 		}
 
-		const domain = domainOfEmail(sub.customerEmail);
-		if (!domain || classifyDomain(domain, vendorDomain).kind !== "company") {
+		// Money first now, because the billed identity lives ON the settled
+		// invoices: there is no domain to check until we know which invoices
+		// count.
+		const payments = paidInvoices.get(sub.id);
+		const invoices = (payments?.settled ?? [])
+			.map((invoice) => ({ invoice, amount: scopedAmount(invoice, scope) }))
+			.filter((x) => x.amount > 0);
+		if (invoices.length === 0) {
+			// Named apart from "nothing settled" because the vendor can see the
+			// invoice marked paid in their own dashboard, and being told we saw no
+			// payment at all would read as our bug rather than as our rule.
+			const reason = payments && payments.markedPaidCount > 0 ? "paid_out_of_band" : "no_settled_invoice";
+			unmatched.push({ subscriptionId: sub.id, reason, domain: null });
+			continue;
+		}
+
+		const domains = new Set(invoices.map((x) => (x.invoice.customerEmail ? domainOfEmail(x.invoice.customerEmail) : null)));
+		if (domains.has(null)) {
+			unmatched.push({ subscriptionId: sub.id, reason: domains.size > 1 ? "email_changed" : "no_email", domain: null });
+			continue;
+		}
+		if (domains.size > 1) {
+			unmatched.push({ subscriptionId: sub.id, reason: "email_changed", domain: null });
+			continue;
+		}
+		const domain = [...domains][0] as string;
+
+		if (classifyDomain(domain, vendorDomain).kind !== "company") {
 			unmatched.push({ subscriptionId: sub.id, reason: "not_a_company", domain });
 			continue;
 		}
-
 		if (!allowUnobserved && !observedDomains.has(domain)) {
 			unmatched.push({ subscriptionId: sub.id, reason: "no_observed_traffic", domain });
 			continue;
 		}
 
-		// The domain checks come first because they are the ones a vendor can
-		// act on, and "we could not attach this payment to a customer" is only
-		// useful once you know which customer it was. The money checks below
-		// decide whether there is a payment at all.
-		const refusal = moneyRefusal(sub, paidInvoices, now);
-		if (refusal) {
-			unmatched.push({ subscriptionId: sub.id, reason: refusal, domain });
+		const last = invoices[invoices.length - 1];
+		const window = SETTLED_WITHIN_DAYS[sub.interval] * DAY_MS;
+		if (now - last.invoice.paidAt * 1000 > window) {
+			unmatched.push({ subscriptionId: sub.id, reason: "payment_lapsed", domain });
 			continue;
 		}
 
+		// The monthly figure comes from the most recent invoice for a full
+		// period. A proration invoice (`subscription_update`) covers a fraction
+		// of a period and would misstate the run rate either way, so it is used
+		// only when nothing else has settled.
+		const periodic = [...invoices].reverse().find((x) => FULL_PERIOD.has(x.invoice.billingReason ?? "")) ?? last;
+		const attributed: Attributed = {
+			sub,
+			currency: periodic.invoice.currency || sub.currency.toLowerCase(),
+			// Divide, don't multiply: the constant is months PER interval, so a
+			// yearly amount spread over 12 months is amount/12. Getting this
+			// backwards published annual contracts at twelve times their value.
+			monthly: periodic.amount / MONTHS_PER_INTERVAL[sub.interval],
+			firstSettledAt: invoices[0].invoice.paidAt,
+		};
+
 		const existing = byDomain.get(domain);
-		if (existing) existing.push(sub);
-		else byDomain.set(domain, [sub]);
+		if (existing) existing.push(attributed);
+		else byDomain.set(domain, [attributed]);
 	}
 
 	const matched: DomainPayment[] = [];
@@ -226,44 +285,27 @@ export function mapPayments(
 		// One domain paying in two currencies cannot be summed into a single
 		// figure without inventing an exchange rate, and inventing one would
 		// put a made-up number inside a signed attestation. Refuse instead.
-		const currencies = new Set(subs.map((s) => s.currency.toLowerCase()));
+		const currencies = new Set(subs.map((s) => s.currency));
 		if (currencies.size > 1) {
-			for (const s of subs) {
-				unmatched.push({ subscriptionId: s.id, reason: "currency_conflict", domain });
-			}
+			for (const s of subs) unmatched.push({ subscriptionId: s.sub.id, reason: "currency_conflict", domain });
 			continue;
 		}
-
-		const monthlyAmount = subs.reduce((sum, s) => {
-			// Non-null by construction: moneyRefusal rejected anything else.
-			const months = MONTHS_PER_INTERVAL[s.interval as string];
-			// Divide, don't multiply: the constant is months PER interval, so a
-			// yearly amount spread over 12 months is amount/12. Getting this
-			// backwards published annual contracts at twelve times their value,
-			// and annual is the normal enterprise shape — caught by the yearly
-			// case in map.test.ts, which is why that test exists.
-			return sum + (s.amount as number) / months;
-		}, 0);
 
 		// Rounded to the minor unit: a fraction of a cent is not a real amount,
 		// and it would differ between runs of the same data. A sum that rounds
 		// to nothing is refused rather than published, because `contract_monthly:
 		// 0` inside a signed body reads as the claim "pays nothing".
-		const rounded = Math.round(monthlyAmount);
+		const rounded = Math.round(subs.reduce((sum, s) => sum + s.monthly, 0));
 		if (rounded < 1) {
-			for (const s of subs) unmatched.push({ subscriptionId: s.id, reason: "zero_amount", domain });
+			for (const s of subs) unmatched.push({ subscriptionId: s.sub.id, reason: "zero_amount", domain });
 			continue;
 		}
 
-		// `since` comes from settled invoices, never from `start_date`. Every
-		// subscription here has at least one, because moneyRefusal required it.
-		const firstSettled = Math.min(
-			...subs.map((s) => paidInvoices.get(s.id)?.firstSettledAt ?? Number.POSITIVE_INFINITY)
-		);
-
 		matched.push({
 			domain,
-			since: new Date(firstSettled * 1000).toISOString(),
+			// From settled invoices, never from `start_date`, which the account
+			// owner can backdate to any year they choose.
+			since: new Date(Math.min(...subs.map((s) => s.firstSettledAt)) * 1000).toISOString(),
 			currency: [...currencies][0],
 			monthlyAmount: rounded,
 			subscriptionCount: subs.length,
@@ -274,42 +316,39 @@ export function mapPayments(
 	return { matched, unmatched };
 }
 
+interface Attributed {
+	sub: StripeSubscriptionLike;
+	currency: string;
+	monthly: number;
+	firstSettledAt: number;
+}
+
+/** Invoices that bill a whole period, as opposed to a mid-period proration. */
+const FULL_PERIOD = new Set(["subscription_cycle", "subscription_create"]);
+
 /**
- * Why this subscription is not evidence that money moved, or null when it is.
+ * How much of what settled on this invoice was spent on in-scope products.
  *
- * WHY THE FLOOR IS SIMPLY "ABOVE ZERO". A larger floor is tempting and it is
- * the wrong instrument. Any figure above zero is denominated in some currency's
- * minor unit, and this file refuses to invent exchange rates elsewhere (see the
- * currency conflict above), so "at least 5000" would mean one thing in USD and
- * something else entirely in JPY or COP. It would also exclude genuinely small
- * customers, who are real customers. And it would not stop anybody: a vendor
- * willing to forge a tier-3 claim will happily pay themselves $50. What makes
- * forgery expensive is the requirement below — a live-mode Stripe account,
- * which Stripe identity-verifies, and a real charge through a real processor
- * that leaves a record in the vendor's own books. The amount is not the barrier;
- * the settled charge is.
+ * Without a scope, all of it. With one, the in-scope lines' share of the
+ * invoice's net line total, applied to what actually settled — so coupons,
+ * credits and tax land proportionally rather than being attributed to
+ * whichever line happens to be first. An invoice whose lines Stripe truncated
+ * cannot be apportioned honestly, so under a scope it counts for nothing:
+ * the hidden lines might all be out of scope.
+ *
+ * WHY THE FLOOR IS SIMPLY "ABOVE ZERO". Any figure above zero is denominated
+ * in some currency's minor unit, and this file refuses to invent exchange
+ * rates (see the currency conflict above), so a larger floor would mean one
+ * thing in USD and another in JPY. What makes forgery expensive is not the
+ * amount but the requirement that real money settled through a real processor
+ * in a live-mode account.
  */
-function moneyRefusal(
-	sub: StripeSubscriptionLike,
-	paidInvoices: PaidInvoiceIndex,
-	now: number
-): UnmatchedReason | null {
-	if (sub.amount === null || sub.interval === null) return "no_recurring_amount";
-	// The cheap half of the fix. A $0 recurring price goes to `active` the
-	// moment it is created, with no payment method and no money, so without
-	// this a free subscription published as a paid one.
-	if (sub.amount <= 0) return "zero_amount";
-
-	const settled = paidInvoices.get(sub.id);
-	if (!settled || settled.settledCount === 0 || settled.lastSettledAt === null) {
-		// Named apart from "nothing settled" because the vendor can see the
-		// invoice marked paid in their own dashboard, and being told we saw no
-		// payment at all would read as our bug rather than as our rule.
-		return settled && settled.markedPaidCount > 0 ? "paid_out_of_band" : "no_settled_invoice";
-	}
-
-	const window = SETTLED_WITHIN_DAYS[sub.interval] * DAY_MS;
-	if (now - settled.lastSettledAt * 1000 > window) return "payment_lapsed";
-
-	return null;
+function scopedAmount(invoice: SettledInvoice, scope: ReadonlySet<string> | null): number {
+	if (!scope) return invoice.amountPaid;
+	if (!invoice.linesComplete) return 0;
+	const total = invoice.lines.reduce((sum, line) => sum + line.net, 0);
+	if (total <= 0) return 0;
+	const inScope = invoice.lines.reduce((sum, line) => sum + (line.product && scope.has(line.product) ? line.net : 0), 0);
+	if (inScope <= 0) return 0;
+	return invoice.amountPaid * Math.min(1, inScope / total);
 }

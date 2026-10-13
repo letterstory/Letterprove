@@ -20,11 +20,21 @@ vi.mock("@/lib/vendors/verification", () => ({
 	verificationMessage: vi.fn(() => "checked"),
 }));
 vi.mock("@/lib/support/slack", () => ({ sendSupportMessage: vi.fn() }));
-vi.mock("@/lib/stripe/credentials", () => ({
+vi.mock("@/lib/stripe/credentials", async () => ({
+	// The real classifier: refusing an sk_ key before any network call is
+	// behaviour under test, not plumbing.
+	classifyKey: (await vi.importActual<typeof import("@/lib/stripe/credentials")>("@/lib/stripe/credentials")).classifyKey,
 	saveCredential: vi.fn(),
 	connectionFor: vi.fn(),
+	credentialFor: vi.fn(),
+	setProductScope: vi.fn(),
 	disconnect: vi.fn(),
 }));
+vi.mock("@/lib/stripe/account", async () => ({
+	checkStripeAccount: vi.fn(),
+	overrideOf: (await vi.importActual<typeof import("@/lib/stripe/account")>("@/lib/stripe/account")).overrideOf,
+}));
+vi.mock("@/lib/stripe/fetch", () => ({ fetchProducts: vi.fn() }));
 vi.mock("@/lib/stripe/sync", () => ({ syncVendorPayments: vi.fn() }));
 vi.mock("@/lib/attest/payment-evidence", () => ({ paymentEvidenceCount: vi.fn() }));
 vi.mock("@/lib/staff/billing", () => ({
@@ -65,6 +75,7 @@ function principal(capabilities: OAuthPrincipal["capabilities"], vendorId: strin
 // shape above), so `from` branches on the table name. Defaults to a
 // resolvable vendor row; tests that need "not found" set vendorRow = null.
 let vendorRow: {
+	id?: string;
 	key?: string;
 	slug?: string;
 	name?: string;
@@ -1139,9 +1150,16 @@ describe("the Stripe tools", () => {
 		connectedAt: "2026-09-01T00:00:00.000Z",
 		lastSyncedAt: null,
 		lastSyncError: null,
+		productIds: [] as string[],
+		stripeAccountId: "acct_1",
+		stripeAccountDomains: ["acme.com"],
+		accountCheckedAt: "2026-09-01T00:00:00.000Z",
 	};
+	const ACCOUNT = { id: "acct_1", domains: ["acme.com"] };
 
 	beforeEach(async () => {
+		const { checkStripeAccount } = await import("@/lib/stripe/account");
+		vi.mocked(checkStripeAccount).mockResolvedValue({ ok: true, account: ACCOUNT, overridden: false });
 		const { saveCredential, connectionFor, disconnect } = await import("@/lib/stripe/credentials");
 		const { paymentEvidenceCount } = await import("@/lib/attest/payment-evidence");
 		const { syncVendorPayments } = await import("@/lib/stripe/sync");
@@ -1188,13 +1206,13 @@ describe("the Stripe tools", () => {
 			principal(["vendor:write"], "v1"),
 		);
 
-		expect(saveCredential).toHaveBeenCalledWith("v1", LIVE_KEY);
+		expect(saveCredential).toHaveBeenCalledWith("v1", LIVE_KEY, { productIds: undefined, account: ACCOUNT });
 	});
 
-	it("connect_stripe refuses an unrestricted key without echoing it", async () => {
+	it("connect_stripe refuses an unrestricted key without echoing it, or sending it anywhere", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { saveCredential } = await import("@/lib/stripe/credentials");
-		vi.mocked(saveCredential).mockResolvedValue({ ok: false, reason: "unrestricted" });
+		const { checkStripeAccount } = await import("@/lib/stripe/account");
 
 		const outcome = await dispatchTool(
 			"connect_stripe",
@@ -1208,6 +1226,147 @@ describe("the Stripe tools", () => {
 		expect(outcome.result.body.error).toBe("unrestricted");
 		// The detail explains what to do instead. It must not quote what arrived.
 		expect(JSON.stringify(outcome.result.body)).not.toContain("secretmaterial");
+		// Refused before the account read: an sk_ key never leaves the server.
+		expect(checkStripeAccount).not.toHaveBeenCalled();
+		expect(saveCredential).not.toHaveBeenCalled();
+	});
+
+	it("connect_stripe refuses, and stores nothing, when the key belongs to another business's account", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { saveCredential } = await import("@/lib/stripe/credentials");
+		const { checkStripeAccount } = await import("@/lib/stripe/account");
+		vi.mocked(checkStripeAccount).mockResolvedValue({
+			ok: false,
+			error: "stripe_account_domain_mismatch",
+			detail: "This Stripe account (acct_9) describes itself as elsewhere.com, not acme.com",
+			account: { id: "acct_9", domains: ["elsewhere.com"] },
+		});
+
+		const outcome = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY }, principal(["vendor:write"]));
+
+		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected refusal");
+		expect(outcome.result.status).toBe(409);
+		expect(outcome.result.body.error).toBe("stripe_account_domain_mismatch");
+		expect(saveCredential).not.toHaveBeenCalled();
+		expect(JSON.stringify(outcome)).not.toContain("secretmaterial");
+	});
+
+	it("connect_stripe names the missing Accounts permission", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { checkStripeAccount } = await import("@/lib/stripe/account");
+		vi.mocked(checkStripeAccount).mockResolvedValue({
+			ok: false,
+			error: "stripe_account_permission_missing",
+			detail: "Add Accounts: Read (connected_account_read) to the key",
+		});
+
+		const outcome = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY }, principal(["vendor:write"]));
+
+		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected refusal");
+		expect(outcome.result.status).toBe(400);
+		expect(outcome.result.body.detail).toMatch(/connected_account_read/);
+	});
+
+	it("connect_stripe stores a product scope given with the key, and refuses one that isn't product ids", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { saveCredential } = await import("@/lib/stripe/credentials");
+
+		await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY, product_ids: ["prod_b", "prod_a", "prod_a"] }, principal(["vendor:write"]));
+		expect(saveCredential).toHaveBeenCalledWith("v1", LIVE_KEY, { productIds: ["prod_a", "prod_b"], account: ACCOUNT });
+
+		const bad = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY, product_ids: ["price_1"] }, principal(["vendor:write"]));
+		expect(bad.kind === "result" && !bad.result.ok && bad.result.body.error).toBe("invalid_product_ids");
+	});
+
+	it("set_stripe_scope narrows which products count and reports the scope back", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { setProductScope, connectionFor } = await import("@/lib/stripe/credentials");
+		vi.mocked(setProductScope).mockResolvedValue(true);
+		vi.mocked(connectionFor).mockResolvedValue({ ...CONNECTION, productIds: ["prod_core"] });
+
+		const outcome = await dispatchTool("set_stripe_scope", { product_ids: ["prod_core"] }, principal(["vendor:write"]));
+
+		expect(setProductScope).toHaveBeenCalledWith("v1", ["prod_core"]);
+		expect(outcome.kind === "result" && outcome.result.ok && (outcome.result.body as { product_scope: unknown }).product_scope).toEqual({
+			mode: "selected",
+			product_ids: ["prod_core"],
+		});
+	});
+
+	it("set_stripe_scope refuses before a key is connected", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { connectionFor, setProductScope } = await import("@/lib/stripe/credentials");
+		vi.mocked(connectionFor).mockResolvedValue(null);
+
+		const outcome = await dispatchTool("set_stripe_scope", { product_ids: [] }, principal(["vendor:write"]));
+
+		expect(outcome.kind === "result" && !outcome.result.ok && outcome.result.status).toBe(409);
+		expect(setProductScope).not.toHaveBeenCalled();
+	});
+
+	it("list_stripe_products lists the account's products with the current scope", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { credentialFor } = await import("@/lib/stripe/credentials");
+		const { fetchProducts } = await import("@/lib/stripe/fetch");
+		vi.mocked(credentialFor).mockResolvedValue({ key: LIVE_KEY, livemode: true, productIds: [] });
+		vi.mocked(fetchProducts).mockResolvedValue({ ok: true, namesAvailable: true, products: [{ id: "prod_a", name: "Alpha", recurring: true }] });
+
+		const outcome = await dispatchTool("list_stripe_products", {}, principal(["vendor:read"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: {
+				ok: true,
+				body: {
+					products: [{ id: "prod_a", name: "Alpha", recurring: true }],
+					names_available: true,
+					product_scope: { mode: "all_products", product_ids: [] },
+				},
+			},
+		});
+		expect(JSON.stringify(outcome)).not.toContain("secretmaterial");
+	});
+
+	it("set_stripe_account_override is staff-only", async () => {
+		const { dispatchTool } = await import("./registry");
+
+		expect(
+			await dispatchTool("set_stripe_account_override", { vendor: "acme", reason: "Parent company bills" }, principal(["vendor:write"])),
+		).toEqual({ kind: "denied", capability: "staff:write" });
+		process.env.STAFF_USER_IDS = "someone-else";
+		expect(
+			await dispatchTool("set_stripe_account_override", { vendor: "acme", reason: "Parent company bills" }, principal(["staff:write"], null)),
+		).toEqual({ kind: "denied", capability: "staff:write" });
+	});
+
+	it("set_stripe_account_override approves the account last read for the vendor, with who and why", async () => {
+		const { dispatchTool } = await import("./registry");
+		vendorRow = { id: "v1", slug: "acme" };
+
+		const outcome = await dispatchTool(
+			"set_stripe_account_override",
+			{ vendor: "acme", reason: "Parent company Acme Holdings bills for this product" },
+			principal(["staff:write"], null),
+		);
+
+		expect(vendorUpdates[0]).toMatchObject({
+			stripe_account_override_account_id: "acct_1",
+			stripe_account_override_by: "u1",
+			stripe_account_override_reason: "Parent company Acme Holdings bills for this product",
+		});
+		expect(outcome.kind === "result" && outcome.result.ok && (outcome.result.body as { override: { stripe_account_id: string } }).override.stripe_account_id).toBe("acct_1");
+	});
+
+	it("set_stripe_account_override requires a reason, and clears on request", async () => {
+		const { dispatchTool } = await import("./registry");
+		vendorRow = { id: "v1", slug: "acme" };
+
+		const noReason = await dispatchTool("set_stripe_account_override", { vendor: "acme" }, principal(["staff:write"], null));
+		expect(noReason.kind === "result" && !noReason.result.ok && noReason.result.body.error).toBe("reason_required");
+
+		const cleared = await dispatchTool("set_stripe_account_override", { vendor: "acme", clear: true }, principal(["staff:write"], null));
+		expect(cleared).toEqual({ kind: "result", result: { ok: true, body: { vendor: "acme", override: null } } });
+		expect(vendorUpdates.at(-1)).toMatchObject({ stripe_account_override_account_id: null });
 	});
 
 	it("connect_stripe refuses, rather than stores, when encryption is not configured", async () => {

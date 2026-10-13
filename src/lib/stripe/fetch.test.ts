@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
+import { fetchAccount, fetchPaidInvoices, fetchProducts, fetchSubscriptions } from "./fetch";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -13,13 +13,13 @@ function sub(id: string, extra: Record<string, unknown> = {}) {
 		status: "active",
 		start_date: 1_770_000_000,
 		currency: "usd",
-		items: { data: [{ price: { unit_amount: 400000, recurring: { interval: "month" } } }] },
+		items: { data: [{ price: { product: "prod_core", unit_amount: 400000, recurring: { interval: "month" } } }] },
 		customer: { email: "billing@acme.com" },
 		...extra,
 	};
 }
 
-function mockJson(pages: { data: unknown[]; has_more?: boolean }[]) {
+function mockJson(pages: ({ data: unknown[]; has_more?: boolean } | Record<string, unknown>)[]) {
 	const calls: URL[] = [];
 	let i = 0;
 	globalThis.fetch = vi.fn(async (url: string | URL) => {
@@ -45,24 +45,23 @@ describe("fetchSubscriptions", () => {
 					status: "active",
 					start_date: 1_770_000_000,
 					currency: "usd",
-					amount: 400000,
 					interval: "month",
-					customerEmail: "billing@acme.com",
+					productIds: ["prod_core"],
 				},
 			],
 		});
 	});
 
-	it("asks Stripe for every status and expands the customer", async () => {
+	it("asks Stripe for every status and never reads the editable customer record", async () => {
 		// status=all because map.ts owns the judgement about what counts as
-		// payment; pre-filtering here would hide that decision in a query string.
-		// The expand saves one request per subscription.
+		// payment. No customer expansion: the billed identity comes from each
+		// settled invoice's frozen email, never the customer's current one.
 		const calls = mockJson([{ data: [] }]);
 
 		await fetchSubscriptions("sk_test_x");
 
 		expect(calls[0].searchParams.get("status")).toBe("all");
-		expect(calls[0].searchParams.get("expand[]")).toBe("data.customer");
+		expect(calls[0].searchParams.get("expand[]")).toBeNull();
 	});
 
 	it("pins the API version, so a Stripe rollout cannot change what amounts mean", async () => {
@@ -121,22 +120,34 @@ describe("fetchSubscriptions", () => {
 		expect(result).toEqual({ ok: false, status: 0, error: "Couldn't reach Stripe." });
 	});
 
-	it("yields a null amount rather than zero for an unreadable price", async () => {
-		// map.ts tolerates null and counts nothing; a zero would publish the
-		// customer as paying nothing, which is a different and false claim.
+	it("yields a null interval and no products for a subscription with no readable items", async () => {
 		mockJson([{ data: [sub("sub_1", { items: { data: [] } })] }]);
 
 		const result = await fetchSubscriptions("sk_test_x");
 
-		expect(result.ok && result.subscriptions[0]).toMatchObject({ amount: null, interval: null });
+		expect(result.ok && result.subscriptions[0]).toMatchObject({ interval: null, productIds: [] });
 	});
 
-	it("yields a null email when the customer was not expanded", async () => {
-		mockJson([{ data: [sub("sub_1", { customer: "cus_123" })] }]);
+	it("collects every product a subscription bills, once each", async () => {
+		mockJson([
+			{
+				data: [
+					sub("sub_1", {
+						items: {
+							data: [
+								{ price: { product: "prod_a", recurring: { interval: "month" } } },
+								{ price: { product: { id: "prod_b" }, recurring: { interval: "month" } } },
+								{ price: { product: "prod_a", recurring: { interval: "month" } } },
+							],
+						},
+					}),
+				],
+			},
+		]);
 
 		const result = await fetchSubscriptions("sk_test_x");
 
-		expect(result.ok && result.subscriptions[0].customerEmail).toBeNull();
+		expect(result.ok && result.subscriptions[0].productIds).toEqual(["prod_a", "prod_b"]);
 	});
 
 	it("ignores an interval Stripe adds later rather than mis-scaling it", async () => {
@@ -154,10 +165,14 @@ function invoice(id: string, extra: Record<string, unknown> = {}) {
 	return {
 		id,
 		amount_paid: 400000,
+		currency: "usd",
+		customer_email: "billing@acme.com",
+		billing_reason: "subscription_cycle",
 		created: 1_770_000_000,
 		status_transitions: { paid_at: 1_770_000_100 },
 		subscription: "sub_1",
 		charge: "ch_1",
+		lines: { data: [{ amount: 400000, price: { product: "prod_core" } }], has_more: false },
 		...extra,
 	};
 }
@@ -169,18 +184,51 @@ describe("fetchPaidInvoices", () => {
 	 * Tier 3 claims the second and used to read only the first.
 	 */
 
-	it("indexes settled invoices by the subscription they paid for", async () => {
-		mockJson([{ data: [invoice("in_1"), invoice("in_2", { status_transitions: { paid_at: 1_780_000_000 } })] }]);
+	it("indexes settled invoices by the subscription they paid for, oldest first", async () => {
+		mockJson([{ data: [invoice("in_2", { status_transitions: { paid_at: 1_780_000_000 } }), invoice("in_1")] }]);
 
 		const result = await fetchPaidInvoices("rk_live_x");
 
-		expect(result.ok).toBe(true);
 		const payments = result.ok && result.payments.get("sub_1");
-		expect(payments).toEqual({
-			firstSettledAt: 1_770_000_100,
-			lastSettledAt: 1_780_000_000,
-			settledCount: 2,
-			markedPaidCount: 0,
+		expect(payments && payments.settled.map((i) => i.id)).toEqual(["in_1", "in_2"]);
+		expect(payments && payments.markedPaidCount).toBe(0);
+		expect(payments && payments.settled[0]).toEqual({
+			id: "in_1",
+			paidAt: 1_770_000_100,
+			amountPaid: 400000,
+			currency: "usd",
+			customerEmail: "billing@acme.com",
+			billingReason: "subscription_cycle",
+			lines: [{ product: "prod_core", net: 400000 }],
+			linesComplete: true,
+		});
+	});
+
+	it("records the frozen invoice email, what was paid less tax, and each line's net after discounts", async () => {
+		mockJson([
+			{
+				data: [
+					invoice("in_1", {
+						amount_paid: 55000,
+						tax: 5000,
+						customer_email: "AP@Acme.com",
+						lines: {
+							data: [{ amount: 100000, price: { product: "prod_core" }, discount_amounts: [{ amount: 50000 }] }],
+							has_more: true,
+						},
+					}),
+				],
+			},
+		]);
+
+		const result = await fetchPaidInvoices("rk_live_x");
+		const settled = result.ok ? result.payments.get("sub_1")?.settled[0] : undefined;
+
+		expect(settled).toMatchObject({
+			amountPaid: 50000,
+			customerEmail: "AP@Acme.com",
+			lines: [{ product: "prod_core", net: 50000 }],
+			linesComplete: false,
 		});
 	});
 
@@ -199,7 +247,7 @@ describe("fetchPaidInvoices", () => {
 
 		const result = await fetchPaidInvoices("rk_live_x");
 
-		expect(result.ok && result.payments.get("sub_1")).toMatchObject({ settledCount: 0, markedPaidCount: 1 });
+		expect(result.ok && result.payments.get("sub_1")).toEqual({ settled: [], markedPaidCount: 1 });
 	});
 
 	it("does not count an invoice marked paid with no processor behind it", async () => {
@@ -208,11 +256,7 @@ describe("fetchPaidInvoices", () => {
 
 		const result = await fetchPaidInvoices("rk_live_x");
 
-		expect(result.ok && result.payments.get("sub_1")).toMatchObject({
-			settledCount: 0,
-			markedPaidCount: 1,
-			firstSettledAt: null,
-		});
+		expect(result.ok && result.payments.get("sub_1")).toEqual({ settled: [], markedPaidCount: 1 });
 	});
 
 	it("accepts a payment intent where there is no charge", async () => {
@@ -220,7 +264,7 @@ describe("fetchPaidInvoices", () => {
 
 		const result = await fetchPaidInvoices("rk_live_x");
 
-		expect(result.ok && result.payments.get("sub_1")).toMatchObject({ settledCount: 1 });
+		expect(result.ok && result.payments.get("sub_1")?.settled).toHaveLength(1);
 	});
 
 	it("ignores an invoice with no subscription behind it", async () => {
@@ -242,7 +286,7 @@ describe("fetchPaidInvoices", () => {
 
 		const result = await fetchPaidInvoices("rk_live_x");
 
-		expect(result.ok && result.payments.get("sub_9")).toMatchObject({ settledCount: 1 });
+		expect(result.ok && result.payments.get("sub_9")?.settled).toHaveLength(1);
 	});
 
 	it("names a permission refusal apart from a bad key", async () => {
@@ -286,5 +330,67 @@ describe("fetchPaidInvoices", () => {
 		}) as never;
 
 		expect(await fetchPaidInvoices("rk_live_x")).toMatchObject({ ok: false, status: 0, scope: false });
+	});
+});
+
+describe("fetchAccount", () => {
+	it("collects the domains the account publishes about itself", async () => {
+		const calls = mockJson([
+			{
+				id: "acct_1",
+				email: "founder@Acme.com",
+				business_profile: { url: "https://www.acme.com/", support_email: "help@support.acme.com", support_url: null },
+			} as never,
+		]);
+
+		const result = await fetchAccount("rk_live_x");
+
+		expect(calls[0].pathname).toBe("/v1/account");
+		expect(result).toEqual({ ok: true, account: { id: "acct_1", domains: ["acme.com", "support.acme.com"] } });
+	});
+
+	it("names a missing Accounts permission as a scope problem", async () => {
+		globalThis.fetch = vi.fn(async () => ({
+			ok: false,
+			status: 403,
+			json: async () => ({ error: { message: "Enabling Accounts Read ('connected_account_read') permissions on this key would allow this request" } }),
+		})) as never;
+
+		expect(await fetchAccount("rk_live_x")).toMatchObject({ ok: false, scope: true });
+	});
+});
+
+describe("fetchProducts", () => {
+	it("lists active products and marks the ones with a recurring price", async () => {
+		mockJson([
+			{ data: [{ id: "prod_b", name: "Beta" }, { id: "prod_a", name: "Alpha" }] },
+			{ data: [{ id: "price_1", product: "prod_a" }] },
+		]);
+
+		const result = await fetchProducts("rk_live_x");
+
+		expect(result).toEqual({
+			ok: true,
+			namesAvailable: true,
+			products: [
+				{ id: "prod_a", name: "Alpha", recurring: true },
+				{ id: "prod_b", name: "Beta", recurring: false },
+			],
+		});
+	});
+
+	it("falls back to the products seen on subscriptions when the key cannot read Products", async () => {
+		let call = 0;
+		globalThis.fetch = vi.fn(async () => {
+			call++;
+			if (call === 1) {
+				return { ok: false, status: 403, json: async () => ({ error: { message: "does not have the required permissions" } }) } as Response;
+			}
+			return { ok: true, json: async () => ({ data: [sub("sub_1")] }) } as Response;
+		}) as never;
+
+		const result = await fetchProducts("rk_live_x");
+
+		expect(result).toEqual({ ok: true, namesAvailable: false, products: [{ id: "prod_core", name: null, recurring: true }] });
 	});
 });
