@@ -12,6 +12,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import { readAllRows } from "@/lib/db/read-all";
 import { evaluateAccount, overrideOf } from "@/lib/stripe/account";
 import { acceptedHosts } from "@/lib/vendors/hosts";
 
@@ -122,4 +123,70 @@ export async function observedSince(vendorSlug: string): Promise<string | null> 
 		.maybeSingle();
 	if (error || !data?.published_at) return null;
 	return new Date(data.published_at as string).toISOString();
+}
+
+/** Older PostHog history reads as absent: the sync runs daily, so two days is one missed run. */
+export const MAX_HISTORY_AGE_MS = 48 * 60 * 60 * 1000;
+
+export interface ReportedHistory {
+	/** Where the history came from. Only PostHog today. */
+	source: "posthog";
+	/** Company domains the vendor's PostHog has identified people from. */
+	companies: number;
+	/** When PostHog first saw a person from any of them, ISO. */
+	since: string | null;
+	/** Of those, how many had activity in PostHog in the last 30 days. */
+	active_companies_30d: number;
+	/** Of the companies Letterprove observed this window, how many PostHog also knows. */
+	observed_also_reported: number;
+}
+
+/**
+ * The vendor's own analytics history, as counts. VENDOR-REPORTED: the vendor
+ * controls its PostHog project, so this is published under `vendor_stated`
+ * and never moves the tier. Null unless PostHog is connected, synced in the
+ * last two days, and the project sees the vendor's own hosts.
+ *
+ * `observed_also_reported` is the one figure here that is not purely the
+ * vendor's word: it is how far their history agrees with what Letterprove
+ * observed itself.
+ */
+export async function reportedHistory(vendorId: string, observed: readonly string[]): Promise<ReportedHistory | null> {
+	const db = dbClient();
+	if (!db) return null;
+	const { data: cred, error: credError } = await db
+		.from("vendor_posthog_credentials")
+		.select("last_synced_at, host_events_30d")
+		.eq("vendor_id", vendorId)
+		.maybeSingle();
+	if (credError || !cred?.last_synced_at || !(Number(cred.host_events_30d) > 0)) return null;
+	if (Date.now() - Date.parse(cred.last_synced_at as string) > MAX_HISTORY_AGE_MS) return null;
+
+	let rows: { domain: string; first_seen: string | null; active_people_30d: number }[];
+	try {
+		rows = await readAllRows(`posthog history for ${vendorId}`, (from, to) =>
+			db
+				.from("vendor_posthog_domains")
+				.select("domain, first_seen, active_people_30d")
+				.eq("vendor_id", vendorId)
+				.order("domain", { ascending: true })
+				.range(from, to),
+		);
+	} catch {
+		return null;
+	}
+	if (rows.length === 0) return null;
+
+	const wanted = new Set(observed);
+	const since = rows
+		.map((r) => (r.first_seen ? Date.parse(r.first_seen) : NaN))
+		.filter((t) => Number.isFinite(t))
+		.sort((a, b) => a - b)[0];
+	return {
+		source: "posthog",
+		companies: rows.length,
+		since: since ? new Date(since).toISOString() : null,
+		active_companies_30d: rows.filter((r) => Number(r.active_people_30d) > 0).length,
+		observed_also_reported: rows.filter((r) => wanted.has(r.domain)).length,
+	};
 }

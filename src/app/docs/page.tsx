@@ -416,6 +416,16 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 <code>logins</code>: measured totals behind those companies.
               </li>
               <li>
+                <code>reported_history</code>, when present: company history
+                from the vendor&apos;s own PostHog project, read only, as
+                counts (<code>companies</code>, <code>since</code>,{" "}
+                <code>active_companies_30d</code>,{" "}
+                <code>observed_also_reported</code>). It is listed in{" "}
+                <code>vendor_stated</code> because the vendor controls that
+                project, and it never moves the tier. It is published only while
+                the project records traffic on the vendor&apos;s own hosts.
+              </li>
+              <li>
                 <code>observed_since</code>: when Letterprove first observed
                 usage for this vendor, from its own frozen record.
               </li>

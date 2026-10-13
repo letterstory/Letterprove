@@ -55,6 +55,16 @@ import { syncVendorPayments } from "@/lib/stripe/sync";
 import { checkStripeAccount, overrideOf } from "@/lib/stripe/account";
 import { fetchProducts } from "@/lib/stripe/fetch";
 import { paymentEvidenceCount } from "@/lib/attest/payment-evidence";
+import {
+	classifyKey as classifyPosthogKey,
+	disconnect as disconnectPosthogCredential,
+	normalizeApiHost,
+	saveCredential as savePosthogCredential,
+	type KeyRejection as PosthogKeyRejection,
+} from "@/lib/posthog/credentials";
+import { hogql } from "@/lib/posthog/fetch";
+import { posthogStatus } from "@/lib/posthog/status";
+import { syncVendorPosthog } from "@/lib/posthog/sync";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
 
@@ -210,6 +220,19 @@ const KEY_REFUSAL: Record<KeyRejection | "not_configured" | "storage_unavailable
 	not_configured: {
 		status: 503,
 		detail: "This deployment has no Stripe encryption key, so it refuses to store a credential it could only store in the clear. Nothing was written.",
+	},
+	storage_unavailable: { status: 503, detail: "Storage is unavailable. Nothing was written." },
+};
+
+const POSTHOG_KEY_REFUSAL: Record<PosthogKeyRejection | "not_configured" | "storage_unavailable", { status: number; detail: string }> = {
+	project_key: {
+		status: 400,
+		detail: "That is a project API key (phc_). It is public and can only send events. Create a personal API key (phx_) with the query:read scope instead. Nothing was stored.",
+	},
+	malformed: { status: 400, detail: "That is not a PostHog personal API key. It should begin with phx_. Nothing was stored." },
+	not_configured: {
+		status: 503,
+		detail: "This deployment has no PostHog encryption key, so it refuses to store a credential it could only store in the clear. Nothing was written.",
 	},
 	storage_unavailable: { status: 503, detail: "Storage is unavailable. Nothing was written." },
 };
@@ -1336,6 +1359,109 @@ export const TOOLS: BoundTool[] = [
 			// Idempotent by construction: a delete that matched nothing is a
 			// success, so a caller retrying after a network blip is not told the
 			// disconnect failed.
+			return { ok: true, body: { disconnected: true } };
+		},
+	}),
+	/*
+	 * ----------------------------------------------------------------- posthog
+	 *
+	 * READ ONLY. The vendor's own analytics, read for history: which company
+	 * domains it has identified people from, and since when. Published as
+	 * `reported_history`, labelled vendor-reported, never moving the tier.
+	 * connect_posthog takes a secret, so the rules on connect_stripe apply:
+	 * POST body only, never echoed, refused rather than stored in the clear.
+	 */
+	defineTool({
+		name: "connect_posthog",
+		description:
+			"Connect the caller's vendor's PostHog project, read only, so the companies it has identified people from can appear on the proof as vendor-reported history. Args: personal_api_key (phx_, query:read scope), project_id, api_host (optional: us.posthog.com default, eu.posthog.com, or self-hosted). The key is checked with one read before it is stored and is never returned. Letterprove never sends events to PostHog.",
+		capability: "vendor:write",
+		inputSchema: S.connectPosthogInput,
+		outputSchema: S.connectPosthogOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const record = asRecord(args);
+			const submitted = record.personal_api_key;
+			if (typeof submitted !== "string" || !submitted.trim()) {
+				return { ok: false, status: 400, body: { error: "personal_api_key is required" } };
+			}
+			const projectId = typeof record.project_id === "string" ? record.project_id.trim() : String(record.project_id ?? "");
+			if (!/^\d{1,12}$/.test(projectId)) {
+				return { ok: false, status: 400, body: { error: "invalid_project_id", detail: "project_id is the number in your PostHog project URL." } };
+			}
+			const apiHost = normalizeApiHost(typeof record.api_host === "string" ? record.api_host : undefined);
+			if (!apiHost) {
+				return { ok: false, status: 400, body: { error: "invalid_api_host", detail: "Use us.posthog.com, eu.posthog.com, or your self-hosted https host." } };
+			}
+			const classified = classifyPosthogKey(submitted);
+			if (!classified.ok) {
+				const refusal = POSTHOG_KEY_REFUSAL[classified.reason];
+				return { ok: false, status: refusal.status, body: { error: classified.reason, detail: refusal.detail } };
+			}
+			// One read before storing, so a wrong key or project is refused now
+			// rather than discovered by tomorrow's sync.
+			const probe = await hogql({ key: classified.key, apiHost, projectId }, "SELECT 1");
+			if (!probe.ok) {
+				return { ok: false, status: probe.auth ? 400 : 502, body: { error: probe.auth ? "posthog_key_refused" : "posthog_unreachable", detail: probe.error } };
+			}
+			const saved = await savePosthogCredential(vendorId, submitted, { apiHost, projectId });
+			if (!saved.ok) {
+				const refusal = POSTHOG_KEY_REFUSAL[saved.reason];
+				return { ok: false, status: refusal.status, body: { error: saved.reason, detail: refusal.detail } };
+			}
+			// First read now, so the vendor sees what PostHog knows straight away.
+			// A failure here is recorded on the connection, not a failed connect.
+			await syncVendorPosthog(vendorId);
+			const status = await posthogStatus(vendorId);
+			if (!status) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: status };
+		},
+	}),
+	defineTool({
+		name: "get_posthog_connection",
+		description:
+			"The caller's vendor's PostHog connection: which project, when it last synced, how many companies it has identified and since when, and whether that history is on the proof (and why not). No args. Never returns key material.",
+		capability: "vendor:read",
+		inputSchema: S.getPosthogConnectionInput,
+		outputSchema: S.getPosthogConnectionOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const status = await posthogStatus(vendorId);
+			return { ok: true, body: status ?? { connected: false } };
+		},
+	}),
+	defineTool({
+		name: "sync_posthog",
+		description:
+			"Re-read the caller's vendor's PostHog project now and replace the stored history. No args. Also runs daily on its own.",
+		capability: "vendor:write",
+		inputSchema: S.syncPosthogInput,
+		outputSchema: S.syncPosthogOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!(await posthogStatus(vendorId))) {
+				return { ok: false, status: 409, body: { error: "posthog_not_connected", detail: "Connect PostHog first with connect_posthog." } };
+			}
+			const result = await syncVendorPosthog(vendorId);
+			if (!result.ok) return { ok: false, status: 502, body: { error: "posthog_sync_failed", detail: result.error } };
+			const status = await posthogStatus(vendorId);
+			if (!status) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: status };
+		},
+	}),
+	defineTool({
+		name: "disconnect_posthog",
+		description: "Remove the caller's vendor's PostHog key and all history read with it. No args. The proof stops showing reported_history at the next snapshot.",
+		capability: "vendor:write",
+		inputSchema: S.disconnectPosthogInput,
+		outputSchema: S.disconnectPosthogOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!(await disconnectPosthogCredential(vendorId))) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			return { ok: true, body: { disconnected: true } };
 		},
 	}),

@@ -163,6 +163,41 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								? ` Payments count from ${a.payment_scope.products} of ${proof.vendor.name}'s Stripe products, the ones it says are this product.`
 								: ""}
 						</p>
+						{a.reported_history && (
+							<>
+								<h2 className="mt-14 text-sm font-semibold tracking-widest text-fog uppercase">
+									History {proof.vendor.name} reports · from its own PostHog
+								</h2>
+								<dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-3">
+									<Tile
+										label="Companies in its analytics"
+										value={a.reported_history.companies.toLocaleString("en-US")}
+										sub={
+											a.reported_history.since ? (
+												<span className="text-xs text-fog">
+													since <AttestedAt iso={a.reported_history.since} />
+												</span>
+											) : undefined
+										}
+									/>
+									<Tile
+										label="Active in the last 30 days"
+										value={a.reported_history.active_companies_30d.toLocaleString("en-US")}
+									/>
+									<Tile
+										label="Also observed by Letterprove"
+										value={`${a.reported_history.observed_also_reported} of ${a.companies_observed}`}
+									/>
+								</dl>
+								<p className="mt-4 text-sm text-fog">
+									Vendor-reported. {proof.vendor.name} controls its PostHog project, so these figures are its
+									statement, not Letterprove&apos;s evidence, and they never change the tier. Letterprove reads
+									the project directly (read only) and publishes it only while that project records traffic on{" "}
+									{a.domain ?? proof.vendor.domain}. The last figure is how far that history agrees with what
+									Letterprove observed itself.
+								</p>
+							</>
+						)}
 					</>
 				)}
 

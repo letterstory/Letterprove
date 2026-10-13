@@ -22,6 +22,7 @@ vi.mock("./vendor-evidence", () => ({
 	hostCount: vi.fn(async () => 0),
 	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
 	observedSince: vi.fn(async () => null),
+	reportedHistory: vi.fn(async () => null),
 }));
 vi.mock("@/lib/fixtures/vendors", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/fixtures/vendors")>()),
@@ -294,6 +295,20 @@ describe("aggregateBody", () => {
 			expect(b.domain_verified_since).toBeNull();
 			expect(b.hosts).toBe(0);
 			expect(b.tier).toBe(0);
+		});
+
+		it("publishes PostHog history as vendor-stated, without moving the tier", async () => {
+			await withRollups([row("globex.com", 2)], false);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			const history = { source: "posthog" as const, companies: 400, since: "2023-01-01T00:00:00.000Z", active_companies_30d: 90, observed_also_reported: 1 };
+			vi.mocked(ev.reportedHistory).mockResolvedValueOnce(history);
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.reported_history).toEqual(history);
+			expect(b.vendor_stated).toEqual(["reported_history"]);
+			expect(b.tier).toBe(1);
+			expect(b.companies_observed).toBe(1);
 		});
 	});
 
