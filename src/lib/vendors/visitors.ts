@@ -86,14 +86,14 @@ export function statusOf(row: Pick<VisitorRow, "visitor_identification_enabled" 
 			enabled,
 			tracking: "active",
 			registered_domains: registered,
-			message: "On. Your Letterprove script now loads Maverick on your site, and visitors show up here as they are identified.",
+			message: "On. Your Letterprove script now identifies visitors on your site, and they show up here as they are identified.",
 		};
 	}
 	return {
 		enabled,
 		tracking: "pending_registration",
 		registered_domains: registered,
-		message: "On, but your domain isn't registered with Maverick yet, so nobody is being identified. Turning it on again retries.",
+		message: "On, but your domain isn't registered for visitor identification yet, so nobody is being identified. Turning it on again retries.",
 	};
 }
 
