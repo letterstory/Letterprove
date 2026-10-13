@@ -132,8 +132,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						<dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-4">
 							<Tile label="Companies observed" value={String(a.companies_observed)} />
 							<Tile
-								label="Paying via Stripe"
-								value={String(a.paying_companies ?? 0)}
+								label="Payments"
+								value={a.tier === 3 ? "Corroborated by Stripe" : binding ? "Not yet corroborated" : "Stripe not connected"}
 								sub={
 									a.paying_since ? (
 										<span className="text-xs text-fog">
@@ -152,7 +152,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						<p className="mt-4 text-sm text-fog">
 							<span className="font-semibold text-mint">Tier {a.tier}.</span>{" "}
 							{a.tier === 3
-								? `Companies were observed signing in on ${proof.vendor.name}'s DNS-proven domain, and ${a.paying_companies} of them paid a settled invoice in its own Stripe account.`
+								? `Companies were observed signing in on ${proof.vendor.name}'s DNS-proven domain, and payments from them are corroborated by settled invoices in its own Stripe account.`
 								: a.tier === 1
 									? `Companies were observed signing in on ${proof.vendor.name}'s DNS-proven domain. None is corroborated by Stripe yet.`
 									: "Nothing is corroborated yet: no sign-ins observed, or the domain isn't proven by DNS."}{" "}

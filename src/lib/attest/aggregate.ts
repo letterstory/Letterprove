@@ -18,7 +18,7 @@
  *
  * WHAT IT DELIBERATELY DOES NOT SAY. Not "customers" — "companies observed".
  * A session from `someone@acme.com` proves a person at Acme used the product;
- * it does not prove Acme buys it. `paying_companies` is the subset where a
+ * it does not prove Acme buys it. Tier 3 says that at least one of them is a
  * settled invoice in the vendor's own Stripe account says Acme does.
  *
  * Unattributable domains are counted and excluded, never silently dropped:
@@ -90,12 +90,12 @@ export interface AggregateBody {
 	/** How that was established: its published domains match, or staff approved it. Null when not bound. */
 	stripe_binding?: StripeBinding | null;
 	/**
-	 * Observed companies with a settled, in-scope invoice in the vendor's own
-	 * Stripe account. A count, never names. 0 when Stripe isn't connected or
-	 * isn't bound. Absent before 2026-10-13.
+	 * RETIRED 2026-10-13 (README decision 35): no longer published. Snapshots
+	 * signed between #182 and that change carry it; they still verify. The
+	 * count stays private to the vendor; tier 3 says payment is corroborated.
 	 */
 	paying_companies?: number;
-	/** Earliest settled invoice among `paying_companies`, or null. */
+	/** Earliest settled invoice from an observed company in the bound Stripe account, or null. */
 	paying_since?: string | null;
 	/** When Letterprove first observed usage for this vendor, from its own frozen record. */
 	observed_since?: string | null;
@@ -156,8 +156,9 @@ interface Totals {
 
 /**
  * What the evidence supports for the vendor claim: the strongest evidence
- * class present, with `paying_companies` published beside it so "tier 3" is
- * never read as "every company pays" (README decision 30).
+ * class present. Tier 3 says "at least one observed company pays"; how many is
+ * private to the vendor since decision 35, so the copy around it must never
+ * read as "every company pays".
  *
  *   3 — companies observed on a verified domain, and at least one of them
  *       pays through the vendor's own (bound) Stripe account;
@@ -274,7 +275,6 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		companies_observed: attributable.length,
 		...summed,
 		domains_excluded: excluded.length,
-		paying_companies: paying.companies,
 		paying_since: paying.since,
 		observed_since: firstObserved ?? (observed ? now : null),
 		tier: earnedAggregateTier(observed, vendor.domainVerified, paying.companies),

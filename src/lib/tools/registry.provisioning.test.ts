@@ -30,6 +30,7 @@ const promoteDomain = vi.fn();
 vi.mock("@/lib/staff/promote", () => ({ promoteDomain: (s: string, d: string) => promoteDomain(s, d) }));
 
 const vendorProof = vi.fn();
+vi.mock("@/lib/tiers/report", () => ({ tierReport: async () => ({ paying: 3 }) }));
 vi.mock("@/lib/attest/proofs", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/attest/proofs")>();
 	return { ...actual, vendorProof: (slug: string) => vendorProof(slug) };
@@ -110,7 +111,7 @@ describe("get_proof_summary", () => {
 		vendorProof.mockResolvedValue({
 			vendor: { slug: "acme", name: "Acme", domain: "acme.com", category: "c" },
 			customers: [],
-			summary: { tier: 3, companies_observed: 52, paying_companies: 3, sessions_30d: 106, last_attested: "2026-08-24T18:05:45.953Z" },
+			summary: { tier: 3, companies_observed: 52, payment_corroborated: true, sessions_30d: 106, last_attested: "2026-08-24T18:05:45.953Z" },
 		});
 		const o = await dispatchTool("get_proof_summary", {}, service({ vendorId: "v1" }));
 		expect(vendorProof).toHaveBeenCalledWith("acme");

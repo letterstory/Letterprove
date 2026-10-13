@@ -37,8 +37,8 @@ export interface VendorProof {
 		tier: Tier;
 		/** Company domains observed signing in over the last 30 days. */
 		companies_observed: number;
-		/** Of those, how many pay through the vendor's own Stripe account. */
-		paying_companies: number;
+		/** Whether payment from observed companies is corroborated by the bound Stripe account (tier 3). The count is private (decision 35). */
+		payment_corroborated: boolean;
 		sessions_30d: number;
 		/** When the newest attestation was signed, or "" before the first one. */
 		last_attested: string;
@@ -61,7 +61,7 @@ function toProof(
 		summary: {
 			tier: attestation?.tier ?? 0,
 			companies_observed: attestation?.companies_observed ?? 0,
-			paying_companies: attestation?.paying_companies ?? 0,
+			payment_corroborated: attestation?.tier === 3,
 			sessions_30d: attestation?.sessions ?? 0,
 			last_attested: attestation?.published_at ?? "",
 		},
