@@ -101,3 +101,17 @@ describe("publicLogos", () => {
 		expect(statusOf("a.com", new Set(), new Set(["a.com"]))).toBe("not_observed");
 	});
 });
+
+describe("logo wall on a separately proven domain", () => {
+	it("accepts a page on a domain the vendor proved with its TXT record", async () => {
+		const { parseLogoWallInput, provenLogoDomain } = await import("./logo-wall");
+		const resolver = async (host: string) => (host === "_letterprove.letter.dev" ? [["letterprove-site-verification=tok"]] : []);
+		const proven = await provenLogoDomain("www.letter.dev", "tok", resolver as never);
+		expect(proven).toBe("letter.dev");
+		const ok = parseLogoWallInput({ page_url: "https://letter.dev/", companies: [{ name: "Acme", domain: "acme.com" }] }, "letterstory.com", new Set(), new Set([proven!]));
+		expect(ok.ok).toBe(true);
+		const no = parseLogoWallInput({ page_url: "https://letter.dev/", companies: [{ name: "Acme", domain: "acme.com" }] }, "letterstory.com", new Set());
+		expect(no).toMatchObject({ ok: false, error: "page_not_yours" });
+		expect(await provenLogoDomain("evil.dev", "tok", resolver as never)).toBeNull();
+	});
+});
