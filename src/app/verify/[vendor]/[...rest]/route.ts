@@ -132,7 +132,16 @@ const HIDDEN_LABELS: Record<string, string> = {
 	payment_details: "payment details",
 	observed_since: "first observed date",
 	hosts: "extra hosts",
+	growth: "companies per month",
+	retention: "retention",
 };
+
+/** "2026-10" → "Oct 2026". */
+function monthLabel(month: string): string {
+	const [y, m] = month.split("-").map(Number);
+	if (!y || !m) return month;
+	return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+}
 
 function summary(f: Record<string, unknown>, vendor: string): string {
 	const tier = typeof f.tier === "number" ? f.tier : null;
@@ -174,7 +183,7 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 		tile("Payments, via Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
 		(typeof f.sessions === "number" ? tile("Sessions", num(f.sessions)) : "") +
 		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
-		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope?.mode === "selected" ? ` Payments count from ${num(scope.products)} products the vendor chose.` : ""}</p></section>`;
+		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope && tier === 3 ? (scope.mode === "selected" ? " Payments verified by Stripe, for the products the vendor chose." : " Payments verified by Stripe.") : ""}</p></section>`;
 
 	html += `<section><h2>Who the vendor is</h2><dl class="facts">` +
 		`<div><dt>Domain, proven by DNS</dt><dd>${esc(fmtDay(f.domain_verified_since) ? `since ${fmtDay(f.domain_verified_since)}` : "not proven")}</dd></div>` +
@@ -190,6 +199,16 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
 	}
 
+	const growth = Array.isArray(f.growth) ? (f.growth as { month: string; companies_observed: number }[]) : [];
+	if (growth.length > 0) {
+		html += `<section><h2>Companies observed per month</h2><div class="tiles">` +
+			growth.map((g) => tile(monthLabel(g.month), num(g.companies_observed))).join("") +
+			`</div><p class="muted">The highest number of companies observed in any signed snapshot that month.</p></section>`;
+	}
+	const retention = f.retention as { cohort?: number; retained?: number } | undefined;
+	if (retention && typeof retention.cohort === "number" && typeof retention.retained === "number") {
+		html += `<section><h2>Retention</h2><p><strong>Of ${num(retention.cohort)} companies active 60 days ago, ${num(retention.retained)} are still signing in.</strong></p><p class="muted">Active 60 days ago means observed in the 30 days ending 60 days ago. Still signing in means observed in the last 30 days.</p></section>`;
+	}
 
 	const hidden = Array.isArray(f.hidden_by_vendor) ? (f.hidden_by_vendor as string[]) : [];
 	if (hidden.length > 0) {

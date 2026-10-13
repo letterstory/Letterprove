@@ -10,7 +10,7 @@
 
 import { dbClient } from "@/lib/db/client";
 
-export const DISPLAY_SECTIONS = ["sessions", "reported_history", "logos", "payment_details", "observed_since", "hosts"] as const;
+export const DISPLAY_SECTIONS = ["sessions", "reported_history", "logos", "payment_details", "observed_since", "hosts", "growth", "retention"] as const;
 export type DisplaySection = (typeof DISPLAY_SECTIONS)[number];
 export type DisplaySettings = Record<DisplaySection, boolean>;
 
@@ -24,6 +24,8 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
 	payment_details: true,
 	observed_since: true,
 	hosts: true,
+	growth: true,
+	retention: true,
 };
 
 /** Normalize whatever is stored: unknown keys dropped, absent keys shown. */
