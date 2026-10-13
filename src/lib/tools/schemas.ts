@@ -883,6 +883,10 @@ const displaySections = z.object({
 	hosts: z.boolean(),
 	growth: z.boolean().describe("Companies observed per month, last six months."),
 	retention: z.boolean().describe("Of the companies active 60 days ago, how many are still signing in."),
+	paying_count: z
+		.enum(["hidden", "signed_in", "all"])
+		.describe("Whether the proof states how many companies pay. hidden (default); signed_in: companies seen signing in that paid through your Stripe; all: every company that paid through your Stripe."),
+	logo_names: z.boolean().describe("Name the verified companies from your logo wall, or show only the counts."),
 });
 
 export const getProofDisplayInput = empty;

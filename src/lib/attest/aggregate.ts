@@ -141,6 +141,13 @@ export interface AggregateBody {
 	 */
 	logos?: PublicLogos;
 	/**
+	 * How many companies pay, when the vendor opted to show it (display
+	 * `paying_count`). scope "signed_in": observed companies with a settled
+	 * invoice in the bound Stripe; "all": every company with a settled,
+	 * in-scope invoice there. Absent by default and when Stripe isn't bound.
+	 */
+	paying?: { scope: "signed_in" | "all"; companies: number };
+	/**
 	 * Which of the vendor's Stripe products its payment corroboration counts,
 	 * present only while Stripe is connected. Counts, never product names: a
 	 * reader is owed whether "pays" means everything the account bills or only
@@ -316,6 +323,15 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		vendor.domainVerified ? growthFor(vendor.slug) : Promise.resolve(null),
 		vendor.domainVerified ? retentionFor(vendor.slug, vendor.domain) : Promise.resolve(null),
 	]);
+	// The paying figure is opt-in and only from a bound account.
+	let payingFigure: { scope: "signed_in" | "all"; companies: number } | null = null;
+	if (binding && vendor.id && vendor.domainVerified && display.paying_count !== "hidden") {
+		payingFigure =
+			display.paying_count === "signed_in"
+				? { scope: "signed_in", companies: paying.companies }
+				: { scope: "all", companies: partitionDomains(await stripePayingDomains(vendor.id), vendor.domain).attributable.length };
+	}
+	if (logos && !display.logo_names) delete logos.companies;
 	return applyDisplay({
 		vendor: vendor.slug,
 		kind: "aggregate",
@@ -334,6 +350,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		vendor_stated: history ? ["reported_history"] : [],
 		...(history ? { reported_history: history } : {}),
 		...(logos ? { logos } : {}),
+		...(payingFigure ? { paying: payingFigure } : {}),
 		...(scope ? { payment_scope: scope } : {}),
 		...(growth ? { growth } : {}),
 		...(retention ? { retention } : {}),

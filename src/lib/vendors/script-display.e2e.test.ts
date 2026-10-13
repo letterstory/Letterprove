@@ -101,7 +101,7 @@ describe("proof display", () => {
 	it("shows everything by default and lists what is always shown", async () => {
 		const res = await tool("get_proof_display", {}, VERIFIED);
 		expect(res.body).toEqual({
-			sections: { sessions: true, reported_history: true, logos: true, payment_details: true, observed_since: true, hosts: true, growth: true, retention: true },
+			sections: { sessions: true, reported_history: true, logos: true, payment_details: true, observed_since: true, hosts: true, growth: true, retention: true, paying_count: "hidden", logo_names: true },
 			locked: ["domain", "tier", "companies_observed", "verify"],
 		});
 	});

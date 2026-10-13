@@ -12,7 +12,21 @@ import { dbClient } from "@/lib/db/client";
 
 export const DISPLAY_SECTIONS = ["sessions", "reported_history", "logos", "payment_details", "observed_since", "hosts", "growth", "retention"] as const;
 export type DisplaySection = (typeof DISPLAY_SECTIONS)[number];
-export type DisplaySettings = Record<DisplaySection, boolean>;
+/**
+ * Whether the proof states how many companies pay, and which count:
+ * "signed_in" = observed companies with a settled invoice in the bound Stripe
+ * account; "all" = every company with a settled, in-scope invoice there,
+ * observed or not. Hidden by default: it is an opt-in figure, not a section,
+ * so it is never listed in hidden_by_vendor.
+ */
+export const PAYING_COUNT = ["hidden", "signed_in", "all"] as const;
+export type PayingCount = (typeof PAYING_COUNT)[number];
+
+export type DisplaySettings = Record<DisplaySection, boolean> & {
+	paying_count: PayingCount;
+	/** Name the verified companies on the logo wall, or show only the counts. */
+	logo_names: boolean;
+};
 
 /** Always shown, whatever the vendor picks. */
 export const LOCKED = ["domain", "tier", "companies_observed", "verify"] as const;
@@ -26,6 +40,8 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
 	hosts: true,
 	growth: true,
 	retention: true,
+	paying_count: "hidden",
+	logo_names: true,
 };
 
 /** Normalize whatever is stored: unknown keys dropped, absent keys shown. */
@@ -36,6 +52,11 @@ export function normalizeDisplay(raw: unknown): DisplaySettings {
 			const v = (raw as Record<string, unknown>)[k];
 			if (typeof v === "boolean") out[k] = v;
 		}
+		const r = raw as Record<string, unknown>;
+		if (typeof r.paying_count === "string" && (PAYING_COUNT as readonly string[]).includes(r.paying_count)) {
+			out.paying_count = r.paying_count as PayingCount;
+		}
+		if (typeof r.logo_names === "boolean") out.logo_names = r.logo_names;
 	}
 	return out;
 }
@@ -66,6 +87,8 @@ export async function setDisplay(vendorId: string, patch: Partial<DisplaySetting
 	for (const k of DISPLAY_SECTIONS) {
 		if (typeof patch[k] === "boolean") next[k] = patch[k] as boolean;
 	}
+	if (patch.paying_count && (PAYING_COUNT as readonly string[]).includes(patch.paying_count)) next.paying_count = patch.paying_count;
+	if (typeof patch.logo_names === "boolean") next.logo_names = patch.logo_names;
 	const { error } = await db.from("vendors").update({ proof_display: next }).eq("id", vendorId);
 	return error ? null : next;
 }

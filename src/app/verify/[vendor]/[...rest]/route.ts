@@ -5,6 +5,7 @@ import { jwksResult } from "@/lib/attest/keys";
 import type { SignedAttestation } from "@/lib/attest/types";
 import { methodUrl } from "@/lib/attest/method";
 import { verifyAttestation } from "@/lib/attest/verify";
+import { logoSplit, payingSentence, type PayingFigure } from "@/lib/attest/paying-copy";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
 import { parseVerifyPath, snapshotStamp, VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { proofHtml, proofJson, retiredCustomerProof } from "@/lib/http";
@@ -173,9 +174,12 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 		const items = (logos.companies ?? [])
 			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
 			.join("");
-		const payingLogos = (logos.companies ?? []).filter((c) => c.status === "paying").length;
-		const activeLogos = (logos.companies ?? []).filter((c) => c.status === "active").length;
+		const { paying: payingLogos, active: activeLogos } = logoSplit(logos as Parameters<typeof logoSplit>[0]);
 		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified: ${num(payingLogos)} paying (verified by Stripe), ${num(activeLogos)} signed in in the last 30 days</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
+	}
+	const payingFig = f.paying as PayingFigure | undefined;
+	if (payingFig && typeof payingFig.companies === "number") {
+		html += `<section><h2>Paying</h2><p><strong>${esc(payingSentence(payingFig))}.</strong></p></section>`;
 	}
 
 	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
