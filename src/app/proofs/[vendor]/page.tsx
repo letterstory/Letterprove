@@ -99,6 +99,36 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					</p>
 				) : (
 					<>
+						{a.logos && (
+							<>
+								<h2 className="mt-10 text-sm font-semibold tracking-widest text-fog uppercase">
+									Logos on {hostOf(a.logos.page)}
+								</h2>
+								<p className="mt-4 text-sm text-fog">
+									<span className="font-semibold text-mint">
+										{a.logos.verified} of {a.logos.on_page} logos verified.
+									</span>{" "}
+									Checked against{" "}
+									<a className="break-all text-mint hover:underline" href={a.logos.page}>
+										{a.logos.page.replace(/^https:\/\//, "")}
+									</a>
+									. Verified means Letterprove observed the company signing in, or Stripe verified it pays.
+								</p>
+								{a.logos.companies.length > 0 && (
+									<ul className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-2">
+										{a.logos.companies.map((c) => (
+											<li key={c.domain} className="flex items-baseline justify-between gap-3 bg-panel px-4 py-3">
+												<span className="font-medium">{c.name}</span>
+												<span className="text-xs text-fog">
+													{c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}
+												</span>
+											</li>
+										))}
+									</ul>
+								)}
+							</>
+						)}
+
 						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Identity</h2>
 						<dl className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-3">
 							<Tile
@@ -175,36 +205,6 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								</div>
 							)}
 						</dl>
-
-						{a.logos && (
-							<>
-								<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">
-									Logos on {hostOf(a.logos.page)}
-								</h2>
-								<p className="mt-4 text-sm text-fog">
-									<span className="font-semibold text-mint">
-										{a.logos.verified} of {a.logos.on_page} logos verified.
-									</span>{" "}
-									Checked against{" "}
-									<a className="break-all text-mint hover:underline" href={a.logos.page}>
-										{a.logos.page.replace(/^https:\/\//, "")}
-									</a>
-									. Verified means Letterprove observed the company signing in.
-								</p>
-								{a.logos.companies.length > 0 && (
-									<ul className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-2">
-										{a.logos.companies.map((c) => (
-											<li key={c.domain} className="flex items-baseline justify-between gap-3 bg-panel px-4 py-3">
-												<span className="font-medium">{c.name}</span>
-												<span className="text-xs text-fog">
-													{c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}
-												</span>
-											</li>
-										))}
-									</ul>
-								)}
-							</>
-						)}
 
 						{a.reported_history && (
 							<>

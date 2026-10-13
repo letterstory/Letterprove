@@ -145,6 +145,14 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	if (tier !== null) html += `<p class="tierline"><span class="tier">Tier ${tier}</span> ${esc(tierLine)}</p>`;
 	html += `</section>`;
 
+	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
+	if (logos && typeof logos.verified === "number" && typeof logos.page === "string") {
+		const items = (logos.companies ?? [])
+			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
+			.join("");
+		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
+	}
+
 	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
 		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
 		tile("Payments, via Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
@@ -166,13 +174,6 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
 	}
 
-	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
-	if (logos && typeof logos.verified === "number" && typeof logos.page === "string") {
-		const items = (logos.companies ?? [])
-			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
-			.join("");
-		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
-	}
 
 	if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {
 		html += `<section><h2>Disclosure</h2><p class="disclosure">${esc(f.issuer_affiliation)}</p></section>`;
