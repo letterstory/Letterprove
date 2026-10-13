@@ -7,6 +7,10 @@ import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { MAX_OBSERVE_BODY_BYTES, readBodyWithLimit } from "@/lib/telemetry/request-limits";
 import { hostnameOf, normalizeDomain } from "@/lib/vendors/domain";
 import { acceptedHosts, isOriginAccepted } from "@/lib/vendors/hosts";
+import { collectorModules, recordServerSeen } from "@/lib/vendors/script";
+
+/** Keys whose server snippet this instance has already stamped as seen. */
+const serverSeenKeys = new Set<string>();
 
 /** Per source IP. A vendor's server forwards every request it serves, so this is far above /v1/observe's. */
 const AGENT_VISIT_IP_LIMIT_PER_MINUTE = 3000;
@@ -62,26 +66,41 @@ export async function POST(request: Request) {
 				userAgent: typeof record.ua === "string" ? record.ua : null,
 				signatureAgent: typeof record.signature_agent === "string" ? record.signature_agent : null,
 			});
+	// The first forward of ANY kind proves the server snippet is installed, so
+	// the app can say so before an agent ever visits. One vendor lookup per key
+	// per instance; after that a browser costs nothing again.
+	if (!clientMode && !serverSeenKeys.has(record.k)) {
+		serverSeenKeys.add(record.k);
+		const seen = await findVendorByKey(record.k);
+		if (seen?.id) await recordServerSeen(seen.id);
+	}
+
 	// A browser, or nothing recognisable. Not counted, and decided before any
-	// database read, because this is most of what a vendor's server forwards.
+	// further database read, because this is most of what a vendor's server forwards.
 	if (!visit) return collectorResponse(false);
 
 	const vendor = await findVendorByKey(record.k);
 	if (!vendor) return collectorResponse(false);
+	// The vendor turned agent visitors off in its script (src/lib/vendors/script.ts).
+	if (!(await collectorModules(vendor.id)).agent_visitors) return collectorResponse(false);
 	if (!(await oauthRateLimit(`agent-visit:vendor:${vendor.slug}`, 60, AGENT_VISIT_VENDOR_LIMIT_PER_MINUTE))) {
 		return collectorResponse(false);
 	}
-	// Same door as /v1/observe: nothing is collected for a domain nobody has
-	// proven, so an impersonator accumulates nothing before the owner arrives.
-	if (!vendor.domainVerified) return collectorResponse(false);
-
 	const host = clientMode
 		? hostnameOf(request.headers.get("origin"))
 		: typeof record.host === "string" && record.host.trim()
 			? normalizeDomain(record.host)
 			: vendor.domain;
 	if (!host) return collectorResponse(false);
-	if (!isOriginAccepted(host, vendor.domain, await acceptedHosts(vendor.id))) return collectorResponse(false);
+	// Before DNS proof, agent visits are still counted, but only for the
+	// vendor's own domain and hosts beneath it. Unlike /v1/observe this is
+	// private analytics the vendor reads about itself and never evidence: it
+	// reaches no attestation, so there is no claim an impersonator could build
+	// up before the owner arrives, and a new vendor sees agents on day one
+	// instead of after a DNS change. Once verified, the usual rule applies: the
+	// verified domain, hosts beneath it, and explicitly proven hosts.
+	const accepted = vendor.domainVerified ? await acceptedHosts(vendor.id) : new Set<string>();
+	if (!isOriginAccepted(host, vendor.domain, accepted)) return collectorResponse(false);
 
 	const ip = clientMode ? clientIp(request.headers) : typeof record.ip === "string" && parseIp(record.ip.trim()) ? record.ip.trim() : null;
 

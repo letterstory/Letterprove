@@ -73,7 +73,9 @@ import { agentKit } from "@/lib/vendors/agent-kit";
 import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
-import { fetchVendorVisitors, setVisitorIdentification } from "@/lib/vendors/visitors";
+import { fetchVendorVisitors, setVisitorIdentification, visitorIdentificationStatus } from "@/lib/vendors/visitors";
+import { scriptModules, scriptStatus, setPlainModules } from "@/lib/vendors/script";
+import { displayFor, LOCKED as LOCKED_DISPLAY, setDisplay } from "@/lib/attest/display";
 
 /**
  * The CLI-controllability seam: every operation a vendor can automate lives
@@ -275,6 +277,38 @@ const ACCOUNT_REFUSAL_STATUS = {
 	stripe_account_domain_mismatch: 409,
 	stripe_account_unreadable: 502,
 } as const;
+
+/** The one answer get_script and set_script_modules give. */
+async function scriptBody(vendorId: string, origin: string) {
+	const db = dbClient();
+	if (!db) return null;
+	const { data: vendor } = await db.from("vendors").select("key, slug, name, domain").eq("id", vendorId).maybeSingle();
+	if (!vendor) return null;
+	const [modules, status, visitors, customDomain] = await Promise.all([
+		scriptModules(vendorId),
+		scriptStatus(vendorId),
+		visitorIdentificationStatus(vendorId),
+		liveCustomDomain(vendor.slug),
+	]);
+	if (!status) return null;
+	const proofUrl = customDomain ? `https://${customDomain}/` : `${VERIFY_ORIGIN}/proofs/${encodeURIComponent(vendor.slug)}`;
+	return {
+		key: vendor.key,
+		snippet: installSnippet(origin, vendor.key),
+		server_snippet: serverSnippets(origin, vendor.key),
+		recipes: installRecipes(origin, vendor.key),
+		agent_kit: agentKit({
+			vendorName: vendor.name,
+			proofUrl,
+			jsonUrl: `${VERIFY_ORIGIN}/attest/${encodeURIComponent(vendor.slug)}.json`,
+			jwksUrl: `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`,
+			siteUrl: `https://${vendor.domain}`,
+		}),
+		modules,
+		status,
+		human_visitors_tracking: visitors?.tracking ?? ("off" as const),
+	};
+}
 
 function productIdsArg(value: unknown): string[] | null {
 	if (value === undefined) return null;
@@ -789,6 +823,103 @@ export const TOOLS: BoundTool[] = [
 					},
 				},
 			};
+		},
+	}),
+	/*
+	 * ---------------------------------------------------------------- scripts
+	 *
+	 * One script per vendor with three modules (src/lib/vendors/script.ts).
+	 * get_script is everything the app's Scripts page needs in one read: the
+	 * tag, the server snippet, recipes, the agent kit, which modules are on,
+	 * and what has been seen so far.
+	 */
+	defineTool({
+		name: "get_script",
+		description:
+			"Your one Letterprove script: the tag, the optional server snippet, install recipes, the agent kit, which modules are on (proofs, agent_visitors, human_visitors), and what has been seen so far (script loaded, server snippet forwarding, first agent visit, first sign-in). Args: none.",
+		capability: "vendor:read",
+		inputSchema: S.getScriptInput,
+		outputSchema: S.getScriptOutput,
+		handler: async (_args, principal, context) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
+			const body = await scriptBody(vendorId, context.origin);
+			if (!body) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body };
+		},
+	}),
+	defineTool({
+		name: "set_script_modules",
+		description:
+			"Turn parts of your script on or off. Args: any of proofs, agent_visitors, human_visitors (booleans). human_visitors needs a DNS-verified domain. The script picks up a change within a few minutes; collection stops at once.",
+		capability: "vendor:write",
+		inputSchema: S.setScriptModulesInput,
+		outputSchema: S.setScriptModulesOutput,
+		handler: async (args, principal, context) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
+			const parsed = S.setScriptModulesInput.safeParse(args ?? {});
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_modules", detail: "proofs, agent_visitors and human_visitors must be true or false." } };
+			const { proofs, agent_visitors, human_visitors } = parsed.data;
+			if (typeof human_visitors === "boolean") {
+				const current = await visitorIdentificationStatus(vendorId);
+				if (!current || current.enabled !== human_visitors) {
+					const result = await setVisitorIdentification(vendorId, human_visitors);
+					if (!result.ok) {
+						const status = result.error === "not_found" ? 404 : result.error === "domain_not_verified" ? 409 : 503;
+						return { ok: false, status, body: { error: result.error, detail: result.detail } };
+					}
+				}
+			}
+			if (!(await setPlainModules(vendorId, { proofs, agent_visitors }))) {
+				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			}
+			const body = await scriptBody(vendorId, context.origin);
+			if (!body) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body };
+		},
+	}),
+	/*
+	 * ----------------------------------------------------------- proof display
+	 *
+	 * Optional proof sections a vendor can hide (src/lib/attest/display.ts).
+	 * The attestation lists what is hidden in hidden_by_vendor.
+	 */
+	defineTool({
+		name: "get_proof_display",
+		description:
+			"Which optional sections show on your public proof (sessions, reported_history, logos, payment_details, observed_since, hosts) and which items are always shown. Args: none.",
+		capability: "vendor:read",
+		inputSchema: S.getProofDisplayInput,
+		outputSchema: S.getProofDisplayOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			return { ok: true, body: { sections: await displayFor(vendorId), locked: [...LOCKED_DISPLAY] } };
+		},
+	}),
+	defineTool({
+		name: "set_proof_display",
+		description:
+			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, payment_details, observed_since, hosts (true shows, false hides). The domain, tier, companies observed and verify link are always shown. Hidden sections are named on the proof as hidden by you. Takes effect at the next hourly snapshot.",
+		capability: "vendor:write",
+		inputSchema: S.setProofDisplayInput,
+		outputSchema: S.setProofDisplayOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const raw = asRecord(args).sections;
+			const lockedTried = raw && typeof raw === "object" ? Object.keys(raw).filter((k) => (LOCKED_DISPLAY as readonly string[]).includes(k)) : [];
+			if (lockedTried.length > 0) {
+				return { ok: false, status: 400, body: { error: "locked_section", detail: `${lockedTried.join(", ")} can't be hidden. The domain, tier, companies observed and verify link are always shown.` } };
+			}
+			const parsed = S.setProofDisplayInput.safeParse(args ?? {});
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_sections", detail: "sections must map section names to true or false." } };
+			const saved = await setDisplay(vendorId, parsed.data.sections);
+			if (!saved) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: { sections: saved, locked: [...LOCKED_DISPLAY] } };
 		},
 	}),
 	defineTool({

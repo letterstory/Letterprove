@@ -27,6 +27,11 @@
  * beacon per page load goes to POST /api/v1/agent-visit carrying only the
  * key, the path and that flag. The server reads who it was from the request's
  * own headers. Ordinary visitors send nothing. See src/lib/agents/visits.ts.
+ * It goes once the config confirms the agent_visitors module is on.
+ *
+ * Modules: the config's `modules` says which parts run. proofs off means
+ * identify/signup/login send nothing; agent_visitors off means no agent
+ * beacon; the visitor pixel loads only when human visitors is on.
  *
  * One opt-in exception to "this script only reports domains": a vendor who
  * turns on visitor identification gets the Maverick pixel loaded on their
@@ -84,6 +89,9 @@
 	// mid-page: a cold cache plus a failed fetch means no collection, not a
 	// guess.
 	var cfg = null;
+	// Which parts of the script run, from the config. Until it answers, and
+	// for an older cached answer without `modules`, everything stays on.
+	var modules = { proofs: true, agent_visitors: true };
 	var ready = false;
 	var failed = false;
 	var queue = [];
@@ -120,6 +128,10 @@
 
 	function send(ev) {
 		if (!domain || cfg === null) return;
+		if (!modules.proofs) {
+			log("proofs are off for this script; " + ev + " not sent");
+			return;
+		}
 		var payload = {
 			k: key,
 			domain: domain,
@@ -170,9 +182,14 @@
 			.then(function (body) {
 				if (!body || typeof body.cfg !== "number") throw new Error("malformed config");
 				cfg = body.cfg;
+				if (body.modules && typeof body.modules === "object") {
+					modules.proofs = body.modules.proofs !== false;
+					modules.agent_visitors = body.modules.agent_visitors !== false;
+				}
 				ready = true;
 				log("key accepted; ready" + (queue.length ? ", sending " + queue.length + " queued event(s)" : ""));
 				flush();
+				if (modules.agent_visitors) agentView();
 				if (body.visitors && body.visitors.pixel) loadVisitorPixel(body.visitors.pixel);
 			})
 			.catch(function (e) {
@@ -309,5 +326,4 @@
 	}
 
 	boot();
-	agentView();
 })();

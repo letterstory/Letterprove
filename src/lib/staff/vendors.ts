@@ -70,7 +70,7 @@ export async function vendorRoster(): Promise<VendorRow[] | null> {
 				// A null aggregate means telemetry could not be read, which is not
 				// the same as publishing nothing — the page distinguishes them.
 				aggregate: agg
-					? { companies: agg.companies_observed, paying: agg.tier === 3 ? 1 : 0, sessions: agg.sessions, tier: agg.tier }
+					? { companies: agg.companies_observed, paying: agg.tier === 3 ? 1 : 0, sessions: agg.sessions ?? 0, tier: agg.tier }
 					: null,
 			};
 		})
