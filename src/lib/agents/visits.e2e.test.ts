@@ -94,9 +94,38 @@ describe("POST /api/v1/agent-visit — server mode", () => {
 		expect(await rows()).toMatchObject([{ agent: "google", kind: "search_crawler", path: "/a" }]);
 	});
 
-	it("collects nothing for a vendor that hasn't proven its domain, or an unknown key", async () => {
-		expect((await post({ k: "lp_live_unv", ua: "GPTBot/1.2", path: "/" })).headers.get("x-letterprove")).toBe("off");
+	it("counts agents before DNS proof, but only on the vendor's own domain and hosts beneath it", async () => {
+		// Private analytics, never evidence: a new vendor sees agents on day one.
+		expect((await post({ k: "lp_live_unv", ua: "GPTBot/1.2", path: "/" })).headers.get("x-letterprove")).toBe("on");
+		expect((await post({ k: "lp_live_unv", ua: "GPTBot/1.2", path: "/a", host: "app.unv.example" })).headers.get("x-letterprove")).toBe("on");
+		// A sibling host needs the DNS proof the vendor doesn't have yet.
+		expect((await post({ k: "lp_live_unv", ua: "GPTBot/1.2", path: "/b", host: "unv-app.example" })).headers.get("x-letterprove")).toBe("off");
+		expect((await post({ k: "lp_live_unv", ua: "GPTBot/1.2", path: "/c", host: "rival.example" })).headers.get("x-letterprove")).toBe("off");
+		expect((await rows()).map((r) => r.path).sort()).toEqual(["/", "/a"]);
+	});
+
+	it("collects nothing for an unknown key", async () => {
 		expect((await post({ k: "lp_live_nobody", ua: "GPTBot/1.2", path: "/" })).headers.get("x-letterprove")).toBe("off");
+		expect(await rows()).toEqual([]);
+	});
+
+	it("stamps server_seen_at on the first forward of any kind, even a browser", async () => {
+		// A vendor this suite hasn't posted for yet, so nothing has stamped it.
+		const fresh = randomUUID();
+		await vendor(fresh, "srv", "srv.example", false);
+		await post({ k: "lp_live_srv", ua: CHROME, path: "/" });
+		const { rows: seen } = await pg.query<{ server_seen_at: string | null }>("select server_seen_at from vendors where id = $1", [fresh]);
+		expect(seen[0].server_seen_at).not.toBeNull();
+		expect(await rows()).toEqual([]);
+	});
+
+	it("drops agent visits when the vendor turned the agent visitors module off", async () => {
+		const { _resetModuleMemo } = await import("@/lib/vendors/script");
+		await pg.query("update vendors set module_agent_visitors = false where id = $1", [ACME]);
+		_resetModuleMemo();
+		expect((await post({ k: "lp_live_acme", ua: "GPTBot/1.2", path: "/" })).headers.get("x-letterprove")).toBe("off");
+		await pg.query("update vendors set module_agent_visitors = true where id = $1", [ACME]);
+		_resetModuleMemo();
 		expect(await rows()).toEqual([]);
 	});
 });

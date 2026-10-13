@@ -53,6 +53,7 @@ import type { PaymentScope, Tier } from "./types";
 import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
+import { DEFAULT_DISPLAY, displayFor, hiddenSections, type DisplaySection, type DisplaySettings } from "./display";
 import { withDisclosure } from "./issuer";
 import { publicLogos, readLogoWall, type PublicLogos } from "@/lib/vendors/logo-wall";
 import {
@@ -103,9 +104,10 @@ export interface AggregateBody {
 	window_days: number;
 	/** Distinct company domains observed. NOT a customer count — see module doc. */
 	companies_observed: number;
-	sessions: number;
-	signups: number;
-	logins: number;
+	/** Absent when the vendor hides session counts (`hidden_by_vendor` lists "sessions"). */
+	sessions?: number;
+	signups?: number;
+	logins?: number;
 	/** Observed domains that can never name a company: free-mail, internal, malformed. */
 	domains_excluded: number;
 	tier: Tier;
@@ -144,6 +146,15 @@ export interface AggregateBody {
 	 * the products the vendor said are this product. Absent before 2026-10-13.
 	 */
 	payment_scope?: PaymentScope;
+	/**
+	 * Optional sections the vendor chose not to show (src/lib/attest/display.ts):
+	 * any of "sessions", "reported_history", "logos", "payment_details",
+	 * "observed_since", "hosts". Those fields are omitted from this document by
+	 * the vendor's choice, not for lack of data. Empty when nothing is hidden.
+	 * The domain, tier, companies observed and verify link can never be hidden.
+	 * Absent before 2026-10-13.
+	 */
+	hidden_by_vendor?: string[];
 	observed_through: string;
 	published_at: string;
 	/** When a newer snapshot is due. Absent on snapshots signed before 2026-10-08 — see ./cadence.ts. */
@@ -285,7 +296,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 			: null;
 	const now = new Date().toISOString();
 	const observed = attributable.length > 0;
-	return {
+	const display = vendor.id ? await displayFor(vendor.id) : { ...DEFAULT_DISPLAY };
+	return applyDisplay({
 		vendor: vendor.slug,
 		kind: "aggregate",
 		domain: vendor.domain,
@@ -310,7 +322,31 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		verify: verifyLink(vendor.slug, null, now),
 		...withDisclosure(vendor.name, vendor.issuerAffiliation),
 		method: methodUrl(METHOD_PATH),
-	};
+	}, display);
+}
+
+/** The fields each hideable section removes. */
+const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
+	sessions: ["sessions", "signups", "logins"],
+	reported_history: ["reported_history"],
+	logos: ["logos"],
+	payment_details: ["payment_scope", "paying_since"],
+	observed_since: ["observed_since"],
+	hosts: ["hosts"],
+};
+
+/**
+ * Omit what the vendor chose to hide, and say so in `hidden_by_vendor`. Pure.
+ * The tier is computed before this and is never affected; `vendor_stated`
+ * only lists fields still present.
+ */
+export function applyDisplay<T extends Omit<AggregateBody, "prev_hash">>(body: T, display: DisplaySettings): T {
+	const hidden = hiddenSections(display);
+	const out: Record<string, unknown> = { ...body };
+	for (const section of hidden) for (const field of SECTION_FIELDS[section]) delete out[field];
+	if (Array.isArray(out.vendor_stated)) out.vendor_stated = (out.vendor_stated as string[]).filter((f) => f in out);
+	out.hidden_by_vendor = hidden;
+	return out as T;
 }
 
 /**

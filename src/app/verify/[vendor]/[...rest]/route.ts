@@ -124,6 +124,16 @@ function num(v: unknown): string {
  * it, and what the vendor reports about itself. Nothing here is computed —
  * every value is a field from the table below, formatted.
  */
+/** How each hideable section reads in the "Hidden by the vendor" line. */
+const HIDDEN_LABELS: Record<string, string> = {
+	sessions: "session counts",
+	reported_history: "PostHog history",
+	logos: "logo verification",
+	payment_details: "payment details",
+	observed_since: "first observed date",
+	hosts: "extra hosts",
+};
+
 function summary(f: Record<string, unknown>, vendor: string): string {
 	const tier = typeof f.tier === "number" ? f.tier : null;
 	const window = typeof f.window_days === "number" ? f.window_days : 30;
@@ -162,14 +172,14 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
 		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
 		tile("Payments, via Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
-		tile("Sessions", num(f.sessions)) +
+		(typeof f.sessions === "number" ? tile("Sessions", num(f.sessions)) : "") +
 		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
 		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope?.mode === "selected" ? ` Payments count from ${num(scope.products)} products the vendor chose.` : ""}</p></section>`;
 
 	html += `<section><h2>Who the vendor is</h2><dl class="facts">` +
 		`<div><dt>Domain, proven by DNS</dt><dd>${esc(fmtDay(f.domain_verified_since) ? `since ${fmtDay(f.domain_verified_since)}` : "not proven")}</dd></div>` +
 		`<div><dt>Stripe account</dt><dd>${esc(binding)}</dd></div>` +
-		`<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` +
+		("observed_since" in f ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` : "") +
 		`</dl></section>`;
 
 	if (history && typeof history.companies === "number") {
@@ -180,6 +190,11 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
 	}
 
+
+	const hidden = Array.isArray(f.hidden_by_vendor) ? (f.hidden_by_vendor as string[]) : [];
+	if (hidden.length > 0) {
+		html += `<p class="muted">Hidden by the vendor: ${esc(hidden.map((h) => HIDDEN_LABELS[h] ?? h).join(", "))}. These fields are left out of this document by the vendor's choice.</p>`;
+	}
 
 	if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {
 		html += `<section><h2>Disclosure</h2><p class="disclosure">${esc(f.issuer_affiliation)}</p></section>`;

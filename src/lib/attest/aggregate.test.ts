@@ -17,6 +17,10 @@ vi.mock("./geo-distribution", () => ({
 }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("./payment-evidence", () => ({ paymentScopeFor: vi.fn(async () => null) }));
+vi.mock("./display", async (importOriginal) => {
+	const real = await importOriginal<typeof import("./display")>();
+	return { ...real, displayFor: vi.fn(async () => ({ ...real.DEFAULT_DISPLAY })) };
+});
 vi.mock("./vendor-evidence", () => ({
 	stripeBinding: vi.fn(async () => null),
 	hostCount: vi.fn(async () => 0),
@@ -348,6 +352,37 @@ describe("aggregateBody", () => {
 			expect(b.vendor_stated).toEqual(["reported_history"]);
 			expect(b.tier).toBe(1);
 			expect(b.companies_observed).toBe(1);
+		});
+
+		it("omits what the vendor hid, says so in hidden_by_vendor, and keeps the tier", async () => {
+			await withRollups([row("globex.com", 2)], false);
+			await asVendor({});
+			const ev = await import("./vendor-evidence");
+			const history = { source: "posthog" as const, companies: 400, since: "2023-01-01T00:00:00.000Z", active_companies_30d: 90, observed_also_reported: 1 };
+			vi.mocked(ev.reportedHistory).mockResolvedValueOnce(history);
+			const display = await import("./display");
+			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, sessions: false, reported_history: false, observed_since: false });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b).not.toHaveProperty("sessions");
+			expect(b).not.toHaveProperty("signups");
+			expect(b).not.toHaveProperty("logins");
+			expect(b).not.toHaveProperty("reported_history");
+			expect(b).not.toHaveProperty("observed_since");
+			expect(b.hidden_by_vendor).toEqual(["sessions", "reported_history", "observed_since"]);
+			// vendor_stated only lists fields still present.
+			expect(b.vendor_stated).toEqual([]);
+			expect(b.tier).toBe(1);
+			expect(b.companies_observed).toBe(1);
+			expect(b.domain).toBe("lettertrace.com");
+		});
+
+		it("states that nothing is hidden when the vendor shows everything", async () => {
+			await withRollups([row("globex.com", 2)], false);
+			await asVendor({});
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.hidden_by_vendor).toEqual([]);
+			expect(b.sessions).toBe(2);
 		});
 	});
 

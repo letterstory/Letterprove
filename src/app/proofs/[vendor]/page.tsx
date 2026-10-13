@@ -18,6 +18,16 @@ function hostOf(url: string): string {
 	}
 }
 
+/** How each hideable section reads in the "Hidden by" note. */
+const HIDDEN_LABELS: Record<string, string> = {
+	sessions: "session counts",
+	reported_history: "PostHog history",
+	logos: "logo verification",
+	payment_details: "payment details",
+	observed_since: "first observed date",
+	hosts: "extra hosts",
+};
+
 
 /**
  * Per-vendor page title, replacing the generic site-wide one.
@@ -65,6 +75,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	const affiliation = proof.vendor.issuer_affiliation;
 	const verifiedSince = a?.domain_verified_since ?? null;
 	const binding = a?.stripe_binding ?? null;
+	const hidden = new Set<string>(a?.hidden_by_vendor ?? []);
 
 	return (
 		<>
@@ -131,7 +142,9 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						)}
 
 						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Identity</h2>
-						<dl className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-3">
+						<dl
+							className={`mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${hidden.has("observed_since") ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}
+						>
 							<Tile
 								label="Domain"
 								value={verifiedSince ? "Verified by DNS" : "Not verified"}
@@ -152,16 +165,20 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									) : undefined
 								}
 							/>
-							<Tile
-								label="First observed"
-								value={a.observed_since ? <AttestedAt iso={a.observed_since} /> : "—"}
-							/>
+							{!hidden.has("observed_since") && (
+								<Tile
+									label="First observed"
+									value={a.observed_since ? <AttestedAt iso={a.observed_since} /> : "—"}
+								/>
+							)}
 						</dl>
 
 						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">
 							Last {a.window_days} days
 						</h2>
-						<dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-4">
+						<dl
+							className={`mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${a.sessions === undefined ? "sm:grid-cols-3" : "sm:grid-cols-4"}`}
+						>
 							<Tile label="Companies" value={a.companies_observed.toLocaleString("en-US")} />
 							<Tile
 								label="Payments"
@@ -174,7 +191,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									) : undefined
 								}
 							/>
-							<Tile label="Sessions" value={a.sessions.toLocaleString("en-US")} />
+							{a.sessions !== undefined && <Tile label="Sessions" value={a.sessions.toLocaleString("en-US")} />}
 							<Tile
 								label="Signed"
 								value={<AttestedAt iso={a.published_at} />}
@@ -240,6 +257,12 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							</>
 						)}
 					</>
+				)}
+
+				{a && hidden.size > 0 && (
+					<p className="mt-10 text-sm text-fog">
+						Hidden by {proof.vendor.name}: {[...hidden].map((h) => HIDDEN_LABELS[h] ?? h).join(", ")}.
+					</p>
 				)}
 
 				<section className="mt-12 rounded-lg border border-edge bg-panel p-6">

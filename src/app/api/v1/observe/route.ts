@@ -4,6 +4,7 @@ import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { acceptedHosts, isOriginAccepted } from "@/lib/vendors/hosts";
 import { recordRejectedOrigin } from "@/lib/telemetry/rejected-origins";
 import { markFirstEvent } from "@/lib/telemetry/first-event";
+import { collectorModules } from "@/lib/vendors/script";
 import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { parseObservePayload } from "@/lib/telemetry/events";
@@ -109,6 +110,10 @@ export async function POST(request: Request) {
 	 * is counted until they verify.
 	 */
 	if (!vendor.domainVerified) return collectorResponse(false);
+
+	// The vendor turned the proofs module off in its script. attest.js stops
+	// sending once its (CDN-cached) config catches up; this makes it final now.
+	if (!(await collectorModules(vendor.id)).proofs) return collectorResponse(false);
 
 	markFirstEvent(vendor.id);
 	await recordObservation({

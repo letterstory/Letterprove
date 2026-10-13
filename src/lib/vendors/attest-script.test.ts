@@ -9,7 +9,13 @@ import { describe, expect, it, vi } from "vitest";
  */
 const SOURCE = readFileSync(join(process.cwd(), "public/attest.js"), "utf8");
 
-function run({ debug = false, stub = false, configStatus = 200 } = {}) {
+function run({
+	debug = false,
+	stub = false,
+	configStatus = 200,
+	modules = undefined as Record<string, boolean> | undefined,
+	agent = false,
+} = {}) {
 	const beacons: { url: string; body: unknown }[] = [];
 	const logs: string[] = [];
 	const attrs: Record<string, string> = { "data-key": "lp_live_x" };
@@ -32,12 +38,12 @@ function run({ debug = false, stub = false, configStatus = 200 } = {}) {
 	}
 	const fetch = vi.fn(async (url: string) => {
 		if (url.includes("/api/v1/config")) {
-			return { ok: configStatus === 200, status: configStatus, json: async () => ({ cfg: 1, signals: [] }) };
+			return { ok: configStatus === 200, status: configStatus, json: async () => ({ cfg: 1, signals: [], ...(modules ? { modules } : {}) }) };
 		}
 		return { ok: true, status: 204 };
 	});
 	const navigator = {
-		userAgent: "Mozilla/5.0 Chrome/130",
+		userAgent: agent ? "Mozilla/5.0 (compatible; GPTBot/1.2)" : "Mozilla/5.0 Chrome/130",
 		webdriver: false,
 		sendBeacon: (url: string, body: string) => {
 			beacons.push({ url, body: JSON.parse(body) });
@@ -80,5 +86,27 @@ describe("attest.js", () => {
 		const page = run({ debug: true, configStatus: 404 });
 		await page.settle();
 		expect(page.logs.some((l) => l.startsWith("warn") && l.includes("isn't recognised"))).toBe(true);
+	});
+
+	it("sends no sign-ins when the proofs module is off", async () => {
+		const page = run({ stub: true, modules: { proofs: false, agent_visitors: true, human_visitors: false } });
+		await page.settle();
+		expect(page.beacons.filter((b) => b.url.endsWith("/api/v1/observe"))).toEqual([]);
+	});
+
+	it("sends the agent beacon only after the config says agent visitors is on", async () => {
+		const on = run({ agent: true, modules: { proofs: true, agent_visitors: true, human_visitors: false } });
+		await on.settle();
+		expect(on.beacons.filter((b) => b.url.endsWith("/api/v1/agent-visit"))).toHaveLength(1);
+		const off = run({ agent: true, modules: { proofs: true, agent_visitors: false, human_visitors: false } });
+		await off.settle();
+		expect(off.beacons.filter((b) => b.url.endsWith("/api/v1/agent-visit"))).toEqual([]);
+	});
+
+	it("keeps everything on for an older cached config without modules", async () => {
+		const page = run({ stub: true, agent: true });
+		await page.settle();
+		expect(page.beacons.some((b) => b.url.endsWith("/api/v1/observe"))).toBe(true);
+		expect(page.beacons.some((b) => b.url.endsWith("/api/v1/agent-visit"))).toBe(true);
 	});
 });

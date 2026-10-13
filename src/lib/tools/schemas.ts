@@ -837,3 +837,59 @@ export const getLogoWallInput = empty;
 export const getLogoWallOutput = z.union([z.object({ configured: z.literal(false) }), logoWall]);
 export const clearLogoWallInput = empty;
 export const clearLogoWallOutput = z.object({ cleared: z.literal(true).describe("The list is gone; the proof stops naming any company at the next snapshot.") });
+
+// ---------------------------------------------------------------- scripts
+
+const scriptModules = z.object({
+	proofs: z.boolean().describe("Sign-ins observed by the script: the evidence behind your proof."),
+	agent_visitors: z.boolean().describe("AI agents and crawlers reading your site, counted privately."),
+	human_visitors: z.boolean().describe("People and companies visiting your site, identified by Maverick. Needs a verified domain."),
+});
+
+export const getScriptInput = empty;
+export const getScriptOutput = z.object({
+	key: z.string().describe("The publishable key in the script tag. Not a secret."),
+	snippet: getInstallSnippetOutput.shape.snippet,
+	server_snippet: getInstallSnippetOutput.shape.server_snippet,
+	recipes: getInstallSnippetOutput.shape.recipes,
+	agent_kit: getInstallSnippetOutput.shape.agent_kit,
+	modules: scriptModules,
+	status: z.object({
+		script_seen_at: z.string().nullable().describe("First time the script tag loaded on a page."),
+		last_script_seen_at: z.string().nullable().describe("Most recent load we saw. Coarse: the config is cached for minutes."),
+		server_seen_at: z.string().nullable().describe("First request your server snippet forwarded, of any kind."),
+		first_agent_visit_at: z.string().nullable().describe("First AI agent or crawler visit counted."),
+		first_signin_at: z.string().nullable().describe("First sign-in counted for your proof."),
+		domain_verified: z.boolean(),
+	}),
+	human_visitors_tracking: z.enum(["off", "active", "pending_registration"]),
+});
+
+export const setScriptModulesInput = z.object({
+	proofs: z.boolean().optional(),
+	agent_visitors: z.boolean().optional(),
+	human_visitors: z.boolean().optional().describe("Turning this on needs a DNS-verified domain."),
+});
+export const setScriptModulesOutput = getScriptOutput;
+
+// ---------------------------------------------------------------- proof display
+
+const displaySections = z.object({
+	sessions: z.boolean(),
+	reported_history: z.boolean(),
+	logos: z.boolean(),
+	payment_details: z.boolean().describe("The Stripe product scope and the first verified payment date."),
+	observed_since: z.boolean(),
+	hosts: z.boolean(),
+});
+
+export const getProofDisplayInput = empty;
+export const getProofDisplayOutput = z.object({
+	sections: displaySections.describe("True means shown on your public proof. Hidden sections are listed on the proof as hidden by you."),
+	locked: z.array(z.string()).describe("Always shown: domain, tier, companies observed, verify link."),
+});
+
+export const setProofDisplayInput = z.object({
+	sections: displaySections.partial().describe("Only the sections you pass change."),
+});
+export const setProofDisplayOutput = getProofDisplayOutput;
