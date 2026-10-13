@@ -82,8 +82,8 @@ letterprove snapshots list [--customer <slug>]  Attestation chain summaries for 
 letterprove support <message>                Send a support message to the team
 
 letterprove customers list                   List this vendor's customers
-letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since> [--consent named]
-letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--consent named|anonymous] [--features a,b,c]
+letterprove customers create --slug <slug> --name <name> --domain <domain> --since <since>
+letterprove customers update <slug> [--name <name>] [--domain <domain>] [--since <since>] [--features a,b,c]
 letterprove customers delete <slug>
 
 letterprove staff tiers [--vendor <slug>]     Per-domain tier status (every vendor, or one)

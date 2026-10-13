@@ -21,10 +21,11 @@ import { FEATURES } from "@/lib/fixtures/vendors";
  * one shape.
  */
 
-const consent = z.enum(["named", "anonymous"]);
-
 /**
- * A customer as every customer-shaped tool returns it. Mirrors CustomerRow,
+ * A customer on the vendor's PRIVATE list, as every customer-shaped tool
+ * returns it. Nothing here is ever published: Letterprove attests the vendor,
+ * in counts, and names no customer (README decision 30). The list is the
+ * vendor's own bookkeeping. Mirrors CustomerRow,
  * which is itself pinned to CUSTOMER_COLUMNS by columns.test.ts — but nothing
  * pins THIS to either, so `schemas.test.ts` closes that edge.
  */
@@ -39,15 +40,14 @@ const customer = z.object({
 		.int()
 		.describe("LEGACY, ignored. Nobody sets a tier: the published tier is derived from evidence at publish time (DNS proof, observed sign-ins, settled Stripe invoices). Read it from the attestation or get_proof_summary."),
 	verified: z.boolean().describe("LEGACY, ignored, for the same reason as `tier`."),
-	features: z.array(z.string()),
-	consent,
+	features: z.array(z.string()).describe("The vendor's own note. Never published."),
 });
 
 /** promoteDomain's success shape, returned by both promotion tools. */
 const promotedCustomer = z.object({
 	customer: z
 		.object({ ok: z.literal(true), slug: z.string(), name: z.string(), domain: z.string() })
-		.describe("Anonymous with a tier-1 ceiling — promoting a domain is not consent to be named."),
+		.describe("Added to the vendor's private list. Nothing about it is published."),
 });
 
 const empty = z.object({});
@@ -81,7 +81,11 @@ export const getProofSummaryOutput = z.object({
 	slug: z.string().describe("Used to build the public proof URL."),
 	tier: z.number().int(),
 	tier_name: z.string().describe("What the tier means, so a caller need not carry its own ladder."),
-	attested_customers: z.number().int().describe("Customers whose current attestation is verified by evidence. A customer record alone does not count."),
+	attested_customers: z
+		.number()
+		.int()
+		.describe("Same as paying_companies; kept for older callers. Companies whose observed use is corroborated by a settled invoice in your own Stripe account."),
+	paying_companies: z.number().int().describe("Observed companies paying through your own Stripe account. A count; never published by name."),
 	companies_observed: z.number().int(),
 	sessions_30d: z.number().int(),
 	last_attested: z.string().nullable(),
@@ -195,11 +199,10 @@ export const listCustomersInput = empty;
 export const listCustomersOutput = z.object({ customers: z.array(customer) });
 
 export const createCustomerInput = z.object({
-	slug: z.string().min(1).describe("Becomes part of the published proof path."),
+	slug: z.string().min(1).describe("An identifier on your private list. Never published."),
 	name: z.string().min(1),
 	domain: z.string().min(1).describe("Rejected if it is a mailbox provider or the vendor's own."),
 	since: z.string().min(1),
-	consent: consent.optional().describe("Defaults to anonymous. Not being asked is not consent."),
 });
 export const createCustomerOutput = z.object({ customer });
 
@@ -208,7 +211,6 @@ export const updateCustomerInput = z.object({
 	name: z.string().optional(),
 	domain: z.string().optional(),
 	since: z.string().optional(),
-	consent: consent.optional(),
 	features: z.array(z.enum(FEATURES as unknown as [string, ...string[]])).optional(),
 });
 export const updateCustomerOutput = z.object({ customer });
@@ -232,7 +234,9 @@ const observedDomain = z.object({
 	signups: z.number().int(),
 	logins: z.number().int(),
 	customer: z.string().nullable(),
-	status: z.string().describe("What it is blocked on: no-customer-record, consent-withheld, published…"),
+	status: z
+		.string()
+		.describe("How it counts in your attestation: observed (in companies_observed), paying (also in paying_companies), not-attributable (excluded), no-observation (on your list, nothing observed)."),
 	detail: z.string().describe("Written to be read by a person deciding what to do next."),
 });
 
@@ -240,8 +244,9 @@ export const listObservedInput = empty;
 export const listObservedOutput = z.object({
 	observed: z.number().int().describe("Distinct domains seen in the window, whatever their kind."),
 	attributable: z.number().int().describe("Of those, how many could ever name a company."),
-	awaiting: z.number().int().describe("Attributable, observed, unpublished — the actionable backlog."),
-	published: z.number().int(),
+	awaiting: z.number().int().describe("Observed companies counted in your attestation without Stripe corroboration."),
+	published: z.number().int().describe("Observed companies counted in your attestation (companies_observed). Counts only; no domain is published."),
+	paying: z.number().int().describe("Of those, how many pay through your own Stripe account (paying_companies)."),
 	domains: z.array(observedDomain),
 });
 
@@ -252,7 +257,7 @@ export const listSnapshotsOutput = z.object({
 	snapshots: z.array(
 		z.object({
 			slug: z.string(),
-			length: z.number().int().describe("How many attestations are in this customer's hash chain."),
+			length: z.number().int().describe("How many attestations are in this customer's retired hash chain (frozen up to 2026-10-13)."),
 			current: z.object({
 				published_at: z.string(),
 				verified: z.boolean(),
@@ -441,13 +446,13 @@ export const vendorRosterOutput = z.object({
 			domain: z.string(),
 			category: z.string(),
 			key: z.string(),
-			customers: z.object({ total: z.number().int(), named: z.number().int() }),
+			customers: z.object({ total: z.number().int() }).describe("The vendor's private customer list. Never published."),
 			published_at: z
 				.string()
 				.nullable()
 				.describe("When this vendor's proofs went public, or null while private. See findPublishedVendor()."),
 			aggregate: z
-				.object({ companies: z.number().int(), sessions: z.number().int(), tier: z.number().int() })
+				.object({ companies: z.number().int(), paying: z.number().int(), sessions: z.number().int(), tier: z.number().int() })
 				.nullable()
 				.describe("What the vendor-level attestation claims, or null if it publishes nothing."),
 		}),
@@ -462,7 +467,6 @@ const tierRow = z.object({
 	logins: z.number().int(),
 	customer: z.string().nullable(),
 	earnedTier: z.number().int().nullable().describe("What the evidence supports right now."),
-	consent: consent.nullable(),
 	status: z.string(),
 	detail: z.string(),
 });
@@ -477,8 +481,9 @@ export const tierReportOutput = z.object({
 			vendor: z.string(),
 			observed: z.number().int(),
 			attributable: z.number().int(),
-			unpublishedEvidence: z.number().int(),
-			published: z.number().int(),
+			unpublishedEvidence: z.number().int().describe("Observed companies without payment evidence."),
+			published: z.number().int().describe("Observed companies counted in the vendor attestation."),
+			paying: z.number().int().describe("Of those, how many pay through the vendor's own Stripe account."),
 			rows: z.array(tierRow),
 		}),
 	),

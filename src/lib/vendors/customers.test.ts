@@ -58,10 +58,11 @@ describe("createCustomer", () => {
 		expect(db.from).not.toHaveBeenCalled();
 	});
 
-	it("defaults consent to anonymous when none is given", async () => {
+	it("writes no naming field, even when a caller still sends one", async () => {
 		const db = mockSupabase();
-		await createCustomer(db as never, "v1", { slug: "acme", name: "Acme", domain: "acme.com", since: "2024" });
-		expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({ consent: "anonymous", vendor_id: "v1" }));
+		await createCustomer(db as never, "v1", { slug: "acme", name: "Acme", domain: "acme.com", since: "2024", consent: "named" } as never);
+		expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({ vendor_id: "v1" }));
+		expect(db.insert.mock.calls[0][0]).not.toHaveProperty("consent");
 	});
 
 	describe("domain gate is vendor-scoped", () => {

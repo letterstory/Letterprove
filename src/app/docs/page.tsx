@@ -32,9 +32,8 @@ import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
  *      do not publish. The cooldown, the script path and the DNS hosts come
  *      from their own modules for the same reason.
  *
- * What is deliberately NOT dressed up: seats_active is always 0, the
- * customer's name, `features` and `since` are vendor-stated, tier 2 is not
- * issued, and the tier-3 section says out loud what a determined vendor
+ * What is deliberately NOT dressed up: companies observed are not
+ * customers, tier 3 never means every company pays, tier 2 is not issued, and the tier-3 section says out loud what a determined vendor
  * can still do. A page that reads better than the system behaves is the one
  * failure this product cannot afford.
  */
@@ -44,7 +43,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Docs — Letterprove",
   description:
-    "How to install Letterprove, what the tiers mean, how naming a customer works, and how to verify any published attestation yourself.",
+    "How to install Letterprove, what a vendor attestation says, what the tiers mean, and how to verify any published attestation yourself.",
 };
 
 const SECTIONS = [
@@ -52,7 +51,7 @@ const SECTIONS = [
   { id: "client-api", title: "The client API" },
   { id: "published", title: "What a published attestation says" },
   { id: "tiers", title: "The tier ladder" },
-  { id: "consent", title: "Naming a customer" },
+  { id: "customers", title: "Your customers stay private" },
   { id: "showing", title: "Badge and your own domain" },
   { id: "verify", title: "Verifying a proof yourself" },
   { id: "endpoints", title: "Endpoint reference" },
@@ -77,12 +76,13 @@ export default async function DocsPage() {
           Documentation
         </h1>
         <p className="mt-6 leading-relaxed text-fog">
-          Letterprove publishes signed, machine-readable evidence that the
-          companies a vendor names really use their product, so an evaluating
-          agent can check a logo wall instead of believing it. This page is the
-          whole of it: how to install the script, what it sends, what the tiers
-          mean, when a customer is named, and how to verify any of it without
-          trusting us.
+          Letterprove publishes signed, machine-readable evidence that a
+          software vendor is who it says it is, backed by data: its domain,
+          proven by DNS; its Stripe account, bound to that domain; how many
+          companies were observed using it and how many of them pay. Counts,
+          never names. This page is the whole of it: how to install the
+          script, what it sends, what the attestation says, what the tiers
+          mean, and how to verify any of it without trusting us.
         </p>
         <p className="mt-4 leading-relaxed text-fog">
           If you are here to check somebody else&apos;s claim rather than
@@ -363,58 +363,66 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
             title="What a published attestation says"
           >
             <p>
-              Two kinds of document are published. The{" "}
-              <strong>aggregate</strong> is a claim about a vendor and names
-              nobody: how many distinct company domains were observed in the
-              last 30 days, and the session, signup and login totals behind
-              that. The <strong>per-customer attestation</strong> names one
-              company and reports what was observed for its domain. The
-              aggregate is the only signed claim most vendors publish, because a
-              customer is named only once you state you have their permission,
-              and counting them needs no one&apos;s.
+              One document is published per vendor: the{" "}
+              <strong>vendor attestation</strong>, at{" "}
+              <code>/attest/&lt;vendor&gt;.json</code>. It says who the vendor
+              is and what backs it, and it names no customer. (Per-customer
+              documents were retired on 2026-10-13; their URLs answer{" "}
+              <code>410</code>, and copies signed before then still verify.)
             </p>
-            <p>
-              The aggregate says <code>companies_observed</code>, and it means
-              it. A session from an address at a company proves somebody there
-              used the product. It does not prove that company buys it. Domains
-              that can never name a company, free mail providers and the
-              vendor&apos;s own, are counted separately as{" "}
-              <code>domains_excluded</code> rather than silently dropped, so the
-              headline can be read honestly.
-            </p>
-            <p>
-              Inside a per-customer body, the fields have different provenance,
-              and it matters:
-            </p>
+            <p>Who the vendor is:</p>
             <ul>
               <li>
-                <code>sessions_30d</code> is measured. It is the sum of hourly
-                rollups for that domain over the trailing 30 days.
+                <code>domain</code> and <code>domain_verified_since</code>: the
+                domain proven by a DNS TXT record, and since when. The record is
+                re-checked daily; if it stays gone, verification is cleared and
+                every tier drops to 0.
               </li>
               <li>
-                <code>seats_active</code> is <strong>always 0 today</strong>.
-                Phase-one events carry no per-user dimension, so there is
-                nothing honest to sum. It is signed as a literal zero because
-                the field is covered by the signature, and it should be read as
-                &ldquo;not yet measured&rdquo; rather than as a measurement of
-                zero.
+                <code>hosts</code>: how many extra hosts on that domain the
+                collector accepts events from. A count, never the hosts.
               </li>
               <li>
-                <code>customer_name</code>, <code>features</code> and{" "}
-                <code>since</code> are your statement, and every body says so in
-                its <code>vendor_stated</code> list. Named feature events are a
-                later phase and are not wired, so nothing observes feature use
-                today.
+                <code>stripe_account_bound</code> and{" "}
+                <code>stripe_binding</code>: whether the connected Stripe
+                account is the vendor&apos;s own. <code>domain_match</code>{" "}
+                means a domain the account publishes (business website, support
+                email, account email) shares the vendor&apos;s verified domain;{" "}
+                <code>staff_override</code> means Letterprove staff approved a
+                related company&apos;s account, such as a parent that bills for
+                a subsidiary.
+              </li>
+            </ul>
+            <p>What backs it, over the last <code>window_days</code> (30):</p>
+            <ul>
+              <li>
+                <code>companies_observed</code>: distinct company email domains
+                seen signing in. It means exactly that. A session from an
+                address at a company proves somebody there used the product; it
+                does not prove the company buys it. Free mail and the
+                vendor&apos;s own domains are counted separately as{" "}
+                <code>domains_excluded</code> rather than silently dropped.
               </li>
               <li>
-                <code>contract_currency</code>, <code>contract_monthly</code>{" "}
-                and <code>contract_since</code> appear only when an invoice in
-                the vendor&apos;s Stripe account actually settled. They are
-                absent rather than zero for everyone else, because a zero would
-                assert &ldquo;pays nothing&rdquo; where absence correctly says
-                &ldquo;we hold no payment evidence&rdquo;.{" "}
-                <code>contract_since</code> is the first settled invoice, not
-                the subscription&apos;s start date.
+                <code>paying_companies</code> and <code>paying_since</code>: how
+                many of the observed companies paid an invoice that actually
+                settled in the vendor&apos;s own Stripe account, and the first
+                such invoice. <code>payment_scope</code> says whether every
+                product the account bills counts or only the products the vendor
+                chose, as a count, never by name.
+              </li>
+              <li>
+                <code>sessions</code>, <code>signups</code>,{" "}
+                <code>logins</code>: measured totals behind those companies.
+              </li>
+              <li>
+                <code>observed_since</code>: when Letterprove first observed
+                usage for this vendor, from its own frozen record.
+              </li>
+              <li>
+                <code>vendor_stated</code> lists any field that is the
+                vendor&apos;s statement rather than evidence. On a vendor
+                attestation it is empty.
               </li>
               <li>
                 <code>observed_through</code> is the end of the window
@@ -428,7 +436,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               </li>
               <li>
                 <code>prev_hash</code> is the SHA-256 of the previous signed
-                snapshot for the same subject, with 64 zeroes at the start of a
+                snapshot for the same vendor, with 64 zeroes at the start of a
                 chain. This is what makes the history auditable rather than
                 merely signed.
               </li>
@@ -482,7 +490,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
             </h3>
             <p>
               Nobody sets a tier, you included. It is derived each hour from the
-              evidence, in this order:
+              evidence, and it describes the vendor&apos;s evidence as a whole:
+              the strongest class present, published beside the counts it rests
+              on. In this order:
             </p>
             <ul>
               <li>
@@ -494,19 +504,19 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 again.
               </li>
               <li>
-                If nothing at all was observed for that domain in the window,
-                the published tier is 0. A tier is a statement about evidence,
-                and there is none.
+                If no company was observed in the window, the published tier is
+                0. A tier is a statement about evidence, and there is none.
               </li>
               <li>
-                If sign-ins were observed on your verified domain, the tier is
-                1, and <code>verified</code> is false: it is evidence, but
-                evidence you could fabricate with effort.
+                If companies were observed signing in on your verified domain,
+                the tier is 1: evidence, but evidence you could fabricate with
+                effort.
               </li>
               <li>
-                If, on top of that, an invoice for that domain settled in your
-                own live Stripe account, the tier is 3 and <code>verified</code>{" "}
-                is true.
+                If at least one of those companies also paid an invoice that
+                settled in your own, bound Stripe account, the tier is 3, and{" "}
+                <code>paying_companies</code> says how many. Tier 3 never means
+                every company pays.
               </li>
             </ul>
             <p>
@@ -586,7 +596,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 nothing is collected stops publishing as paid.
               </li>
               <li>
-                <code>contract_since</code> is dated from the{" "}
+                <code>paying_since</code> is dated from the{" "}
                 <strong>first settled invoice</strong>, never from the
                 subscription&apos;s start date. A start date is a field you set,
                 and Stripe accepts a backdated one, so tenure read from it was
@@ -609,7 +619,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
             <p>
               <strong>Scope is stated.</strong> If your Stripe account bills
               more than this product, choose which products count with{" "}
-              <code>set_stripe_scope</code>. Your aggregate attestation carries{" "}
+              <code>set_stripe_scope</code>. Your attestation carries{" "}
               <code>payment_scope</code>: whether every product counts or only
               the ones you chose, and how many. Counts only; product names are
               never published.
@@ -633,9 +643,10 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 has verified, leaving a record in your own books.
               </strong>{" "}
               It does not make it impossible. A vendor willing to pay themselves
-              can still reach tier 3, and nothing here binds the Stripe account
-              to the vendor in the first place — the key is pasted in, not
-              granted through Connect. Read tier 3 as corroboration by a third
+              can still reach tier 3. The Stripe account is bound to the
+              vendor by the domain it publishes about itself (or a staff
+              approval, stated in <code>stripe_binding</code>), not granted
+              through Connect. Read tier 3 as corroboration by a third
               party&apos;s ledger, not as immunity.
             </p>
             <p>
@@ -643,57 +654,30 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               2026-10-12, for Letterstory. A test-mode key deliberately stores
               nothing.
             </p>
-            <p>
-              The aggregate document follows the same gates without the payment
-              step: tier 1 when anything was observed on your verified domain,
-              tier 0 otherwise. It makes no commercial claim, so it never
-              reaches tier 3.
-            </p>
           </Section>
 
-          <Section n={5} id="consent" title="Naming a customer">
+          <Section n={5} id="customers" title="Your customers stay private">
             <p>
-              <strong>
-                Anonymous is the default, and the default is applied on read.
-              </strong>{" "}
-              A customer record added without a naming decision is treated as
-              anonymous, so a customer nobody thought about is withheld rather
-              than published. Naming governs what leaves the building, not what
-              we store: an unnamed customer still has snapshots computed and
-              chained, and the per-customer endpoint simply refuses to serve
-              them. That is what &ldquo;the moment a customer is named, the
-              history is already there&rdquo; has to mean to be more than a
-              slogan.
+              Letterprove never names, publishes or contacts your customers.
+              The attestation carries counts only. Company domains are used
+              inside Letterprove for one thing: joining the sign-ins the script
+              observed to the invoices in your Stripe account, so that{" "}
+              <code>paying_companies</code> counts only companies that both use
+              and pay.
             </p>
             <p>
-              Naming a customer publishes a signed, immutable, public statement
-              about a third party. Everything below follows from taking that
-              seriously.
+              You can see the domains behind your own counts in the Proofs tab
+              (or with <code>list_observed</code>), and keep a private customer
+              list there for your own bookkeeping. Nothing on that list is
+              published, and it does not change any figure: the attestation
+              counts what was observed and paid, whether or not a company is on
+              it.
             </p>
-
-            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              You hold the permission
-            </h3>
             <p>
-              Marking a customer as named is your statement that you have their
-              permission to be identified publicly (see the terms). Letterprove
-              does not contact your customers to check it. Naming changes only
-              whether their name appears; it never raises the tier, which still
-              comes from observation, your domain proof and your Stripe ledger.
-            </p>
-
-            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              Withdrawal takes effect
-            </h3>
-            <p>
-              Documents that name a third party are cached for 60 seconds and
-              must be revalidated, with no stale-while-revalidate at all.
-              Everything else here is cached for an hour with a day of
-              stale-while-revalidate, which is right for a document that names
-              nobody and badly wrong for one that does. Stale serving is the
-              specific hazard: it authorises serving a document the origin has
-              already stopped publishing. A withdrawn customer stayed publicly
-              named from cache once, in production, after the change had landed.
+              Per-customer documents, which named a company when the vendor said
+              it had permission, were retired on 2026-10-13. Their URLs answer{" "}
+              <code>410</code>; copies signed before then still verify against
+              the published keys.
             </p>
           </Section>
 
@@ -861,12 +845,12 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
               <code>/proofs/&lt;vendor&gt;</code> is content-negotiated. A
               browser gets the human page; a <code>.json</code> suffix or an
               explicit JSON <code>Accept</code> with no HTML alternative gets
-              the machine document, which carries the summary, each
-              customer&apos;s current attestation, and the tier ladder inline so
-              an agent that landed there directly can weight what it reads
-              without a second fetch. <code>/attest/&lt;vendor&gt;</code> and
-              the per-customer path both accept a <code>.json</code> suffix as
-              well, for clients that cannot set a header.
+              the machine document, which carries the summary, the signed
+              vendor attestation, and the tier ladder inline so an agent that
+              landed there directly can weight what it reads without a second
+              fetch. <code>/attest/&lt;vendor&gt;</code> accepts a{" "}
+              <code>.json</code> suffix as well, for clients that cannot set a
+              header.
             </p>
             <p>
               The two collection endpoints are called by the script, not by you.
@@ -967,20 +951,15 @@ function Endpoints({ origin }: { origin: string }) {
     },
     {
       path: "/attest/<vendor>",
-      serves: "The aggregate attestation. Counts, no names",
+      serves: "The vendor attestation: identity and evidence. Counts, no names",
     },
     {
       path: "/attest/<vendor>/chain",
-      serves: "The full signed aggregate history, oldest first",
+      serves: "Its full signed history, oldest first",
     },
     {
       path: "/attest/<vendor>/<customer>",
-      serves:
-        "One customer's current attestation, if the vendor has named them",
-    },
-    {
-      path: "/attest/<vendor>/<customer>/chain",
-      serves: "That customer's full signed history",
+      serves: "Retired 2026-10-13: answers 410. Per-customer documents are no longer published",
     },
     { path: "/.well-known/letterprove.json", serves: "Discovery. Start here" },
     {

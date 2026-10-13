@@ -396,6 +396,7 @@ describe("dispatchTool", () => {
 			observed: 3,
 			attributable: 2,
 			unpublishedEvidence: 1,
+			paying: 0,
 			published: 1,
 			rows: [
 				{
@@ -406,8 +407,7 @@ describe("dispatchTool", () => {
 					logins: 0,
 					customer: null,
 					earnedTier: null,
-					consent: null,
-					status: "no-customer-record",
+					status: "observed",
 					detail: "Observed, but nobody has recorded it as a customer.",
 				},
 			],
@@ -426,7 +426,7 @@ describe("dispatchTool", () => {
 					attributable: 2,
 					awaiting: 1,
 					published: 1,
-					domains: [{ domain: "widgets.co", status: "no-customer-record", sessions: 4 }],
+					domains: [{ domain: "widgets.co", status: "observed", sessions: 4 }],
 				},
 			},
 		});
@@ -446,6 +446,7 @@ describe("dispatchTool", () => {
 			observed: 0,
 			attributable: 0,
 			unpublishedEvidence: 0,
+			paying: 0,
 			published: 0,
 			rows: [],
 		} as never);
@@ -489,7 +490,7 @@ describe("dispatchTool", () => {
 		const { tierReport } = await import("@/lib/tiers/report");
 		vi.mocked(vendorSlugs).mockResolvedValue(["vantage", "acme"]);
 		vi.mocked(tierReport).mockImplementation(async (slug) =>
-			slug === "acme" ? null : ({ vendor: slug, observed: 1, attributable: 1, unpublishedEvidence: 0, published: 1, rows: [] } as never),
+			slug === "acme" ? null : ({ vendor: slug, observed: 1, attributable: 1, unpublishedEvidence: 0, published: 1, paying: 0, rows: [] } as never),
 		);
 
 		const outcome = await dispatchTool("tier_report", {}, principal(["staff:read"], null));
@@ -502,7 +503,7 @@ describe("dispatchTool", () => {
 			result: {
 				ok: true,
 				body: {
-					vendors: [{ vendor: "vantage", observed: 1, attributable: 1, unpublishedEvidence: 0, published: 1, rows: [] }],
+					vendors: [{ vendor: "vantage", observed: 1, attributable: 1, unpublishedEvidence: 0, published: 1, paying: 0, rows: [] }],
 					unreadable: ["acme"],
 				},
 			},
@@ -518,6 +519,7 @@ describe("dispatchTool", () => {
 			observed: 2,
 			attributable: 2,
 			unpublishedEvidence: 1,
+			paying: 0,
 			published: 1,
 			rows: [],
 		} as never);

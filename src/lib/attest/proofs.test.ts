@@ -1,419 +1,148 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GENESIS_HASH, snapshotHash } from "./verify";
-import { isDemonstration, jwks } from "./keys";
-import { customerChain, customerProof, earned, vendorProof } from "./proofs";
-import { verifyAttestation } from "./verify";
-import type { SignedAttestation } from "./types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { earned, publishedVendorProof, vendorProof, vendorSnapshots } from "./proofs";
 
-vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
+vi.mock("./aggregate", () => ({ vendorAggregate: vi.fn(), publishedVendorAggregate: vi.fn() }));
 vi.mock("@/rollup/history", () => ({ loadPersistedChain: vi.fn() }));
-vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
-// Real by default (a test process signs with the development key, so this is
-// true); the production cases below flip it to exercise the frozen-only path.
-vi.mock("./keys", async (importOriginal) => {
-	const real = await importOriginal<typeof import("./keys")>();
-	return { ...real, isDemonstration: vi.fn(real.isDemonstration) };
-});
-// acme-corp and northwind pay (tier 3, verified); globex is only observed.
-// Attestation now comes from evidence alone, so "attested" means a settled
-// invoice in the fixture, not a tier typed on the record.
-vi.mock("@/lib/attest/payment-evidence", () => ({
-	paymentEvidenceFor: vi.fn(async (_vendorId: string, domain: string) =>
-		domain === "acme-corp.example" || domain === "northwind.example"
-			? { currency: "usd", monthlyAmount: 120000, since: "2024-01-01T00:00:00.000Z", subscriptionCount: 1 }
-			: null,
-	),
+vi.mock("../fixtures/vendors", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../fixtures/vendors")>()),
+	findVendor: vi.fn(),
+	findPublishedVendor: vi.fn(),
 }));
 
-// Vendor/customer identity is DB-backed now (supabase/migrations/
-// 20260814230000_vendor_accounts.sql), but this suite is exercising chain
-// composition and consent gating, not the database — so mock the lookup at
-// the module boundary, holding it to the same two vendors/customers the
-// static fixture used to ship.
-vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
-	const original = await importOriginal<typeof import("@/lib/fixtures/vendors")>();
-	const VENDORS: import("@/lib/fixtures/vendors").VendorFixture[] = [
-		{
-			id: "00000000-0000-0000-0000-000000000001",
-			slug: "vantage",
-			name: "Vantage",
-			domain: "vantage.example",
-			category: "customer data platforms",
-			key: "lp_live_vantage_9f2c", domainVerified: true, proofsPublishedAt: "2026-01-01T00:00:00.000Z", issuerAffiliation: null,
-			customers: [
-				{ slug: "acme-corp", name: "Acme Corp", domain: "acme-corp.example", since: "2023-03", tier: 2, verified: true, features: ["sso", "api", "analytics"], consent: "named" },
-				{ slug: "northwind", name: "Northwind", domain: "northwind.example", since: "2024-08", tier: 2, verified: true, features: ["sso", "api", "analytics", "sla"], consent: "anonymous" },
-				{ slug: "globex", name: "Globex", domain: "globex.example", since: "2022-11", tier: 1, verified: false, features: ["sso", "audit_log", "api"] },
-			],
-		},
-		{ id: "00000000-0000-0000-0000-000000000001", slug: "lettertrace", name: "Lettertrace", domain: "lettertrace.com", category: "AI brand monitoring", key: "lp_live_lettertrace_5747b5e0f521", domainVerified: true, proofsPublishedAt: "2026-01-01T00:00:00.000Z", issuerAffiliation: null, customers: [] },
-	];
-	return {
-		...original,
-		allVendors: async () => VENDORS,
-		findVendor: async (slug: string) => VENDORS.find((v) => v.slug === slug),
-		// `findPublishedVendor` has to be mocked alongside `findVendor`, not left
-		// to the spread: it calls `findVendor` through the module's own binding,
-		// which the spread does not replace, so the real (DB-backed, unconfigured
-		// here) lookup would run and every public route would 404.
-		findPublishedVendor: async (slug: string) => {
-			const vendor = VENDORS.find((v) => v.slug === slug);
-			return vendor && vendor.proofsPublishedAt !== null ? vendor : undefined;
-		},
-		findVendorByKey: async (key: string) => VENDORS.find((v) => v.key === key),
-	};
+const VENDOR = {
+	id: "v-1",
+	slug: "acme",
+	name: "Acme",
+	domain: "acme.com",
+	category: "Analytics",
+	key: "k",
+	domainVerified: true,
+	domainVerifiedAt: "2026-09-02T00:00:00.000Z",
+	proofsPublishedAt: "2026-09-10T00:00:00.000Z",
+	issuerAffiliation: null,
+	customers: [{ slug: "globex", name: "Globex", domain: "globex.com", since: "2024-01", tier: 1 as const, verified: false, features: [] }],
+};
+
+const ATTESTATION = {
+	vendor: "acme",
+	kind: "aggregate" as const,
+	domain: "acme.com",
+	window_days: 30,
+	companies_observed: 12,
+	paying_companies: 4,
+	sessions: 340,
+	signups: 2,
+	logins: 90,
+	domains_excluded: 1,
+	tier: 3 as const,
+	observed_through: "2026-10-13T03:05:00.000Z",
+	published_at: "2026-10-13T03:05:00.000Z",
+	prev_hash: "0".repeat(64),
+	method: "m",
+	key_id: "lp-test",
+	signature: "sig",
+};
+
+beforeEach(async () => {
+	vi.clearAllMocks();
+	const v = await import("../fixtures/vendors");
+	const a = await import("./aggregate");
+	vi.mocked(v.findVendor).mockResolvedValue(VENDOR as never);
+	vi.mocked(v.findPublishedVendor).mockResolvedValue(VENDOR as never);
+	vi.mocked(a.vendorAggregate).mockResolvedValue(ATTESTATION as never);
+	vi.mocked(a.publishedVendorAggregate).mockResolvedValue(ATTESTATION as never);
 });
 
-const TTL_SECONDS = 3600;
-function currentHourBucket(): number {
-	return Math.floor(Date.now() / (TTL_SECONDS * 1000));
-}
+describe("vendorProof", () => {
+	it("is the vendor attestation and a summary read from it — never a customer", async () => {
+		const proof = (await vendorProof("acme"))!;
+		expect(proof.attestation).toBe(ATTESTATION);
+		expect(proof.summary).toEqual({
+			tier: 3,
+			companies_observed: 12,
+			paying_companies: 4,
+			sessions_30d: 340,
+			last_attested: "2026-10-13T03:05:00.000Z",
+		});
+		expect(proof).not.toHaveProperty("customers");
+		// The vendor's private list is never part of what this returns.
+		expect(JSON.stringify(proof)).not.toContain("globex");
+	});
 
-// `customerChain` caches by vendor/customer/hour in a module-level Map that
-// is never reset between tests in this file. Each test pins the clock to
-// its own hour (via fake timers) rather than needing a fresh fixture slug,
-// so reusing a real customer slug across tests never hits another test's
-// cached entry.
+	it("reports zeros before the first freeze, not an error", async () => {
+		const a = await import("./aggregate");
+		vi.mocked(a.vendorAggregate).mockResolvedValue(null);
+		const proof = (await vendorProof("acme"))!;
+		expect(proof.attestation).toBeNull();
+		expect(proof.summary).toEqual({ tier: 0, companies_observed: 0, paying_companies: 0, sessions_30d: 0, last_attested: "" });
+	});
 
-describe("customerProof", () => {
-	beforeEach(async () => {
-		const { currentSnapshot } = await import("@/rollup/snapshots");
+	it("is null for an unknown vendor", async () => {
+		const v = await import("../fixtures/vendors");
+		vi.mocked(v.findVendor).mockResolvedValue(undefined);
+		expect(await vendorProof("nope")).toBeNull();
+	});
+});
+
+describe("publishedVendorProof", () => {
+	it("is null for an unpublished vendor, exactly as for an unknown one", async () => {
+		const v = await import("../fixtures/vendors");
+		vi.mocked(v.findPublishedVendor).mockResolvedValue(undefined);
+		expect(await publishedVendorProof("acme")).toBeNull();
+	});
+
+	it("reads the gated attestation", async () => {
+		const a = await import("./aggregate");
+		await publishedVendorProof("acme");
+		expect(a.publishedVendorAggregate).toHaveBeenCalledWith("acme");
+		expect(a.vendorAggregate).not.toHaveBeenCalled();
+	});
+});
+
+describe("vendorSnapshots", () => {
+	it("reads the retired per-customer history and signs nothing new", async () => {
 		const { loadPersistedChain } = await import("@/rollup/history");
-		vi.mocked(currentSnapshot).mockReset();
-		vi.mocked(loadPersistedChain).mockReset().mockResolvedValue([]);
-		vi.useFakeTimers();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("signs a valid single-entry chain from the live snapshot, chained onto genesis", async () => {
-		vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		vi.mocked(currentSnapshot).mockResolvedValue({
-			observed_through: "2026-08-01T00:00:00.000Z",
-			published_at: "2026-08-01T00:00:00.000Z",
-			sessions_30d: 42,
-			seats_active: 0,
-			observed: true,
-			readOk: true,
-		});
-
-		const proof = await customerProof("vantage", "acme-corp");
-		expect(proof).not.toBeNull();
-		expect(proof!.chain).toHaveLength(1);
-		expect(proof!.current.sessions_30d).toBe(42);
-		expect(proof!.current.seats_active).toBe(0);
-		expect(proof!.current.prev_hash).toBe(GENESIS_HASH);
-		// Signed into the body, so verification covers it — and no `ttl`.
-		expect(proof!.current.next_snapshot_at).toBe("2026-08-01T00:05:00.000Z");
-		expect(proof!.current).not.toHaveProperty("ttl");
-		expect(proof!.current.verify).toBe("https://app.letterprove.com/verify/vantage/acme-corp/20260801T000000000Z");
-		expect(verifyAttestation(proof!.current, jwks())).toEqual({ ok: true });
-		expect(currentSnapshot).toHaveBeenCalledWith("vantage", "acme-corp.example");
-	});
-
-	/*
-	 * The lookalike check, published at the only place a reader can perform it.
-	 *
-	 * `name` and `domain` are both vendor-chosen and nothing ties one to the
-	 * other, so "Acme Corp" in a document is worth exactly what it is worth on a
-	 * logo wall. The domain is what telemetry joined on and what a tier-4
-	 * counter-signature had to be mailed to, which makes it the field that says
-	 * whose claim this actually is.
-	 */
-	it("publishes the domain the claim was joined on, not only the display name", async () => {
-		vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		vi.mocked(currentSnapshot).mockResolvedValue({
-			observed_through: "2026-08-03T00:00:00.000Z",
-			published_at: "2026-08-03T00:00:00.000Z",
-			sessions_30d: 7,
-			seats_active: 0,
-			observed: true,
-			readOk: true,
-		});
-
-		const proof = await customerProof("vantage", "acme-corp");
-
-		expect(proof!.current.customer_name).toBe("Acme Corp");
-		expect(proof!.current.customer_domain).toBe("acme-corp.example");
-		// Signed, not decorative: swapping it after the fact breaks verification,
-		// so a reader can trust the domain as much as the numbers beside it.
-		expect(verifyAttestation({ ...proof!.current, customer_domain: "acme-hq.example" }, jwks()).ok).toBe(false);
-	});
-
-	it("returns null for an unknown customer without querying telemetry or persistence", async () => {
-		vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		const { loadPersistedChain } = await import("@/rollup/history");
-
-		const proof = await customerProof("vantage", "does-not-exist");
-		expect(proof).toBeNull();
-		expect(currentSnapshot).not.toHaveBeenCalled();
-		expect(loadPersistedChain).not.toHaveBeenCalled();
-	});
-
-	// One end-to-end proof that the gate reaches the signed body — including
-	// through the persisted path, since a frozen row is signed via the same
-	// attestationBody() this live path uses. The rule itself is covered
-	// exhaustively against `earned` below, where no cache is involved.
-	it("drops an asserted claim to vendor-asserted tier 0 when nothing was observed", async () => {
-		vi.setSystemTime(new Date("2026-08-12T21:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		vi.mocked(currentSnapshot).mockResolvedValue({
-			observed_through: "2026-08-12T21:00:00.000Z",
-			published_at: "2026-08-12T21:00:00.000Z",
-			sessions_30d: 0,
-			seats_active: 0,
-			observed: false,
-			readOk: true,
-		});
-
-		// acme-corp's fixture asserts tier 2 / verified, and is the one customer
-		// with consent to be named — so it's also the only one customerProof
-		// will return at all.
-		const proof = await customerProof("vantage", "acme-corp");
-		expect(proof!.current.tier).toBe(0);
-		expect(proof!.current.verified).toBe(false);
-		// Still a well-formed, signed document — a weaker claim, not a broken one.
-		expect(verifyAttestation(proof!.current, jwks())).toEqual({ ok: true });
-	});
-
-	it("caches the composed chain across repeated calls instead of re-querying every time", async () => {
-		vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		vi.mocked(currentSnapshot).mockResolvedValue({
-			observed_through: "2026-08-03T00:00:00.000Z",
-			published_at: "2026-08-03T00:00:00.000Z",
-			sessions_30d: 7,
-			seats_active: 0,
-			observed: true,
-			readOk: true,
-		});
-
-		const [a, b] = await Promise.all([customerChain("vantage", "northwind"), customerChain("vantage", "northwind")]);
-		expect(a![0].signature).toBe(b![0].signature);
-		expect(currentSnapshot).toHaveBeenCalledTimes(1);
-	});
-
-	it("in development signing only, appends a fresh, unpersisted entry onto persisted history for an unfrozen hour", async () => {
-		vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		const { loadPersistedChain } = await import("@/rollup/history");
-		vi.mocked(currentSnapshot).mockResolvedValue({
-			observed_through: "2026-08-04T00:00:00.000Z",
-			published_at: "2026-08-04T00:00:00.000Z",
-			sessions_30d: 9,
-			seats_active: 0,
-			observed: true,
-			readOk: true,
-		});
-		const priorAttestation = { published_at: "2026-08-03T23:00:00.000Z", sessions_30d: 4 } as unknown as SignedAttestation;
-		vi.mocked(loadPersistedChain).mockResolvedValue([{ hourBucket: currentHourBucket() - 1, attestation: priorAttestation }]);
-
-		const chain = await customerChain("vantage", "globex");
-		expect(chain).toHaveLength(2);
-		expect(chain![0]).toBe(priorAttestation);
-		expect(chain![1].prev_hash).toBe(snapshotHash(priorAttestation));
-		expect(chain![1].sessions_30d).toBe(9);
-		expect(verifyAttestation(chain![1], jwks())).toEqual({ ok: true });
-	});
-
-	it("returns exactly the persisted chain, without appending or querying telemetry, once the current hour is already frozen", async () => {
-		vi.setSystemTime(new Date("2026-08-05T00:00:00.000Z"));
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		const { loadPersistedChain } = await import("@/rollup/history");
-		const priorAttestation = { published_at: "2026-08-04T23:00:00.000Z", sessions_30d: 3 } as unknown as SignedAttestation;
-		const frozenNow = { published_at: "2026-08-05T00:00:00.000Z", sessions_30d: 11 } as unknown as SignedAttestation;
 		vi.mocked(loadPersistedChain).mockResolvedValue([
-			{ hourBucket: currentHourBucket() - 1, attestation: priorAttestation },
-			{ hourBucket: currentHourBucket(), attestation: frozenNow },
+			{ hourBucket: 1, attestation: { published_at: "2026-10-12T23:05:00.000Z", verified: false, sessions_30d: 9, features: [] } },
+		] as never);
+		const out = await vendorSnapshots("acme");
+		expect(out).toEqual([
+			{ slug: "globex", length: 1, current: { published_at: "2026-10-12T23:05:00.000Z", verified: false, sessions_30d: 9, features: [] } },
 		]);
-
-		const chain = await customerChain("vantage", "acme-corp");
-		expect(chain).toEqual([priorAttestation, frozenNow]);
-		expect(currentSnapshot).not.toHaveBeenCalled();
-	});
-
-	/*
-	 * The production rule: serve only what the freeze stored. A live entry
-	 * signed per instance carried a `verify` link to a snapshot that was never
-	 * persisted, and /verify then called our own document a forgery.
-	 */
-	describe("in production (not development signing)", () => {
-		beforeEach(() => vi.mocked(isDemonstration).mockReturnValue(false));
-		afterEach(async () => {
-			const real = await vi.importActual<typeof import("./keys")>("./keys");
-			vi.mocked(isDemonstration).mockImplementation(real.isDemonstration);
-		});
-
-		it("serves the frozen chain as it stands while this hour waits on its freeze, signing nothing", async () => {
-			vi.setSystemTime(new Date("2026-08-06T00:01:00.000Z"));
-			const { currentSnapshot } = await import("@/rollup/snapshots");
-			const { loadPersistedChain } = await import("@/rollup/history");
-			const lastHour = { published_at: "2026-08-05T23:05:00.000Z", sessions_30d: 7 } as unknown as SignedAttestation;
-			vi.mocked(loadPersistedChain).mockResolvedValue([{ hourBucket: currentHourBucket() - 1, attestation: lastHour }]);
-
-			const chain = await customerChain("vantage", "globex");
-
-			expect(chain).toEqual([lastHour]);
-			expect(currentSnapshot).not.toHaveBeenCalled();
-		});
-
-		it("publishes nothing for a customer with no frozen history yet", async () => {
-			vi.setSystemTime(new Date("2026-08-07T00:01:00.000Z"));
-			const { currentSnapshot } = await import("@/rollup/snapshots");
-			const { loadPersistedChain } = await import("@/rollup/history");
-			vi.mocked(loadPersistedChain).mockResolvedValue([]);
-
-			expect(await customerChain("vantage", "acme-corp")).toEqual([]);
-			expect(await customerProof("vantage", "acme-corp")).toBeNull();
-			expect(currentSnapshot).not.toHaveBeenCalled();
-		});
 	});
 });
 
-describe("earned", () => {
-	const base = { slug: "x", name: "X", domain: "x.example", since: "2023-01", features: [] };
-	// A legacy stored tier must have no effect whatever: the tier comes from
-	// evidence alone (decision 29).
-	const storedHigh = { ...base, tier: 2 as const, verified: true };
-	const storedLow = { ...base, tier: 1 as const, verified: false };
-
-	it("publishes tier 1, unverified, once sign-ins were observed on a verified domain", () => {
-		expect(earned(storedLow, true, true)).toEqual({ tier: 1, verified: false });
+describe("earned (the per-domain evidence rule)", () => {
+	it("is tier 1, unverified, once sign-ins were observed on a verified domain", () => {
+		expect(earned(true, true)).toEqual({ tier: 1, verified: false });
 	});
 
-	it("ignores whatever tier is stored on the customer record", () => {
-		expect(earned(storedHigh, true, true)).toEqual({ tier: 1, verified: false });
-		expect(earned({ ...base, tier: 0 as const, verified: false }, true, true)).toEqual({ tier: 1, verified: false });
-	});
-
-	it("never issues tier 2, which waits on the ASN binding", () => {
-		for (const c of [storedHigh, storedLow]) expect(earned(c, true, true).tier).not.toBe(2);
-	});
-
-	it("refuses every tier when nothing was observed", () => {
-		expect(earned(storedHigh, false, true)).toEqual({ tier: 0, verified: false });
-		expect(earned(storedLow, false, true)).toEqual({ tier: 0, verified: false });
-	});
-
-	// The gate one step earlier: an observation only counts as evidence if we
-	// know whose origin produced it. Origin binds a browser, not curl, so
-	// without DNS control of the vendor's domain the traffic is the vendor
-	// asserting — and asserting earns tier 0.
-	it("refuses every tier while the vendor's domain is unverified, however much was observed", () => {
-		expect(earned(storedHigh, true, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(storedLow, true, false)).toEqual({ tier: 0, verified: false });
-	});
-
-	it("needs both verification and observation, not either", () => {
-		expect(earned(storedHigh, false, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(storedHigh, true, true)).toEqual({ tier: 1, verified: false });
-	});
-
-	it("never earns tier 4, which was retired, even from a row that still carries a counter-signature", () => {
-		const legacy = { ...storedLow, tier: 4, countersignedAt: "2026-08-21T00:00:00.000Z" } as never;
-		expect(earned(legacy, false, false)).toEqual({ tier: 0, verified: false });
-		expect(earned(legacy, true, true)).toEqual({ tier: 1, verified: false });
-	});
-});
-
-describe("consent-gated publication", () => {
-	beforeEach(async () => {
-		const { currentSnapshot } = await import("@/rollup/snapshots");
-		const { loadPersistedChain } = await import("@/rollup/history");
-		const { tierReport } = await import("@/lib/tiers/report");
-		vi.mocked(loadPersistedChain).mockReset().mockResolvedValue([]);
-		vi.mocked(tierReport).mockReset();
-		vi.mocked(currentSnapshot).mockReset().mockResolvedValue({
-			observed_through: "2026-08-20T00:00:00.000Z",
-			published_at: "2026-08-20T00:00:00.000Z",
-			sessions_30d: 100,
-			seats_active: 0,
-			observed: true,
-			readOk: true,
+	it("is tier 3 with a settled payment on top", () => {
+		expect(earned(true, true, { currency: "usd", monthlyAmount: 100, since: "2025-01-01", subscriptionCount: 1 })).toEqual({
+			tier: 3,
+			verified: true,
 		});
-		vi.useFakeTimers();
-	});
-	afterEach(() => vi.useRealTimers());
-
-	it("publishes an attestation for a customer who consented to be named", async () => {
-		vi.setSystemTime(new Date("2026-08-20T00:00:00.000Z"));
-		await expect(customerProof("vantage", "acme-corp")).resolves.not.toBeNull();
 	});
 
-	it("withholds one for a customer who has not, even though the chain exists", async () => {
-		vi.setSystemTime(new Date("2026-08-20T01:00:00.000Z"));
-
-		// northwind is attested at tier 3 — withheld for naming, not for lack
-		// of evidence. The chain is still computed and still frozen; only
-		// publication is gated, which is what makes flipping consent a no-op.
-		await expect(customerProof("vantage", "northwind")).resolves.toBeNull();
-		await expect(customerChain("vantage", "northwind")).resolves.toHaveLength(1);
-	});
-
-	it("treats a customer with no consent field as anonymous", async () => {
-		vi.setSystemTime(new Date("2026-08-20T02:00:00.000Z"));
-
-		// globex declares no consent at all. Opt-in means the absent case is
-		// private — a customer added without thinking about consent must never
-		// be published by default.
-		await expect(customerProof("vantage", "globex")).resolves.toBeNull();
-	});
-
-	it("counts every attested customer in the aggregate but lists only the named", async () => {
-		vi.setSystemTime(new Date("2026-08-20T03:00:00.000Z"));
-		const proof = await vendorProof("vantage");
-
-		// acme-corp + northwind are both attested; only acme-corp is named.
-		expect(proof!.summary.attested_customers).toBe(2);
-		expect(proof!.summary.attested_unnamed).toBe(1);
-		expect(proof!.customers.map((c) => c.current.customer)).toEqual(["acme-corp"]);
-
-		// The aggregate is the consent-safe view, so it stays complete: sla comes
-		// only from northwind, who is never named anywhere on the page.
-		expect(proof!.summary.features_stated).toContain("sla");
-		expect(proof!.summary.sessions_30d).toBe(200);
-	});
-
-	it("never leaks a withheld customer's name through the vendor report", async () => {
-		vi.setSystemTime(new Date("2026-08-20T04:00:00.000Z"));
-		const proof = await vendorProof("vantage");
-
-		expect(JSON.stringify(proof)).not.toContain("Northwind");
-		expect(JSON.stringify(proof)).not.toContain("northwind");
-	});
-
-	// The lettertrace case that motivated this field: real traffic, zero
-	// customer records, so the headline reads 0 attested with nothing to
-	// explain why. unverified_customers is that explanation, as a count only
-	// — tierReport's own per-domain rows must never reach this surface.
-	it("surfaces tierReport's unpublished-evidence count as unverified_customers", async () => {
-		vi.setSystemTime(new Date("2026-08-20T05:00:00.000Z"));
-		const { tierReport } = await import("@/lib/tiers/report");
-		vi.mocked(tierReport).mockResolvedValue({
-			vendor: "lettertrace",
-			observed: 47,
-			attributable: 43,
-			unpublishedEvidence: 43,
-			published: 0,
-			rows: [],
+	it("never counts a zero payment", () => {
+		expect(earned(true, true, { currency: "usd", monthlyAmount: 0, since: "2025-01-01", subscriptionCount: 1 })).toEqual({
+			tier: 1,
+			verified: false,
 		});
-
-		const proof = await vendorProof("lettertrace");
-		expect(proof!.summary.unverified_customers).toBe(43);
-		expect(JSON.stringify(proof)).not.toContain("tenevents"); // no row data, ever
 	});
 
-	it("degrades unverified_customers to 0 rather than failing the page when telemetry can't be read", async () => {
-		vi.setSystemTime(new Date("2026-08-20T06:00:00.000Z"));
-		const { tierReport } = await import("@/lib/tiers/report");
-		vi.mocked(tierReport).mockResolvedValue(null);
+	it("refuses every tier when nothing was observed, payment or not", () => {
+		expect(earned(false, true, { currency: "usd", monthlyAmount: 100, since: "2025-01-01", subscriptionCount: 1 })).toEqual({
+			tier: 0,
+			verified: false,
+		});
+	});
 
-		const proof = await vendorProof("lettertrace");
-		expect(proof!.summary.unverified_customers).toBe(0);
+	it("refuses every tier while the vendor's domain is unverified", () => {
+		expect(earned(true, false)).toEqual({ tier: 0, verified: false });
+	});
+
+	it("never issues tier 2 or the retired tier 4", () => {
+		for (const o of [true, false]) for (const d of [true, false]) expect([2, 4]).not.toContain(earned(o, d).tier);
 	});
 });

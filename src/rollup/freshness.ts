@@ -80,9 +80,9 @@ async function checkTable(
 
 	// Never written at all is not staleness. Nothing is being served with a
 	// freshness claim it cannot back, because nothing is being served. This is
-	// also the normal state of `published_snapshots` for a deploy whose vendors
-	// have no named customers yet, and paging about that every 15 minutes
-	// forever would be the loudest possible way to say nothing.
+	// also the normal state of a fresh deploy with no vendors yet, and paging
+	// about that every 15 minutes forever would be the loudest possible way to
+	// say nothing.
 	if (!data) {
 		return { scope, ok: true, detail: `${table} has never been written, so nothing is going stale` };
 	}
@@ -118,13 +118,12 @@ export async function checkPublicationFreshness(): Promise<PublicationFreshness>
 	}
 
 	const bucket = currentBucket();
-	// Both halves of the published record, checked separately for the same
-	// reason the freeze reports them separately: snapshots can stall while
-	// aggregates keep publishing, and a single combined verdict would hide
-	// whichever half is still healthy and misname the blast radius.
+	// The vendor attestations are the whole published record since 2026-10-13.
+	// Per-customer snapshots were retired (README decision 30) and stopped
+	// being frozen, so `published_snapshots` going stale is expected and is not
+	// checked.
 	const checks = await Promise.all([
-		checkTable(db, "per-customer snapshots (/attest/{vendor}/{customer})", "published_snapshots", bucket),
-		checkTable(db, "vendor aggregates (/attest/{vendor})", "published_aggregates", bucket),
+		checkTable(db, "vendor attestations (/attest/{vendor})", "published_aggregates", bucket),
 	]);
 
 	return { ok: checks.every((check) => check.ok), checks };

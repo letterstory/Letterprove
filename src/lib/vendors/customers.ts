@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { FEATURES, type Consent } from "@/lib/fixtures/vendors";
+import { FEATURES } from "@/lib/fixtures/vendors";
 import { classifyDomain } from "@/lib/identity/domains";
 
 /** Slugs that would publish to an unreachable URL — see attest/[vendor]/chain. */
@@ -31,7 +31,6 @@ export type CustomerRow = {
 	tier: number;
 	verified: boolean;
 	features: string[];
-	consent: Consent;
 };
 
 /**
@@ -42,7 +41,7 @@ export type CustomerRow = {
  * constant is exported for the guard test, not for building queries elsewhere.
  */
 export const CUSTOMER_COLUMNS =
-	"id, slug, name, domain, since, tier, verified, features, consent";
+	"id, slug, name, domain, since, tier, verified, features";
 
 export type ServiceResult<T> = { ok: true; data: T } | { ok: false; status: number; body: Record<string, unknown> };
 
@@ -74,7 +73,6 @@ export type CreateCustomerInput = {
 	name: unknown;
 	domain: unknown;
 	since: unknown;
-	consent?: unknown;
 };
 
 export async function createCustomer(
@@ -114,8 +112,6 @@ export async function createCustomer(
 		};
 	}
 
-	const consent: Consent = input.consent === "named" ? "named" : "anonymous";
-
 	const { data, error } = await supabase
 		.from("vendor_customers")
 		.insert({
@@ -124,7 +120,6 @@ export async function createCustomer(
 			name: input.name.trim(),
 			domain,
 			since: input.since.trim(),
-			consent,
 			tier: 1,
 			verified: false,
 			features: [],
@@ -140,7 +135,6 @@ export type UpdateCustomerInput = {
 	name?: unknown;
 	domain?: unknown;
 	since?: unknown;
-	consent?: unknown;
 	features?: unknown;
 };
 
@@ -167,9 +161,6 @@ export async function updateCustomer(
 		update.domain = domain;
 	}
 	if (typeof input.since === "string" && input.since.trim()) update.since = input.since.trim();
-	if (input.consent === "named" || input.consent === "anonymous") {
-		update.consent = input.consent as Consent;
-	}
 	if (Array.isArray(input.features)) {
 		update.features = input.features.filter(
 			(f: unknown): f is string => typeof f === "string" && FEATURE_SET.includes(f),

@@ -7,16 +7,14 @@ import { GENESIS_HASH } from "@/lib/attest/verify";
  *
  * Chains are signed for real (development key, which jwks() publishes in
  * tests), so "signature checks out" is measured rather than mocked. Only the
- * gated chain lookups are mocked — the gates themselves are covered where they
- * live (aggregate.test.ts, proofs.test.ts, publication.test.ts).
+ * gated chain lookup is mocked — the gate itself is covered where it lives
+ * (aggregate.test.ts, publication.test.ts).
  */
 
 vi.mock("@/lib/attest/aggregate", () => ({ publishedVendorAggregateChain: vi.fn() }));
-vi.mock("@/lib/attest/proofs", () => ({ customerProof: vi.fn() }));
 
 import { GET } from "./route";
 import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
-import { customerProof } from "@/lib/attest/proofs";
 
 const OLD = "2026-10-08T16:05:07.822Z";
 const NEW = "2026-10-08T17:01:21.613Z";
@@ -39,7 +37,6 @@ function get(path: string, accept = "text/html") {
 beforeEach(async () => {
 	vi.clearAllMocks();
 	vi.mocked(publishedVendorAggregateChain).mockResolvedValue((await aggregateChain()) as never);
-	vi.mocked(customerProof).mockResolvedValue(null);
 	vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
@@ -130,22 +127,21 @@ describe("GET /verify/{vendor}/{stamp}", () => {
 });
 
 describe("GET /verify/{vendor}/{customer}/{stamp}", () => {
-	it("goes through the consent gate — an unconsented customer 404s like an unknown one", async () => {
+	it("answers 410: per-customer documents were retired, and says a copy is not therefore forged", async () => {
 		const res = await get("vantage/acme-corp/20261008T170121613Z");
 
-		expect(customerProof).toHaveBeenCalledWith("vantage", "acme-corp");
-		expect(res.status).toBe(404);
+		expect(res.status).toBe(410);
+		const html = await res.text();
+		expect(html).toContain("retired on 2026-10-13");
+		expect(html).not.toMatch(/not issued by Letterprove/i);
+		expect(html).toContain("https://app.letterprove.com/attest/vantage.json");
+		expect(publishedVendorAggregateChain).not.toHaveBeenCalled();
 	});
 
-	it("verifies a named customer's snapshot, with the short named-proof cache", async () => {
-		const signed = await signAttestation({
-			vendor: "vantage", customer: "acme-corp", sessions_30d: 42, observed_through: NEW, published_at: NEW, prev_hash: GENESIS_HASH, method: "m",
-		});
-		vi.mocked(customerProof).mockResolvedValue({ current: signed, chain: [signed] } as never);
-		const res = await get("vantage/acme-corp/20261008T170121613Z");
+	it("answers 410 as JSON when asked", async () => {
+		const res = await get("vantage/acme-corp/20261008T170121613Z", "application/json");
 
-		expect(res.status).toBe(200);
-		expect(await res.text()).toContain("<th>sessions_30d</th><td>42</td>");
-		expect(res.headers.get("cache-control")).toBe("public, max-age=60, must-revalidate");
+		expect(res.status).toBe(410);
+		expect((await res.json()).error).toBe("gone");
 	});
 });

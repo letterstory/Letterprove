@@ -11,10 +11,10 @@ const UPDATED = "October 13, 2026";
 
 /**
  * The clauses that carry real weight here are §4 (what a signature actually
- * asserts) and §6 (consent before naming). Both encode product decisions
- * documented in the README — the provenance-tier model and the anonymous-by-
- * default consent gate — rather than boilerplate, because getting either wrong
- * is what would turn this product into the logo wall it exists to replace.
+ * asserts) and §6 (customers are never named). Both encode product decisions
+ * documented in the README — the provenance-tier model and the vendor-only
+ * attestation (decision 30) — rather than boilerplate, because getting either
+ * wrong is what would turn this product into the logo wall it exists to replace.
  */
 export default function TermsPage() {
 	return (
@@ -77,17 +77,17 @@ export default function TermsPage() {
 					much independent corroboration stands behind it — from vendor-asserted at the bottom, to
 					observed by our script on a domain you proved by DNS, to corroborated by a third
 					party&apos;s ledger. The tier is derived from that evidence alone; you cannot set it.
-					Fields that are your own statement (a customer&apos;s name, start date and features) are
-					labelled as such in every attestation. Anyone
-					reading a proof is expected to weigh the tier rather than treat every claim as
+					Anyone reading a proof is expected to weigh the tier rather than treat every claim as
 					equivalent.
 				</p>
 				<p>
 					Third-party corroboration today means Stripe: if you connect your own live Stripe account,
 					we read invoices that actually settled there and join them to usage we observed from the
-					same customer domain, for any of your customers, named or not. This evidence expires if it is not refreshed by a successful sync, so a
-					stale Stripe connection reads as absent corroboration, not as proof the customer stopped
-					paying.
+					same company domain, and publish how many observed companies pay — a count, never a
+					name. The account must publish your verified domain, unless we approve a related
+					company&apos;s account. This evidence expires if it is not refreshed by a successful
+					sync, so a stale Stripe connection reads as absent corroboration, not as proof anyone
+					stopped paying.
 				</p>
 				<p>
 					You agree not to represent a Letterprove attestation as certifying more than its tier
@@ -118,20 +118,17 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
-			<Section n={6} title="Naming your customers">
+			<Section n={6} title="Your customers are never named">
 				<p>
-					Publishing that a named company uses your product discloses{" "}
-					<strong>that company&apos;s</strong> information, not only yours.
+					A Letterprove attestation is about you: that you control your domain, that your Stripe
+					account is yours, and how many companies use and pay for your product.{" "}
+					<strong>It never names, publishes or contacts your customers.</strong> Company domains
+					are used inside Letterprove only to join observed usage to your Stripe payments, and
+					only counts are published.
 				</p>
 				<p>
-					A customer is anonymous by default and is only named once you mark them as consenting.
-					By doing so, <strong>you confirm that the customer has actually agreed</strong> to be
-					identified publicly in this way. You are responsible for holding that consent, and for
-					withdrawing it in Letterprove if the customer withdraws it with you.
-				</p>
-				<p>
-					Anonymous customers still count toward your aggregate totals. Consent controls naming,
-					not measurement.
+					Attestations that named individual customers were retired on October 13, 2026. Copies
+					signed before then remain verifiable; their addresses no longer serve them.
 				</p>
 			</Section>
 
@@ -190,8 +187,7 @@ export default function TermsPage() {
 				<p>
 					You agree to indemnify The Letter Company against claims, losses, and reasonable legal
 					costs arising from your use of the service, from attestations you publish, or from your
-					breach of these terms — including any claim by a customer you named without their
-					consent.
+					breach of these terms.
 				</p>
 			</Section>
 

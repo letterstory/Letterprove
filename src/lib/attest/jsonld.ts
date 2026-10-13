@@ -25,12 +25,12 @@ export function vendorJsonLd(proof: VendorProof, origin: string): Record<string,
 		url: `https://${proof.vendor.domain}`,
 		subjectOf: {
 			"@type": "Dataset",
-			name: `Letterprove attestations for ${proof.vendor.name}`,
+			name: `Letterprove attestation for ${proof.vendor.name}`,
 			description:
-				`Cryptographically signed attestations for ${proof.vendor.name}: ${proof.summary.attested_customers} ` +
-				`customers whose observed usage is corroborated by a settled invoice in ${proof.vendor.name}'s own Stripe account, ` +
-				`out of ${proof.summary.companies_observed} companies observed. Each attestation says which of its fields are ` +
-				`the vendor's own statement and links to the open-source logic that computed it.`,
+				`A signed, hourly attestation that ${proof.vendor.name} controls ${proof.vendor.domain} (proven by DNS) and is backed by ` +
+				`observed usage: ${proof.summary.companies_observed} companies observed signing in over the last 30 days, ` +
+				`${proof.summary.paying_companies} of them paying through ${proof.vendor.name}'s own Stripe account. ` +
+				`Counts only; no customer is named. It links to the open-source logic that computed it.`,
 			url: proofUrl,
 			dateModified: proof.summary.last_attested,
 			isAccessibleForFree: true,

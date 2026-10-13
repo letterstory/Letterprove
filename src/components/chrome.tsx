@@ -41,7 +41,7 @@ export function SiteHeader() {
 					    .well-known JSON at the top. The endpoints themselves are
 					    unchanged — agents still fetch exactly what they always did. */}
 					{/* First, because it is where somebody who has not decided yet
-					    should start: install, tiers, consent, and how to check a
+					    should start: install, what is attested, tiers, and how to check a
 					    proof without trusting us. */}
 					<Link className="hover:text-mint" href="/docs">
 						docs

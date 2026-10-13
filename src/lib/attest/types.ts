@@ -17,6 +17,12 @@ export interface PaymentScope {
 	products: number;
 }
 
+/**
+ * A RETIRED per-customer attestation. Nothing of this shape has been published
+ * since 2026-10-13 (README decision 30): Letterprove now publishes one vendor
+ * attestation (./aggregate.ts) and names no customer. The type stays because
+ * frozen chains hold documents of this shape, and they still verify.
+ */
 export interface AttestationBody {
 	/** Slug of the vendor who installed Letterprove. */
 	vendor: string;

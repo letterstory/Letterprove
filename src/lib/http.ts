@@ -31,8 +31,7 @@ export function proofJson(body: unknown, ttl = 3600): NextResponse {
 			// JSON is UTF-8 by definition (RFC 8259) so this is redundant to a
 			// correct client — but a signature is over UTF-8 BYTES, and a consumer
 			// that guesses latin-1 recomputes different bytes and fails to verify
-			// a perfectly good document. Non-ASCII is unavoidable here: customer
-			// names are company names. Being explicit costs nothing.
+			// a perfectly good document. Being explicit costs nothing.
 			"content-type": "application/json; charset=utf-8",
 			"cache-control": `public, max-age=${ttl}, stale-while-revalidate=86400`,
 			...NO_EDGE_CACHE,
@@ -45,47 +44,15 @@ export function proofJson(body: unknown, ttl = 3600): NextResponse {
 }
 
 /**
- * A proof response that NAMES a third party, cached far more briefly.
- *
- * Consent is withdrawable, and withdrawal is the one operation that has to
- * take effect now. `proofJson` caches for an hour with a DAY of
- * stale-while-revalidate — correct for an aggregate that names nobody, and
- * badly wrong here: a customer who withdraws could stay publicly named, and
- * their attestation publicly fetchable, long after the database says
- * otherwise. Measured in production: a revoked customer was still served from
- * cache after the revert.
- *
- * 60 seconds, and no stale-while-revalidate at all. SWR is the specific
- * hazard — it authorises serving a document the origin has already stopped
- * publishing. Losing edge caching on these is the correct trade: the aggregate
- * carries the numbers agents fetch in bulk, while a named per-customer
- * document is read rarely and must be right.
- */
-export function namedProofJson(body: unknown): NextResponse {
-	return NextResponse.json(body, {
-		headers: {
-			"content-type": "application/json; charset=utf-8",
-			"cache-control": "public, max-age=60, must-revalidate",
-			...NO_EDGE_CACHE,
-			"access-control-allow-origin": "*",
-			"x-letterprove": "on",
-		},
-	});
-}
-
-/**
  * A plain-language proof page — what /verify/{vendor}/{stamp} serves to a
  * browser or an answer engine's fetch tool. Same cache policy as the JSON it
- * describes: an hour for an aggregate, a minute and no SWR for anything that
- * names a customer, and never answered from Vercel's edge (see NO_EDGE_CACHE).
+ * describes, and never answered from Vercel's edge (see NO_EDGE_CACHE).
  */
-export function proofHtml(html: string, { names: namesCustomer }: { names: boolean }): NextResponse {
+export function proofHtml(html: string): NextResponse {
 	return new NextResponse(html, {
 		headers: {
 			"content-type": "text/html; charset=utf-8",
-			"cache-control": namesCustomer
-				? "public, max-age=60, must-revalidate"
-				: `public, max-age=${SNAPSHOT_CADENCE_SECONDS}, stale-while-revalidate=86400`,
+			"cache-control": `public, max-age=${SNAPSHOT_CADENCE_SECONDS}, stale-while-revalidate=86400`,
 			...NO_EDGE_CACHE,
 			"access-control-allow-origin": "*",
 			"x-letterprove": "on",
@@ -142,4 +109,40 @@ export function configJson(body: unknown, maxAge = 300): NextResponse {
 			"x-letterprove": "on",
 		},
 	});
+}
+
+/**
+ * What a retired per-customer URL answers: 410 Gone, with the reason in words.
+ *
+ * Per-customer documents were retired on 2026-10-13 (README decision 30):
+ * Letterprove now attests the vendor only, in counts, and names no customer.
+ * Copies signed before then still verify against the published keys; their
+ * URLs simply stop serving. The same answer for every vendor and customer
+ * slug, so it confirms nothing about who was a customer.
+ */
+export const RETIRED_STATEMENT =
+	"Per-customer proofs were retired on 2026-10-13. Letterprove now publishes one attestation per vendor — who the vendor is and the evidence behind it, in counts — and never names a customer. " +
+	"This does not mean any document pointing here was forged: a copy signed before then still verifies against Letterprove's published keys.";
+
+export function retiredCustomerProof(vendor: string, { html = false }: { html?: boolean } = {}): NextResponse {
+	const vendorProof = `https://app.letterprove.com/attest/${encodeURIComponent(vendor)}.json`;
+	const headers = {
+		"cache-control": "public, max-age=86400",
+		...NO_EDGE_CACHE,
+		"access-control-allow-origin": "*",
+		"x-letterprove": "on",
+	};
+	if (html) {
+		const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		return new NextResponse(
+			`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Retired: Letterprove</title></head>` +
+				`<body style="font-family:system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.6"><h1>Retired</h1><p>${esc(RETIRED_STATEMENT)}</p>` +
+				`<p>The vendor's current attestation: <a href="${esc(vendorProof)}">${esc(vendorProof)}</a></p></body></html>`,
+			{ status: 410, headers: { ...headers, "content-type": "text/html; charset=utf-8" } },
+		);
+	}
+	return NextResponse.json(
+		{ error: "gone", statement: RETIRED_STATEMENT, vendor_proof: vendorProof },
+		{ status: 410, headers: { ...headers, "content-type": "application/json; charset=utf-8" } },
+	);
 }

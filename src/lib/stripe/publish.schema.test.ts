@@ -351,19 +351,13 @@ describe("tier 3 publish path, against a real Postgres schema", () => {
 		await syncVendorPayments(VENDOR_ID, VENDOR_SLUG);
 
 		const payment = await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN);
-		const customer = { tier: 1, verified: false, countersignedAt: null } as never;
 
-		expect(earned(customer, true, true, payment)).toEqual({ tier: 3, verified: true });
+		expect(earned(true, true, payment)).toEqual({ tier: 3, verified: true });
 
 		// Tier 3 sits BELOW the observed/domain-verified gates on purpose: money
 		// proves a commercial relationship, not that the product was used.
-		expect(earned(customer, false, true, payment)).toEqual({ tier: 0, verified: false });
-		expect(earned(customer, true, false, payment)).toEqual({ tier: 0, verified: false });
-
-		// And it is the top: a leftover counter-signature (tier 4, retired)
-		// earns nothing above it.
-		const countersigned = { tier: 1, verified: false, countersignedAt: "2026-08-23T00:00:00Z" } as never;
-		expect(earned(countersigned, true, true, payment).tier).toBe(3);
+		expect(earned(false, true, payment)).toEqual({ tier: 0, verified: false });
+		expect(earned(true, false, payment)).toEqual({ tier: 0, verified: false });
 	});
 
 	it("a cancelled subscription DISAPPEARS from evidence rather than lingering", async () => {
@@ -429,9 +423,8 @@ describe("tier 3 publish path, against a real Postgres schema", () => {
 		const { rows } = await pg.query("select * from vendor_payment_evidence where vendor_id = $1", [VENDOR_ID]);
 		expect(rows).toHaveLength(0);
 
-		const customer = { tier: 1, verified: false, countersignedAt: null } as never;
 		const payment = await paymentEvidenceFor(VENDOR_ID, PAYING_DOMAIN);
-		expect(earned(customer, true, true, payment)).toEqual({ tier: 1, verified: false });
+		expect(earned(true, true, payment)).toEqual({ tier: 1, verified: false });
 	});
 
 	it("an active subscription nothing settled against writes nothing", async () => {

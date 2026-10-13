@@ -152,10 +152,10 @@ describe("what promotion refuses", () => {
 });
 
 describe("what promotion writes", () => {
-	it("creates the record anonymous, never named", async () => {
+	it("writes no naming field: nothing on the vendor's list is published", async () => {
 		const { insert } = await setup([row("globex.com")]);
 		await promoteDomain("lettertrace", "globex.com");
-		expect(insert.mock.calls[0][0]).toMatchObject({ consent: "anonymous" });
+		expect(insert.mock.calls[0][0]).not.toHaveProperty("consent");
 	});
 
 	// tier is a CEILING re-derived by earned() at publish time. Storing

@@ -5,13 +5,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 
-import { currentSnapshot } from "@/rollup/snapshots";
 import { domainArrivals } from "./domain-arrivals";
 import { fraudFeatures } from "./fraud-features";
 import { geoDistribution } from "./geo-distribution";
 
 /**
- * The four readers that feed a signed number or the fraud gate, run against
+ * The readers that feed the fraud gate, run against
  * real Postgres holding MORE ROWS THAN POSTGREST WILL RETURN.
  *
  * Their own unit suites hand back one page from a hand-rolled mock. That is a
@@ -243,33 +242,6 @@ describe("domainArrivals, over the row cap", () => {
 
 	it("is empty, not partial, when the vendor has nothing", async () => {
 		expect(await domainArrivals(VENDOR)).toEqual({ vendor_first_seen: null, first_seen: [] });
-	});
-});
-
-describe("currentSnapshot, over the row cap", () => {
-	// sessions_30d is signed and hash-chained. A prefix here is a signature over
-	// a number that understates its own evidence.
-	it("sums every session row rather than the first page of them", async () => {
-		await seedRollups(OVER_CAP, { sessions: 2 });
-
-		expect(await unpagedCount("hot_rollups")).toBe(MAX_ROWS);
-
-		const snapshot = await currentSnapshot(VENDOR, DOMAIN);
-		expect(snapshot.sessions_30d).toBe(OVER_CAP * 2);
-		expect(snapshot.observed).toBe(true);
-		expect(snapshot.readOk).toBe(true);
-	});
-
-	it("matches an unpaged read exactly for a small table", async () => {
-		await seedRollups(3, { sessions: 7 });
-
-		expect((await currentSnapshot(VENDOR, DOMAIN)).sessions_30d).toBe(21);
-	});
-
-	// The distinction proofs.ts gates the published tier on: no rows is an
-	// absence of measurement, not a measured zero.
-	it("reports not-observed rather than a confident zero when there are no rows", async () => {
-		expect(await currentSnapshot(VENDOR, DOMAIN)).toMatchObject({ sessions_30d: 0, observed: false, readOk: true });
 	});
 });
 

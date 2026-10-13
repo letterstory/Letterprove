@@ -11,8 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * companies use Letterstory, before Letterprove had launched and before anyone
  * had decided to say it.
  *
- * What is gated is PUBLICATION ONLY. Collection, rollup, freeze, signing and
- * countersigning all keep running while a vendor is private, so the chain has
+ * What is gated is PUBLICATION ONLY. Collection, rollup, freeze and signing
+ * all keep running while a vendor is private, so the chain has
  * no hole in it and going public is a flip rather than a rebuild. Those are
  * two separate claims and this file tests both:
  *
@@ -30,8 +30,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("@/rollup/history", () => ({ loadPersistedChain: vi.fn() }));
-vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
-vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
+vi.mock("./vendor-evidence", () => ({
+	stripeBinding: vi.fn(async () => null),
+	hostCount: vi.fn(async () => 0),
+	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
+	observedSince: vi.fn(async () => null),
+}));
 vi.mock("@/lib/access/log", () => ({ logProofAccess: vi.fn() }));
 // Reached transitively through countersign -> fraudFeatures, against a query
 // shape the db mock below is not built for. Nothing here is about arrival
@@ -60,6 +64,8 @@ const PUBLIC_VENDOR = {
 	category: "AI brand monitoring",
 	key: "lp_live_lettertrace",
 	domainVerified: true,
+	domainVerifiedAt: "2025-12-01T00:00:00.000Z",
+	issuerAffiliation: null,
 	proofsPublishedAt: "2026-01-01T00:00:00.000Z" as string | null,
 	customers: [
 		{
@@ -70,7 +76,6 @@ const PUBLIC_VENDOR = {
 			tier: 2 as const,
 			verified: true,
 			features: ["sso"],
-			consent: "named" as const,
 		},
 	],
 };
@@ -139,21 +144,10 @@ beforeEach(async () => {
 	const { dbClient } = await import("@/lib/db/client");
 	const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
 	const { loadPersistedChain } = await import("@/rollup/history");
-	const { currentSnapshot } = await import("@/rollup/snapshots");
-	const { tierReport } = await import("@/lib/tiers/report");
 
 	vi.mocked(dbClient).mockReturnValue(mockDb([{ domain: "tenevents.com", sessions: 7, signups: 1, logins: 2 }]) as never);
 	vi.mocked(loadAggregateHistory).mockResolvedValue([]);
 	vi.mocked(loadPersistedChain).mockResolvedValue([]);
-	vi.mocked(currentSnapshot).mockResolvedValue({
-		observed_through: "2026-09-14T00:00:00.000Z",
-		published_at: "2026-09-14T00:00:00.000Z",
-		sessions_30d: 7,
-		seats_active: 0,
-		observed: true,
-		readOk: true,
-	});
-	vi.mocked(tierReport).mockResolvedValue({ observed: 1, attributable: 1, published: 1, unpublishedEvidence: 0, rows: [] } as never);
 });
 
 describe("the publication gate, at the library boundary", () => {
@@ -223,21 +217,12 @@ describe("the publication gate, at the library boundary", () => {
 		expect(await publishedVendorAggregate("lettertrace")).not.toBeNull();
 	});
 
-	/*
-	 * Two consents, one door. The customer agreed to be named; the vendor has
-	 * not published. A customer who consented early must not be the thing that
-	 * launches the vendor.
-	 */
-	it("withholds a consenting customer of a private vendor, while still chaining them", async () => {
-		const { customerChain, customerProof } = await import("./proofs");
-
-		expect(await customerChain("letterstory", "tenevents")).not.toBeNull();
-		expect(await customerProof("letterstory", "tenevents")).toBeNull();
-		expect(await customerProof("lettertrace", "tenevents")).not.toBeNull();
-	});
-
 	it("keeps the vendor's own read-back of their snapshots ungated", async () => {
 		const { vendorSnapshots } = await import("./proofs");
+		const { loadPersistedChain } = await import("@/rollup/history");
+		vi.mocked(loadPersistedChain).mockResolvedValue([
+			{ hourBucket: 1, attestation: { published_at: "2026-10-12T00:05:00.000Z", verified: false, sessions_30d: 7, features: [] } },
+		] as never);
 
 		// A vendor reading their own data through a token scoped to their own
 		// vendor id is not publication — the same trust boundary as
@@ -269,34 +254,21 @@ describe("every public route, for a private vendor", () => {
 		expect(pub.status).toBe(200);
 	});
 
-	it("404s a named customer's attestation", async () => {
-		const { GET } = await import("@/app/attest/[vendor]/[customer]/route");
-
-		const priv = await GET(req("https://x/attest/letterstory/tenevents"), {
-			params: Promise.resolve({ vendor: "letterstory", customer: "tenevents" }),
-		});
-		const pub = await GET(req("https://x/attest/lettertrace/tenevents"), {
-			params: Promise.resolve({ vendor: "lettertrace", customer: "tenevents" }),
-		});
-
-		expect(priv.status).toBe(404);
-		expect(pub.status).toBe(200);
-	});
-
-	// The spelling that got past the consent gate once already (#137). Every
-	// public spelling of a document has to clear the same gate, not the shortest.
-	it("404s that customer's chain too", async () => {
-		const { GET } = await import("@/app/attest/[vendor]/[customer]/chain/route");
-
-		const priv = await GET(req("https://x/attest/letterstory/tenevents/chain"), {
-			params: Promise.resolve({ vendor: "letterstory", customer: "tenevents" }),
-		});
-		const pub = await GET(req("https://x/attest/lettertrace/tenevents/chain"), {
-			params: Promise.resolve({ vendor: "lettertrace", customer: "tenevents" }),
-		});
-
-		expect(priv.status).toBe(404);
-		expect(pub.status).toBe(200);
+	// Retired on 2026-10-13 (decision 30). The same 410 for a private vendor,
+	// a public one and an unknown one, so the retired routes confirm nothing.
+	it("answers the retired per-customer routes identically for private, public and unknown vendors", async () => {
+		const { GET: doc } = await import("@/app/attest/[vendor]/[customer]/route");
+		const { GET: chain } = await import("@/app/attest/[vendor]/[customer]/chain/route");
+		const bodies: unknown[] = [];
+		for (const vendor of ["letterstory", "lettertrace", "nobody"]) {
+			for (const get of [doc, chain]) {
+				const res = await get(req(`https://x/attest/${vendor}/tenevents`), { params: Promise.resolve({ vendor, customer: "tenevents" }) });
+				expect(res.status).toBe(410);
+				const body = (await res.json()) as { vendor_proof: string };
+				bodies.push({ ...body, vendor_proof: body.vendor_proof.replace(vendor, "X") });
+			}
+		}
+		expect(new Set(bodies.map((b) => JSON.stringify(b))).size).toBe(1);
 	});
 
 	// The machine half of /proofs/{vendor}, which proxy.ts rewrites to on an
@@ -347,20 +319,6 @@ describe("publishing is a flip, not a rebuild", () => {
 		expect(vi.mocked(loadAggregateHistory).mock.calls).toHaveLength(readsBefore);
 	});
 
-	it("serves the customer history that was already built while the vendor was private", async () => {
-		const { customerChain, customerProof } = await import("./proofs");
-		const { loadPersistedChain } = await import("@/rollup/history");
-
-		const whilePrivate = await customerChain("letterstory", "tenevents");
-		const readsBefore = vi.mocked(loadPersistedChain).mock.calls.length;
-
-		PRIVATE_VENDOR.proofsPublishedAt = "2026-09-14T12:00:00.000Z";
-		const proof = await customerProof("letterstory", "tenevents");
-
-		expect(proof!.chain).toEqual(whilePrivate);
-		expect(vi.mocked(loadPersistedChain).mock.calls).toHaveLength(readsBefore);
-	});
-
 	it("takes the proofs back down when the flag goes back to null", async () => {
 		const { publishedVendorAggregate } = await import("./aggregate");
 
@@ -369,5 +327,56 @@ describe("publishing is a flip, not a rebuild", () => {
 
 		PRIVATE_VENDOR.proofsPublishedAt = null;
 		expect(await publishedVendorAggregate("letterstory")).toBeNull();
+	});
+});
+
+/*
+ * Decision 30: Letterprove attests the vendor, in counts, and names no
+ * customer. The fixture's one customer ("Ten Events", tenevents.com) is
+ * observed, on the vendor's private list, AND paying — the strongest case for
+ * a leak — and no public response may carry its domain, its name or its slug.
+ */
+describe("no public route ever emits a customer", () => {
+	const FORBIDDEN = /tenevents|ten events/i;
+	const req = (url: string, accept = "application/json") => new Request(url, { headers: { accept } });
+
+	beforeEach(async () => {
+		// The aggregate chain is memoised per hour; start from a fresh module
+		// graph so this case's evidence is what gets signed.
+		vi.resetModules();
+		const { dbClient } = await import("@/lib/db/client");
+		const { loadAggregateHistory } = await import("@/rollup/aggregate-history");
+		vi.mocked(dbClient).mockReturnValue(mockDb([{ domain: "tenevents.com", sessions: 7, signups: 1, logins: 2 }]) as never);
+		vi.mocked(loadAggregateHistory).mockResolvedValue([]);
+		const ev = await import("./vendor-evidence");
+		vi.mocked(ev.stripeBinding).mockResolvedValue("domain_match");
+		vi.mocked(ev.payingAmong).mockResolvedValue({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+	});
+
+	it("keeps the observed, paying customer out of every response body", async () => {
+		const bodies: [string, string][] = [];
+		const read = async (label: string, res: Response | Promise<Response>) => bodies.push([label, await (await res).text()]);
+		const v = { params: Promise.resolve({ vendor: "lettertrace" }) };
+
+		await read("/attest/{v}", (await import("@/app/attest/[vendor]/route")).GET(req("https://x/attest/lettertrace.json"), { params: Promise.resolve({ vendor: "lettertrace.json" }) }));
+		await read("/attest/{v}/chain", (await import("@/app/attest/[vendor]/chain/route")).GET(req("https://x/attest/lettertrace/chain"), v));
+		await read("/api/proofs/{v}", (await import("@/app/api/proofs/[vendor]/route")).GET(req("https://x/api/proofs/lettertrace"), v));
+		await read("/attest/{v}/{c}", (await import("@/app/attest/[vendor]/[customer]/route")).GET(req("https://x/attest/lettertrace/tenevents"), { params: Promise.resolve({ vendor: "lettertrace", customer: "tenevents" }) }));
+		await read("/.well-known/letterprove.json", (await import("@/app/api/well-known/letterprove/route")).GET(req("https://app.letterprove.com/.well-known/letterprove.json")));
+		await read("/llms.txt", (await import("@/app/llms.txt/route")).GET(req("https://app.letterprove.com/llms.txt", "text/plain")));
+
+		const attestation = JSON.parse(bodies[0][1]) as { verify: string; tier: number; paying_companies: number };
+		// The case is real: the attestation does count the paying customer.
+		expect(attestation.paying_companies).toBe(1);
+		expect(attestation.tier).toBe(3);
+
+		const stamp = attestation.verify.split("/").pop()!;
+		await read("/verify/{v}/{stamp}", (await import("@/app/verify/[vendor]/[...rest]/route")).GET(req(`https://x/verify/lettertrace/${stamp}`), { params: Promise.resolve({ vendor: "lettertrace", rest: [stamp] }) }));
+		await read("/verify/{v}/{c}/{stamp}", (await import("@/app/verify/[vendor]/[...rest]/route")).GET(req(`https://x/verify/lettertrace/tenevents/${stamp}`, "text/html"), { params: Promise.resolve({ vendor: "lettertrace", rest: ["tenevents", stamp] }) }));
+
+		for (const [label, body] of bodies) {
+			expect(body.length, label).toBeGreaterThan(0);
+			expect(body, `${label} leaked a customer`).not.toMatch(FORBIDDEN);
+		}
 	});
 });
