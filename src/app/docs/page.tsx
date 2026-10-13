@@ -167,7 +167,9 @@ export default async function DocsPage() {
               processing agreement with every vendor, and a breach story. The
               same discipline runs through the rest of the payload. No user ids,
               no cookies, no local storage, no IP address, no page URLs, no
-              referrer.
+              referrer. The one exception is agent counting, below: on a page
+              an automated browser renders, the script sends that page&apos;s
+              path and nothing about any person.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -261,6 +263,35 @@ export default async function DocsPage() {
               verification carry that weight instead. Rotating the key takes
               effect immediately and the old one stops working at once, so every
               install has to be updated in the same change.
+            </p>
+
+            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
+              Counting AI agents on your site
+            </h3>
+            <p>
+              The same install tells you which AI agents and crawlers read your
+              site. On any page rendered by an automated browser (ChatGPT&apos;s
+              agent, Comet, a headless browser), the script sends one beacon
+              with the page&apos;s path. Ordinary visitors send nothing.
+            </p>
+            <p>
+              Most agents never run JavaScript: ChatGPT, Claude and Perplexity
+              fetch your HTML and leave, and so do the search crawlers. To count
+              them, add the optional server snippet from{" "}
+              <code>get_install_snippet</code> (<code>server_snippet</code>, a
+              Next.js middleware and a plain Node version). It forwards each
+              request&apos;s user-agent, address and path to{" "}
+              <code>/api/v1/agent-visit</code> without waiting for an answer,
+              so it can never slow or break your page.
+            </p>
+            <p>
+              Read the counts with <code>get_agent_visits</code>: per agent,
+              the most-read paths and a daily series. <em>Verified</em> means
+              the request came from an address the operator publishes for its
+              agents; <em>claimed</em> means only the user-agent said so. We
+              keep the classification and drop the address and user-agent. This
+              is for you alone. It is never published and never affects your
+              proof.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">

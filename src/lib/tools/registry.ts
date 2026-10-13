@@ -27,7 +27,8 @@ import { vendorRoster } from "@/lib/staff/vendors";
 import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
-import { installSnippet } from "@/lib/vendors/install";
+import { installSnippet, serverSnippets } from "@/lib/vendors/install";
+import { agentVisitsReport } from "@/lib/agents/visits";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
 import { MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, type HostRow } from "@/lib/vendors/hosts";
 import {
@@ -724,7 +725,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "get_install_snippet",
-		description: "The <script> tag to install on the caller's site, pointed at this server's own origin, and the \"Attested and proven by Letterprove\" footer badge (show it only when badge.live — before publishing its link is a 404). Args: none.",
+		description: "The <script> tag to install on the caller's site, pointed at this server's own origin; the optional server snippet (server_snippet) that forwards AI-agent and crawler requests, which never run JavaScript, so get_agent_visits can count them; and the \"Attested and proven by Letterprove\" footer badge (show it only when badge.live — before publishing its link is a 404). Args: none.",
 		capability: "vendor:read",
 		inputSchema: S.getInstallSnippetInput,
 		outputSchema: S.getInstallSnippetOutput,
@@ -752,6 +753,9 @@ export const TOOLS: BoundTool[] = [
 					snippet: installSnippet(context.origin, vendor.key),
 					origin: context.origin,
 					publishable_key: vendor.key,
+					// Optional second line for the vendor's server. The script tag
+					// only sees agents that render pages; most never do.
+					server_snippet: serverSnippets(context.origin, vendor.key),
 					// The footer badge rides the same call: it is the other thing a
 					// vendor pastes into their site. `live` is false until the vendor
 					// publishes, because until then the page it links to is a 404.
@@ -1695,6 +1699,30 @@ export const TOOLS: BoundTool[] = [
 				ok: true,
 				body: { domain: vendor.domain, hosts: ((data ?? []) as HostRow[]).map((r) => hostStatus(r, vendor.domain_verification_token)) },
 			};
+		},
+	}),
+	defineTool({
+		// Private analytics, never evidence: see src/lib/agents/visits.ts. Nothing
+		// here reaches the attestation or any public route.
+		name: "get_agent_visits",
+		description:
+			"AI agents and crawlers that visited the caller's own site: totals per agent (verified from the operator's published addresses vs. claimed by user-agent only), the most-read paths, and a daily series. Args: days (1–90, default 30). Agents that never run JavaScript (ChatGPT, Claude, Perplexity fetches, search crawlers) are counted only once the server snippet from get_install_snippet is installed; the script tag alone sees only automated browsers. Private to the vendor; never published.",
+		capability: "vendor:read",
+		inputSchema: S.getAgentVisitsInput,
+		outputSchema: S.getAgentVisitsOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const parsed = S.getAgentVisitsInput.safeParse(args ?? {});
+			if (!parsed.success) {
+				return { ok: false, status: 400, body: { error: "invalid_days", detail: "days must be a whole number from 1 to 90." } };
+			}
+			try {
+				return { ok: true, body: await agentVisitsReport(vendorId, parsed.data.days ?? 30) };
+			} catch (e) {
+				console.error("[letterprove:agent-visits] report failed", e instanceof Error ? e.message : String(e));
+				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			}
 		},
 	}),
 ];

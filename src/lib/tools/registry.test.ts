@@ -551,7 +551,7 @@ describe("dispatchTool", () => {
 	it("builds an install snippet from the caller's vendor key and the request's own origin", async () => {
 		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", proofs_published_at: null };
 		const { dispatchTool } = await import("./registry");
-		const { installSnippet } = await import("@/lib/vendors/install");
+		const { installSnippet, serverSnippets } = await import("@/lib/vendors/install");
 		const { badgeHtml } = await import("@/lib/vendors/badge");
 		const origin = "https://acme.example.com";
 
@@ -565,10 +565,17 @@ describe("dispatchTool", () => {
 					snippet: installSnippet(origin, "lp_live_acme_9f2c"),
 					origin,
 					publishable_key: "lp_live_acme_9f2c",
+					server_snippet: serverSnippets(origin, "lp_live_acme_9f2c"),
 					badge: { html: badgeHtml(origin, "acme"), href: `${origin}/proofs/acme`, live: false },
 				},
 			},
 		});
+		// Same origin rule as the script tag: a snippet forwarding to the wrong
+		// host is a silent outage.
+		const body = (outcome as { result: { body: { server_snippet: { endpoint: string; nextjs_middleware: string } } } }).result.body;
+		expect(body.server_snippet.endpoint).toBe(`${origin}/api/v1/agent-visit`);
+		expect(body.server_snippet.nextjs_middleware).toContain(`"${origin}/api/v1/agent-visit"`);
+		expect(body.server_snippet.nextjs_middleware).toContain("keepalive: true");
 	});
 
 	// Until a vendor publishes, the page the badge links to is a 404, so the

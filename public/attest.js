@@ -22,6 +22,12 @@
  * `email` is never sent anywhere — only its domain part is, and only after
  * being split off locally. See README § "The one hard rule: domain only".
  *
+ * Agent views (no API call needed): when the page is rendered by an automated
+ * browser — navigator.webdriver set, or a user-agent naming an agent — one
+ * beacon per page load goes to POST /api/v1/agent-visit carrying only the
+ * key, the path and that flag. The server reads who it was from the request's
+ * own headers. Ordinary visitors send nothing. See src/lib/agents/visits.ts.
+ *
  * Every public method is wrapped so nothing here can throw into the host
  * page: a vendor's product must work identically whether this script loads,
  * fails, or is missing entirely.
@@ -40,6 +46,11 @@
 
 	var CONFIG_URL = origin + "/api/v1/config?k=" + encodeURIComponent(key);
 	var OBSERVE_URL = origin + "/api/v1/observe";
+	var AGENT_VISIT_URL = origin + "/api/v1/agent-visit";
+	// A self-identified agent or headless browser. Deliberately small: the
+	// server classifies from the real user-agent, this only decides whether a
+	// page is worth one beacon at all.
+	var AGENT_UA = /chatgpt|gptbot|oai-searchbot|claude|anthropic|perplexity|headlesschrome|bot\b|crawler|spider/i;
 
 	// Boot state. `cfg` and `ready`/`failed` come from the one config fetch
 	// below — per README § Configuration, fails closed and is never retried
@@ -95,16 +106,7 @@
 		} catch {
 			return;
 		}
-		try {
-			if (navigator.sendBeacon && navigator.sendBeacon(OBSERVE_URL, body)) return;
-		} catch {
-			// fall through to fetch
-		}
-		try {
-			fetch(OBSERVE_URL, { method: "POST", body: body, keepalive: true, credentials: "omit" }).catch(function () {});
-		} catch {
-			// never throw into the host page
-		}
+		beacon(OBSERVE_URL, body);
 	}
 
 	function fire(ev) {
@@ -147,6 +149,32 @@
 			});
 	}
 
+	function beacon(url, body) {
+		try {
+			if (navigator.sendBeacon && navigator.sendBeacon(url, body)) return;
+		} catch {
+			// fall through to fetch
+		}
+		try {
+			fetch(url, { method: "POST", body: body, keepalive: true, credentials: "omit" }).catch(function () {});
+		} catch {
+			// never throw into the host page
+		}
+	}
+
+	function agentView() {
+		try {
+			var webdriver = navigator.webdriver === true;
+			if (!webdriver && !AGENT_UA.test(navigator.userAgent || "")) return;
+			beacon(
+				AGENT_VISIT_URL,
+				JSON.stringify({ k: key, path: location.pathname, client: true, webdriver: webdriver })
+			);
+		} catch {
+			// never throw into the host page
+		}
+	}
+
 	function identify(email) {
 		try {
 			var d = domainFromEmail(email);
@@ -186,4 +214,5 @@
 	window.Letterprove = api;
 
 	boot();
+	agentView();
 })();

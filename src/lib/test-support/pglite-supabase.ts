@@ -93,6 +93,7 @@ function isoTimestamps<T>(row: T): T {
  *   update(patch).eq()... .select(returning) -> maybeSingle | single
  *   upsert(row, { onConflict }) -> (awaited)
  *   delete().eq()... -> (awaited)
+ *   rpc(fn, { p_arg: value }) -> (awaited), named arguments
  *
  * Every clause it builds is a real SQL statement against `pg` — nothing here
  * is faked except the two non-Postgres boundaries `withAuthAdmin` stubs
@@ -100,6 +101,18 @@ function isoTimestamps<T>(row: T): T {
  */
 export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {}) {
 	const client = {
+		async rpc(fn: string, args: Record<string, unknown> = {}) {
+			const names = Object.keys(args);
+			try {
+				const { rows } = await pg.query<{ result: unknown }>(
+					`select ${fn}(${names.map((n, i) => `${n} => $${i + 1}`).join(", ")}) as result`,
+					names.map((n) => args[n]),
+				);
+				return { data: rows[0]?.result ?? null, error: null };
+			} catch (e) {
+				return { data: null, error: pgError(e) };
+			}
+		},
 		from(table: string) {
 			const wheres: Where[] = [];
 			const orderBys: { col: string; ascending: boolean }[] = [];

@@ -575,6 +575,40 @@ nothing here can throw into the host page, and transport prefers
 `navigator.sendBeacon`, falling back to a `keepalive` `fetch` where it's
 unavailable.
 
+### Agent visits — **Decided (10-13)**
+
+A second, separate question the same install answers: **which AI agents and
+crawlers read the vendor's own site.** It is private analytics for the vendor
+and never evidence — nothing in `vendor_agent_visits` is read by the
+attestation, the tiers, or any public route. Code: `src/lib/agents/visits.ts`,
+`POST /api/v1/agent-visit`, tool `get_agent_visits`.
+
+Two ways in, because most agents never run JavaScript:
+
+| Mode | Who sends it | What it sees |
+|---|---|---|
+| **client** | `attest.js`, automatically, on any page where `navigator.webdriver` is set or the user-agent names an agent. Sends only `{k, path, client: true, webdriver}`; the server reads the user-agent, address and `Signature-Agent` from the request's own headers and the host from `Origin`. | Agents that render pages in a real browser (ChatGPT's agent, Comet, headless browsers). |
+| **server** | An optional few lines in the vendor's server (`get_install_snippet` → `server_snippet`: a Next.js middleware and a generic Node version), forwarding `{k, ua, ip, path, host, signature_agent}` fire-and-forget with `keepalive`. | Everything that fetches HTML and leaves: ChatGPT/Claude/Perplexity fetchers, GPTBot, ClaudeBot, Googlebot, Bingbot. |
+
+Rules: browsers and unrecognisable clients are dropped before any database
+read; the host must be the vendor's verified domain or an accepted host
+(`vendor_hosts`); an unverified vendor collects nothing — the same door as
+`/v1/observe`. Each visit is folded into one row per vendor, day, agent, kind,
+verified flag and path by `record_agent_visit()`. Paths lose their query
+string and fragment and id-like segments become `:id`. **No address and no raw
+user-agent are stored.**
+
+`verified` means the request came from an address the claimed operator
+publishes for its agents (`src/lib/access/verify-agent.ts`, the same check
+agentic-read billing uses, with Google's and Bing's crawler lists added). In
+server mode that address is the one the vendor's server reported, so it is
+only as honest as that server; and the publishable key is not a secret, so
+anyone can post here. Both are acceptable for analytics a vendor reads about
+itself, and both are why none of it is ever evidence. ChatGPT's agent browses
+under an ordinary Chrome user-agent and is recognised by `Signature-Agent:
+"https://chatgpt.com"` (stored as claimed; the signature itself is not
+checked).
+
 ### Reliability
 
 Telemetry must never break a host page — every path wrapped, every failure
@@ -1047,6 +1081,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 29 | **The tier comes from evidence alone, and every field says whose word it is.** `earned()` reads only DNS proof, observation and Stripe evidence — the stored customer `tier` is ignored. Tier 2 is not issued until the ASN binding exists; the aggregate publishes tier 1 for the same evidence a customer claim does, and both are gated on DNS proof. Customer bodies list `vendor_stated` (`customer_name`, `since`, `features`); `features_proven` is renamed `features_stated`; naming is the vendor's statement of permission. Domain proof is re-checked daily and cleared after three misses over two days. `/llms.txt` is generated from the discovery document. Supersedes 14 and the asserted-tier ceiling in the evidence gate | ✅ **Decided (10-13)**, Casey — see `src/lib/attest/body.ts`, `src/lib/vendors/dns-recheck.ts` |
 | 30 | **Letterprove attests the vendor, in counts, and never names a customer.** One attestation per vendor: identity (`domain`, `domain_verified_since`, `hosts`, `stripe_account_bound`/`stripe_binding`) and evidence (`companies_observed`, `paying_companies`, `paying_since`, `sessions`, `observed_since`, `payment_scope`). Per-customer documents, their verify links, the per-customer freeze and the vendor-set `consent` field are retired; their URLs answer 410. **Vendor tier = the strongest evidence class present** — 3 when at least one observed company pays through the vendor's own bound Stripe account, 1 when companies are observed on the DNS-proven domain, 0 otherwise — published beside `paying_companies` so it is never read as "every company pays". A minimum share was rejected: any threshold is arbitrary and hides the number a reader needs; the count states it exactly. `paying_companies` joins payment evidence to the attestation's own observed domains (not to the vendor's customer list), and counts only while the Stripe account is bound | ✅ **Decided (10-13)**, Casey — see [Customers are never named](#customers-are-never-named--decided-10-13) |
 | 31 | **The vendor's own PostHog is read, never written, and published only as labelled history.** `connect_posthog` takes a personal API key (`phx_`, `query:read`); a public project key (`phc_`) is refused. A daily sync reads, inside PostHog, the domain part of identified people's emails — never an address — and keeps company domains only. The attestation carries `reported_history` (`companies`, `since`, `active_companies_30d`, `observed_also_reported`) listed in `vendor_stated`, and it never moves the tier: the vendor controls that project, and anyone with its public key can send events into it. Published only while the project records traffic on the vendor's verified domain or accepted hosts, synced within two days; three failed syncs clear it. Its value is history Letterprove cannot have observed before install, and `observed_also_reported` is how far that history agrees with what Letterprove observed | ✅ **Decided (10-13)**, Matthew's rollout list — see `src/lib/posthog/` |
+| 32 | **Agent visits to a vendor's own site are private analytics, never evidence.** `attest.js` beacons automated-browser page views, and an optional server snippet forwards agent and crawler requests, to `POST /api/v1/agent-visit`; `get_agent_visits` reports them, verified (operator-published addresses) vs. claimed. No address or raw user-agent is stored, and nothing reaches the attestation | ✅ **Decided (10-13)** — see [Agent visits](#agent-visits--decided-10-13) |
 
 ### Open
 

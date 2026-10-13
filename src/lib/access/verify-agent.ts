@@ -35,6 +35,10 @@ export const RANGE_SOURCES: Record<string, string[]> = {
 	],
 	apple: ["https://search.developer.apple.com/applebot.json"],
 	commoncrawl: ["https://index.commoncrawl.org/ccbot.json"],
+	// Search crawlers. Never billed (only ai_agent reads are), but agent-visit
+	// counts on a vendor's own site report them verified or claimed too.
+	google: ["https://developers.google.com/static/search/apis/ipranges/googlebot.json"],
+	bing: ["https://www.bing.com/toolbox/bingbot.json"],
 };
 
 /** Lists change rarely; a day-old copy is fine, and refetching per read would be absurd. */
