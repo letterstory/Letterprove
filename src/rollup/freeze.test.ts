@@ -63,6 +63,7 @@ function mockDb({ selectResult, upsertResult }: { selectResult: { data: unknown;
 		eq: ReturnType<typeof vi.fn>;
 		gte: ReturnType<typeof vi.fn>;
 		lt: ReturnType<typeof vi.fn>;
+		lte: ReturnType<typeof vi.fn>;
 		order: ReturnType<typeof vi.fn>;
 		limit: ReturnType<typeof vi.fn>;
 		maybeSingle: ReturnType<typeof vi.fn>;
@@ -75,6 +76,7 @@ function mockDb({ selectResult, upsertResult }: { selectResult: { data: unknown;
 	// being publishable.
 	chain.gte = vi.fn(() => chain);
 	chain.lt = vi.fn(() => chain);
+	chain.lte = vi.fn(() => chain);
 	chain.order = vi.fn(() => chain);
 	chain.limit = vi.fn(() => chain);
 	chain.maybeSingle = vi.fn().mockResolvedValue(selectResult);
@@ -132,7 +134,23 @@ describe("freezeSnapshots", () => {
 		expect(upsertCalls).toHaveLength(3);
 		const [row, opts] = upsertCalls[0] as [Record<string, unknown>, Record<string, unknown>];
 		expect((row.attestation as { prev_hash: string }).prev_hash).toBe(GENESIS_HASH);
-		expect(opts).toEqual({ onConflict: "vendor_slug,customer_slug,hour_bucket" });
+		// Insert-only: ON CONFLICT DO NOTHING, never an overwrite of a served row.
+		expect(opts).toEqual({ onConflict: "vendor_slug,customer_slug,hour_bucket", ignoreDuplicates: true });
+	});
+
+	it("leaves an hour that is already frozen untouched, without re-signing it", async () => {
+		const bucket = Math.floor(Date.now() / 3_600_000);
+		const db = mockDb({ selectResult: { data: { hour_bucket: bucket, attestation: {} }, error: null }, upsertResult: { error: null } });
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(db as never);
+		const { signAttestation } = await import("@/lib/attest/sign");
+		vi.mocked(signAttestation).mockClear();
+
+		const result = await freezeSnapshots();
+
+		expect(result).toEqual({ ok: true, frozen: 0, alreadyFrozen: 3 });
+		expect(db.upsert).not.toHaveBeenCalled();
+		expect(signAttestation).not.toHaveBeenCalled();
 	});
 
 	/*

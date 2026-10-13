@@ -23,9 +23,8 @@
  * CHAINED AND FROZEN. rollup/freeze-aggregates.ts persists one signed entry
  * per vendor per hour, rollup/aggregate-history.ts reads that history back, and
  * `/attest/{vendor}/chain` publishes it. What `vendorAggregateChain` serves is
- * the frozen rows plus one live entry for the current hour, which is usually
- * not frozen yet, so the chain never goes blank between a deploy and the first
- * cron tick.
+ * exactly the frozen rows and nothing signed on the side (see buildChainFor),
+ * so every document handed out is stored and its `verify` link resolves.
  *
  * The immutability caveat that applies to customer snapshots applies here too:
  * a frozen entry is permanent, so a wrong one is permanent. That is why the
@@ -35,6 +34,8 @@
 
 import { canonicalBytes } from "./canonical";
 import { fraudFeatures } from "./fraud-features";
+import { createHourlyMemo } from "./hourly-memo";
+import { isDemonstration } from "./keys";
 import { methodUrl } from "./method";
 import { signAttestation } from "./sign";
 import { GENESIS_HASH, snapshotHash } from "./verify";
@@ -186,11 +187,10 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 }
 
 /**
- * Memoised per hour, matching the customer chains: the page and the JSON
- * endpoint must serve byte-identical documents, or the difference reads to a
- * verifier exactly like tampering.
+ * Memoised per hour, matching the customer chains — see hourly-memo.ts for how
+ * long a chain still waiting on this hour's freeze is held.
  */
-const chainCache = new Map<string, Promise<SignedAggregate[] | null>>();
+const chainCache = createHourlyMemo<{ chain: SignedAggregate[] | null; complete: boolean }>((v) => v.complete);
 
 function hourBucket(): number {
 	return Math.floor(Date.now() / (SNAPSHOT_CADENCE_SECONDS * 1000));
@@ -199,9 +199,8 @@ function hourBucket(): number {
 /**
  * Sign one aggregate onto whatever precedes it.
  *
- * Shared with the hourly freeze so the live entry and the frozen one are built
- * the same way — if they diverged, the document an agent reads before the
- * freeze would not be the document it reads after.
+ * Called by the hourly freeze, which is the only thing whose output is served
+ * in production (see buildChainFor below).
  */
 export async function signAggregate(
 	vendorSlug: string,
@@ -220,38 +219,30 @@ export async function signAggregate(
 }
 
 /**
- * The published chain: everything frozen so far, plus one live entry for the
- * current hour when that hour has not been frozen yet.
+ * The published chain: exactly the rows the hourly freeze has written.
  *
- * Same composition as customer chains in proofs.ts, and for the same reason —
- * a chain that went blank between a deploy and the first cron tick would look
- * to a verifier like history had been withdrawn.
+ * Nothing signed on the side, for the reason given at length in proofs.ts: a
+ * live entry signed per instance carried a `verify` link to a snapshot that was
+ * never stored, so /verify called our own document a forgery. Null until the
+ * first freeze. Development signing is the one exception, because the freeze
+ * refuses to persist dev-key signatures and a local checkout would otherwise
+ * show nothing.
  */
-async function buildChainFor(vendorSlug: string): Promise<SignedAggregate[] | null> {
+async function buildChainFor(vendorSlug: string): Promise<{ chain: SignedAggregate[] | null; complete: boolean }> {
 	const persisted = await loadAggregateHistory(vendorSlug);
-	const bucket = hourBucket();
+	const frozen = persisted.map((p) => p.attestation);
+	if (persisted.at(-1)?.hourBucket === hourBucket()) return { chain: frozen, complete: true };
+	if (!isDemonstration()) return { chain: frozen.length ? frozen : null, complete: false };
 
-	if (persisted.length && persisted.at(-1)!.hourBucket === bucket) {
-		return persisted.map((p) => p.attestation);
-	}
-
-	const tail = persisted.at(-1)?.attestation;
+	const tail = frozen.at(-1);
 	const fresh = await signAggregate(vendorSlug, tail ? snapshotHash(tail) : GENESIS_HASH);
-	if (!fresh) return null;
-
-	return [...persisted.map((p) => p.attestation), fresh];
+	return { chain: fresh ? [...frozen, fresh] : null, complete: false };
 }
 
 /** A vendor's full aggregate history, oldest first. */
 export async function vendorAggregateChain(vendorSlug: string): Promise<SignedAggregate[] | null> {
-	const key = `${vendorSlug}/${hourBucket()}`;
-	let entry = chainCache.get(key);
-	if (!entry) {
-		entry = buildChainFor(vendorSlug);
-		entry.catch(() => chainCache.delete(key));
-		chainCache.set(key, entry);
-	}
-	return entry;
+	const { chain } = await chainCache(`${vendorSlug}/${hourBucket()}`, () => buildChainFor(vendorSlug));
+	return chain;
 }
 
 export async function vendorAggregate(vendorSlug: string): Promise<SignedAggregate | null> {

@@ -77,11 +77,26 @@ describe("GET /verify/{vendor}/{stamp}", () => {
 		expect(html).toContain("has not expired");
 	});
 
-	it("404s a stamp Letterprove never signed — what a forged document's link leads to", async () => {
+	it("404s a stamp with no stored snapshot without calling it a forgery", async () => {
 		const res = await get("lettertrace/20261008T170121614Z");
 
 		expect(res.status).toBe(404);
-		expect(await res.text()).toContain("not issued by Letterprove");
+		const html = await res.text();
+		expect(html).toContain("No snapshot found");
+		expect(html).not.toMatch(/not issued by Letterprove/i);
+		// Points the reader at the one check that can settle it.
+		expect(html).toContain("/.well-known/letterprove-jwks.json");
+	});
+
+	it("answers a miss as JSON with found:false rather than a forgery verdict", async () => {
+		const res = await GET(new Request("https://app.letterprove.com/verify/lettertrace/20261008T170121614Z?format=json"), {
+			params: Promise.resolve({ vendor: "lettertrace", rest: ["20261008T170121614Z"] }),
+		});
+
+		expect(res.status).toBe(404);
+		const body = await res.json();
+		expect(body.found).toBe(false);
+		expect(body).not.toHaveProperty("issued_by_letterprove");
 	});
 
 	it("404s an unpublished vendor exactly as an unknown one", async () => {

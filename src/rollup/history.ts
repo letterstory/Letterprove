@@ -1,8 +1,7 @@
 /**
  * Reads a customer's durable attestation history — the rows the hourly
- * freeze (freeze.ts) has persisted so far. Never the whole story on its
- * own: the current hour is usually not frozen yet, so attest/proofs.ts
- * appends one live entry on top of whatever this returns.
+ * freeze (freeze.ts) has persisted so far. In production this IS the
+ * published chain: attest/proofs.ts serves these rows and nothing else.
  */
 
 import { readAllRows } from "@/lib/db/read-all";

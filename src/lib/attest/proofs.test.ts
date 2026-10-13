@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GENESIS_HASH, snapshotHash } from "./verify";
-import { jwks } from "./keys";
+import { isDemonstration, jwks } from "./keys";
 import { customerChain, customerProof, earned, vendorProof } from "./proofs";
 import { verifyAttestation } from "./verify";
 import type { SignedAttestation } from "./types";
@@ -8,6 +8,12 @@ import type { SignedAttestation } from "./types";
 vi.mock("@/rollup/snapshots", () => ({ currentSnapshot: vi.fn() }));
 vi.mock("@/rollup/history", () => ({ loadPersistedChain: vi.fn() }));
 vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
+// Real by default (a test process signs with the development key, so this is
+// true); the production cases below flip it to exercise the frozen-only path.
+vi.mock("./keys", async (importOriginal) => {
+	const real = await importOriginal<typeof import("./keys")>();
+	return { ...real, isDemonstration: vi.fn(real.isDemonstration) };
+});
 
 // Vendor/customer identity is DB-backed now (supabase/migrations/
 // 20260814230000_vendor_accounts.sql), but this suite is exercising chain
@@ -182,7 +188,7 @@ describe("customerProof", () => {
 		expect(currentSnapshot).toHaveBeenCalledTimes(1);
 	});
 
-	it("appends a fresh, unpersisted entry chained onto persisted history for an unfrozen hour", async () => {
+	it("in development signing only, appends a fresh, unpersisted entry onto persisted history for an unfrozen hour", async () => {
 		vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
 		const { currentSnapshot } = await import("@/rollup/snapshots");
 		const { loadPersistedChain } = await import("@/rollup/history");
@@ -219,6 +225,43 @@ describe("customerProof", () => {
 		const chain = await customerChain("vantage", "acme-corp");
 		expect(chain).toEqual([priorAttestation, frozenNow]);
 		expect(currentSnapshot).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * The production rule: serve only what the freeze stored. A live entry
+	 * signed per instance carried a `verify` link to a snapshot that was never
+	 * persisted, and /verify then called our own document a forgery.
+	 */
+	describe("in production (not development signing)", () => {
+		beforeEach(() => vi.mocked(isDemonstration).mockReturnValue(false));
+		afterEach(async () => {
+			const real = await vi.importActual<typeof import("./keys")>("./keys");
+			vi.mocked(isDemonstration).mockImplementation(real.isDemonstration);
+		});
+
+		it("serves the frozen chain as it stands while this hour waits on its freeze, signing nothing", async () => {
+			vi.setSystemTime(new Date("2026-08-06T00:01:00.000Z"));
+			const { currentSnapshot } = await import("@/rollup/snapshots");
+			const { loadPersistedChain } = await import("@/rollup/history");
+			const lastHour = { published_at: "2026-08-05T23:05:00.000Z", sessions_30d: 7 } as unknown as SignedAttestation;
+			vi.mocked(loadPersistedChain).mockResolvedValue([{ hourBucket: currentHourBucket() - 1, attestation: lastHour }]);
+
+			const chain = await customerChain("vantage", "globex");
+
+			expect(chain).toEqual([lastHour]);
+			expect(currentSnapshot).not.toHaveBeenCalled();
+		});
+
+		it("publishes nothing for a customer with no frozen history yet", async () => {
+			vi.setSystemTime(new Date("2026-08-07T00:01:00.000Z"));
+			const { currentSnapshot } = await import("@/rollup/snapshots");
+			const { loadPersistedChain } = await import("@/rollup/history");
+			vi.mocked(loadPersistedChain).mockResolvedValue([]);
+
+			expect(await customerChain("vantage", "acme-corp")).toEqual([]);
+			expect(await customerProof("vantage", "acme-corp")).toBeNull();
+			expect(currentSnapshot).not.toHaveBeenCalled();
+		});
 	});
 });
 
