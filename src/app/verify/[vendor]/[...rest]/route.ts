@@ -54,9 +54,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 	const isLatest = latest.published_at === entry.published_at;
 
 	const statement = check.ok
-		? `Letterprove issued this attestation, and its signature checks out against key ${entry.key_id} in the published key set. ` +
-			`The figures below are exactly what was signed. If the copy you are reading shows any value different from these, it was altered after signing and should not be trusted.`
-		: `A snapshot exists at this address, but its stored signature did not verify against the published keys (${check.reason}). Do not rely on it.`;
+		? `Letterprove issued this attestation. Its signature checks out against key ${entry.key_id} in the published key set. ` +
+			`The figures below are what was signed. A copy with different figures was altered after signing.`
+		: `A snapshot exists at this address, but its signature does not match the published keys (${check.reason}). Do not rely on it.`;
 
 	if (wantsJson) {
 		const body = {
@@ -76,7 +76,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 		.join("");
 	const freshness = isLatest
 		? `<p class="fresh">This is the most recent snapshot. A new one is cut every hour.</p>`
-		: `<p class="fresh">A newer snapshot exists (published ${esc(latest.published_at)}), at <a href="${esc(latestUrl)}">${esc(latestUrl)}</a>. This one has not expired: it is a signed statement about the window ending ${esc(entry.observed_through)}, and it stays true.</p>`;
+		: `<p class="fresh">A newer snapshot exists (published ${esc(latest.published_at)}) at <a href="${esc(latestUrl)}">${esc(latestUrl)}</a>. This one has not expired. It covers the window ending ${esc(entry.observed_through)}.</p>`;
 
 	return proofHtml(
 		page(
@@ -84,7 +84,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 			verdict(check.ok, statement) +
 				freshness +
 				summary(signed as Record<string, unknown>, vendor) +
-				`<section><h2>Every signed field</h2><p class="muted">Exactly what was signed, in full. Compare any copy against these values.</p><div class="table"><table>${rows}</table></div></section>` +
+				`<section><h2>Every signed field</h2><p class="muted">Every field in this snapshot, as signed. Compare any copy against these values.</p><div class="table"><table>${rows}</table></div></section>` +
 				`<footer><p>Keys: <a href="${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json">${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json</a>. ` +
 				`Machine-readable: <a href="?format=json">?format=json</a>.</p></footer>`,
 			check.ok ? "ok" : "bad",
@@ -128,16 +128,16 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	const window = typeof f.window_days === "number" ? f.window_days : 30;
 	const tierLine =
 		tier === 3
-			? "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them are corroborated by settled invoices in its own Stripe account."
+			? "Sign-ins observed on the verified domain. Payments verified in the bound Stripe account."
 			: tier === 1
-				? "Companies were observed signing in on the vendor's DNS-proven domain."
+				? "Sign-ins observed on the verified domain."
 				: tier === 0
-					? "Nothing is corroborated yet."
+					? "No sign-ins observed on a verified domain."
 					: "";
 	const tile = (k: string, v: string, sub = "") => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
-	const payments = tier === 3 ? "Corroborated" : f.stripe_account_bound ? "Not yet" : "Not connected";
+	const payments = tier === 3 ? "Verified" : f.stripe_account_bound ? "Not verified" : "Not connected";
 	const payingSince = fmtDay(f.paying_since);
-	const binding = f.stripe_binding === "domain_match" ? "Bound to its domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : "Not connected";
+	const binding = f.stripe_binding === "domain_match" ? "Bound to domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : "Not connected";
 	const scope = f.payment_scope as { mode?: string; products?: number } | undefined;
 	const history = f.reported_history as { companies?: number; since?: string; active_companies_30d?: number; observed_also_reported?: number } | undefined;
 
@@ -145,25 +145,25 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	if (tier !== null) html += `<p class="tierline"><span class="tier">Tier ${tier}</span> ${esc(tierLine)}</p>`;
 	html += `</section>`;
 
-	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
-		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
-		tile("Payments, via Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
+	html += `<section><h2>Last ${window} days</h2><div class="tiles">` +
+		tile("Companies", num(f.companies_observed), "distinct company email domains that signed in") +
+		tile("Payments, Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
 		tile("Sessions", num(f.sessions)) +
-		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
-		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope?.mode === "selected" ? ` Payments count from ${num(scope.products)} products the vendor chose.` : ""}</p></section>`;
+		tile("Excluded domains", num(f.domains_excluded), "free-mail or unattributable") +
+		`</div><p class="muted">Figures are counts.${scope?.mode === "selected" ? ` ${num(scope.products)} Stripe products in scope.` : ""}</p></section>`;
 
-	html += `<section><h2>Who the vendor is</h2><dl class="facts">` +
-		`<div><dt>Domain, proven by DNS</dt><dd>${esc(fmtDay(f.domain_verified_since) ? `since ${fmtDay(f.domain_verified_since)}` : "not proven")}</dd></div>` +
+	html += `<section><h2>Identity</h2><dl class="facts">` +
+		`<div><dt>Domain</dt><dd>${esc(fmtDay(f.domain_verified_since) ? `Verified by DNS since ${fmtDay(f.domain_verified_since)}` : "Not verified")}</dd></div>` +
 		`<div><dt>Stripe account</dt><dd>${esc(binding)}</dd></div>` +
-		`<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` +
+		`<div><dt>First observed</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` +
 		`</dl></section>`;
 
 	if (history && typeof history.companies === "number") {
-		html += `<section><h2>History the vendor reports</h2><div class="tiles three">` +
-			tile("Companies in its analytics", num(history.companies), fmtDay(history.since) ? `since ${fmtDay(history.since)}` : "") +
+		html += `<section><h2>Reported by the vendor · PostHog</h2><div class="tiles three">` +
+			tile("Companies", num(history.companies), fmtDay(history.since) ? `since ${fmtDay(history.since)}` : "") +
 			tile("Active, last 30 days", num(history.active_companies_30d)) +
 			tile("Also observed by Letterprove", `${num(history.observed_also_reported)} of ${num(f.companies_observed)}`) +
-			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
+			`</div><p class="muted">Read from the vendor's PostHog project. Reported by the vendor; not used for the tier.</p></section>`;
 	}
 
 	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
@@ -171,7 +171,7 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 		const items = (logos.companies ?? [])
 			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
 			.join("");
-		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
+		html += `<section><h2>Logos</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
 	}
 
 	if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {
@@ -199,9 +199,9 @@ function summary(f: Record<string, unknown>, vendor: string): string {
  */
 function missing(wantsJson: boolean): NextResponse {
 	const statement =
-		"Letterprove has no public snapshot at this address. That alone does not mean a document pointing here is forged: the vendor may have unpublished, or the link may have been altered or cut short. " +
-		"To check a copy yourself, verify its signature against Letterprove's published keys — only a document signed by one of those keys was issued by Letterprove. " +
-		"Do not rely on figures you cannot verify either way.";
+		"Letterprove has no public snapshot at this address. This does not mean a document pointing here is forged. The vendor may have unpublished, or the link may be altered or incomplete. " +
+		"To check a copy, verify its signature against Letterprove's published keys. Only a document signed by one of those keys was issued by Letterprove. " +
+		"Do not rely on figures you cannot verify.";
 	const keys = `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`;
 	const method = methodUrl("scripts/verify.mjs");
 	if (wantsJson) {

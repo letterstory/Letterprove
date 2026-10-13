@@ -6,7 +6,7 @@ import { Badge, Card, Mono } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-	title: "Signing keys — Letterprove",
+	title: "Signing keys · Letterprove",
 	description: "The public keys Letterprove attestations are signed with, and why retired ones stay.",
 };
 
@@ -66,13 +66,13 @@ export default function KeysPage() {
 							{isDemonstration() ? (
 								<p className="mt-4 text-sm leading-relaxed text-amber-300">
 									This is a published development key. Anything signed with it is a
-									demonstration and is not evidence — anyone can forge under it.
+									demonstration. Anyone can sign with it, so it is not evidence.
 								</p>
 							) : (
 								<p className="mt-4 text-sm leading-relaxed text-fog">
-									The private half never sits on this service. Letterstory countersigns each
-									snapshot after fraud scoring, so compromising this host does not let anyone
-									mint a signature.
+									The private key is not stored on this service. Letterstory countersigns each
+									snapshot after a fraud check, so access to this host cannot produce a
+									signature.
 								</p>
 							)}
 						</Card>
@@ -80,9 +80,8 @@ export default function KeysPage() {
 
 					<Card title={retired.length ? `Retired keys (${retired.length})` : "Retired keys"}>
 						<p className="text-sm leading-relaxed text-fog">
-							Retired keys stay here forever, and that is deliberate. A proof issued today has
-							to still verify years after the key that signed it leaves rotation — dropping one
-							would silently invalidate history we have published as immutable.
+							Retired keys stay listed permanently. A proof issued today must still verify after
+							its key is rotated out. Removing a key would invalidate published history.
 						</p>
 						{retired.length === 0 ? (
 							<p className="mt-4 text-sm text-fog">No keys have been rotated out yet.</p>

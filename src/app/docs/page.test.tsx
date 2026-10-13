@@ -96,9 +96,10 @@ describe("the docs page", () => {
 		expect(text).toMatch(/Tier 3 never means every company pays/);
 		// Tier 2 is not issued: the ASN binding it describes is not built.
 		expect(text).toMatch(/Tier 2 is not issued/);
-		// Customers are never named.
-		expect(text).toMatch(/never names, publishes or contacts your customers/);
+		// Customers are never contacted, and named only from the vendor's own logo wall.
+		expect(text).toMatch(/does not contact your customers/);
+		expect(text).toMatch(/A company not found on your page is never named/);
 		// A valid signature is not the claim; the tier is.
-		expect(text).toMatch(/tier-0 document asserts nothing beyond the vendor existing/);
+		expect(text).toMatch(/tier-0 document only shows that the vendor exists/);
 	});
 });

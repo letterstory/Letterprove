@@ -7,7 +7,7 @@ import { Card, Mono } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-	title: "Verify — Letterprove",
+	title: "Verify · Letterprove",
 	description: "How to check a Letterprove attestation yourself, and what the discovery document says.",
 };
 
@@ -36,9 +36,9 @@ export default async function VerifyPage() {
 					How to verify any of this
 				</h1>
 				<p className="mt-3 leading-relaxed text-fog">
-					Every attestation is signed, chained to the one before it, and carries a commit-pinned
-					link to the code that computed it. Nothing below asks you to trust us — it tells you
-					where to check.
+					Every attestation is signed and chained to the one before it. Each one links to the
+					open-source code that computed it, pinned to a commit. This page lists where to check
+					each part.
 				</p>
 
 				<a
