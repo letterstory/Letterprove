@@ -11,8 +11,8 @@
  * the same reason.
  */
 
-import { execFileSync } from "node:child_process";
-import { generateKeyPairSync, sign as edSign, createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { generateKeyPairSync, sign as edSign, createHash, createPrivateKey, createPublicKey, type KeyObject } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,10 +35,21 @@ function canonicalize(v: unknown): string {
 
 type Body = Record<string, unknown>;
 
-function signed(body: Body, kid = "test-key"): Body {
+function signed(body: Body, kid = "test-key", key: KeyObject = privateKey): Body {
 	const doc = { ...body, key_id: kid };
-	return { ...doc, signature: edSign(null, Buffer.from(canonicalize(doc), "utf8"), privateKey).toString("base64url") };
+	return { ...doc, signature: edSign(null, Buffer.from(canonicalize(doc), "utf8"), key).toString("base64url") };
 }
+
+/** The published development key, derived from its seed the way the service does. */
+const devPrivate = createPrivateKey({
+	key: Buffer.concat([
+		Buffer.from("302e020100300506032b657004220420", "hex"),
+		createHash("sha256").update("letterprove-development-key-do-not-trust").digest(),
+	]),
+	format: "der",
+	type: "pkcs8",
+});
+const devJwk = createPublicKey(devPrivate).export({ format: "jwk" });
 
 function hashOf(doc: Body): string {
 	return createHash("sha256").update(canonicalize(doc), "utf8").digest("hex");
@@ -52,19 +63,15 @@ function jwksFor(kids: string[]) {
 }
 
 /** Runs the verifier, returning its output and exit code rather than throwing. */
-function verify(doc: unknown, jwks: unknown): { out: string; code: number } {
+function verify(doc: unknown, jwks: unknown, extra: string[] = []): { out: string; err: string; code: number } {
 	const dir = mkdtempSync(join(tmpdir(), "lp-verify-"));
 	const docPath = join(dir, "doc.json");
 	const jwksPath = join(dir, "jwks.json");
 	writeFileSync(docPath, JSON.stringify(doc));
 	writeFileSync(jwksPath, JSON.stringify(jwks));
 
-	try {
-		return { out: execFileSync("node", ["scripts/verify.mjs", docPath, "--jwks", jwksPath], { encoding: "utf8" }), code: 0 };
-	} catch (e) {
-		const err = e as { stdout?: string; status?: number };
-		return { out: err.stdout ?? "", code: err.status ?? 1 };
-	}
+	const r = spawnSync("node", ["scripts/verify.mjs", docPath, "--jwks", jwksPath, ...extra], { encoding: "utf8" });
+	return { out: r.stdout ?? "", err: r.stderr ?? "", code: r.status ?? 1 };
 }
 
 const CUSTOMER: Body = { customer: "acme-corp", tier: 0, observed_through: "2026-08-18T00:00:00Z", prev_hash: GENESIS };
@@ -132,8 +139,25 @@ describe("what the verifier refuses", () => {
 });
 
 describe("the demonstration warning", () => {
-	it("warns when the signing key is a development key", () => {
-		expect(verify(signed(CUSTOMER, "dev-insecure-1"), jwksFor(["dev-insecure-1"])).out).toMatch(/not evidence/);
+	it("rejects a document signed with a development key", () => {
+		const { out, code } = verify(signed(CUSTOMER, "dev-insecure-1"), jwksFor(["dev-insecure-1"]));
+		expect(out).toMatch(/not evidence/);
+		expect(code).not.toBe(0);
+	});
+
+	it("accepts it for local testing only with --allow-dev", () => {
+		const { out, code } = verify(signed(CUSTOMER, "dev-insecure-1"), jwksFor(["dev-insecure-1"]), ["--allow-dev"]);
+		expect(out).toMatch(/not evidence/);
+		expect(code).toBe(0);
+	});
+
+	// The key id is the signer's choice. A forger signing with the published
+	// dev seed under a production-looking id must still be caught.
+	it("recognises the development key by its material, not its id", () => {
+		const doc = signed(CUSTOMER, "lp-looks-real", devPrivate);
+		const { out, code } = verify(doc, { keys: [{ ...devJwk, kid: "lp-looks-real" }] });
+		expect(out).toMatch(/development key/);
+		expect(code).not.toBe(0);
 	});
 
 	// The inverse of the mislabeling that shipped on 2026-08-13. A JWKS carrying
@@ -144,5 +168,13 @@ describe("the demonstration warning", () => {
 		const { out, code } = verify(signed(CUSTOMER, "test-key"), jwksFor(["test-key", "dev-insecure-1"]));
 		expect(code).toBe(0);
 		expect(out).not.toMatch(/not evidence/);
+	});
+});
+
+describe("where the keys come from", () => {
+	it("warns loudly when the keys did not come from app.letterprove.com", () => {
+		const { err, code } = verify(signed(CUSTOMER), jwksFor(["test-key"]));
+		expect(code).toBe(0);
+		expect(err).toMatch(/KEYS NOT FROM app\.letterprove\.com/);
 	});
 });

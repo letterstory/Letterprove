@@ -2,9 +2,15 @@
 /**
  * Independent verifier for Letterprove attestations.
  *
- *   npm run verify -- http://localhost:9100/attest/{vendor}/{customer}.json
- *   npm run verify -- http://localhost:9100/attest/{vendor}/{customer}/chain
- *   npm run verify -- ./snapshot.json --jwks http://localhost:9100/.well-known/letterprove-jwks.json
+ *   npm run verify -- https://app.letterprove.com/attest/{vendor}/chain
+ *   npm run verify -- ./snapshot.json
+ *   npm run verify -- ./snapshot.json --jwks ./jwks.json      (a copy you already hold)
+ *   npm run verify -- ./dev-snapshot.json --allow-dev         (local testing only)
+ *
+ * Keys always come from app.letterprove.com unless --jwks says otherwise —
+ * NEVER from the host that served the document. A vendor's proof can be
+ * served from the vendor's own domain (proof.acme.com), and whoever controls
+ * that hostname could serve a forged document with its own keys beside it.
  *
  * This file deliberately shares NO code with the service. It re-implements
  * canonicalisation and signature checking from the published description, using
@@ -17,7 +23,7 @@
  * trusting us, so it stays dependency-free and short enough to read.
  */
 
-import { createHash, createPublicKey, verify as edVerify } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, verify as edVerify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 const GENESIS = "0".repeat(64);
@@ -53,10 +59,19 @@ async function load(target) {
 	return JSON.parse(await readFile(target, "utf8"));
 }
 
-/** Default to the JWKS on the same origin as the proof. */
-function defaultJwksUrl(target) {
-	if (!/^https?:\/\//.test(target)) return null;
-	return new URL("/.well-known/letterprove-jwks.json", target).toString();
+/** The only key set this verifier trusts by default, wherever the document came from. */
+const CANONICAL_JWKS = "https://app.letterprove.com/.well-known/letterprove-jwks.json";
+
+/**
+ * The development key's public half, derived here from its published seed
+ * rather than recognised by key id. A forger chooses the key id; it cannot
+ * choose which key the published seed produces.
+ */
+function devPublicX() {
+	const seed = createHash("sha256").update("letterprove-development-key-do-not-trust").digest();
+	const pkcs8 = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]);
+	const priv = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
+	return createPublicKey(priv).export({ format: "jwk" }).x;
 }
 
 // ------------------------------------------------------------- verification
@@ -143,13 +158,22 @@ function tierOf(snapshot) {
 // --------------------------------------------------------------------- main
 
 const args = process.argv.slice(2);
-const target = args.find((a) => !a.startsWith("--"));
 const jwksFlag = args.indexOf("--jwks");
-const jwksTarget = jwksFlag >= 0 ? args[jwksFlag + 1] : defaultJwksUrl(target);
+const allowDev = args.includes("--allow-dev");
+const target = args.find((a, i) => !a.startsWith("--") && (jwksFlag < 0 || i !== jwksFlag + 1));
+const jwksTarget = jwksFlag >= 0 ? args[jwksFlag + 1] : CANONICAL_JWKS;
 
 if (!target || !jwksTarget) {
-	console.error("usage: verify <proof-url|file> [--jwks <url|file>]");
+	console.error("usage: verify <proof-url|file> [--jwks <url|file>] [--allow-dev]");
 	process.exit(2);
+}
+
+if (jwksTarget !== CANONICAL_JWKS) {
+	console.error(
+		`\n  ⚠ KEYS NOT FROM app.letterprove.com: ${jwksTarget}\n` +
+			"    A passing result proves only that these documents match THESE keys. Trust it only if\n" +
+			`    you fetched the keys from ${CANONICAL_JWKS} yourself.\n`
+	);
 }
 
 const [doc, jwks] = await Promise.all([load(target), load(jwksTarget)]);
@@ -201,14 +225,27 @@ if (head?.tier === 4) {
 
 if (head?.method) console.log(`  method: ${head.method}`);
 
-// Warn on the key that actually SIGNED these documents, not on whatever the
+// Judge the key that actually SIGNED these documents, not whatever the
 // endpoint happens to publish. A JWKS carrying both a dev and a production key
 // — which is exactly what a rotation looks like — would otherwise stamp
 // "demonstration" on genuine countersigned proof. That mislabeling shipped
 // once already, on 2026-08-13, in the service itself.
-const signingKids = new Set(chain.map((s) => String(s.key_id)));
-if ([...signingKids].some((kid) => kid.startsWith("dev-insecure"))) {
-	console.log("\n  ⚠ signed with a development key — this is a demonstration, not evidence");
+//
+// Matched on key MATERIAL as well as id: the id is chosen by whoever signed,
+// so a forger signing with the published dev seed under an "lp-" id would
+// otherwise pass as production.
+const DEV_X = devPublicX();
+const signedByDev = chain.some((s) => {
+	const kid = String(s.key_id);
+	const jwk = jwks.keys?.find((k) => k.kid === kid);
+	return kid.startsWith("dev-insecure") || jwk?.x === DEV_X;
+});
+if (signedByDev) {
+	console.log("\n  ⚠ signed with the published development key — this is a demonstration, not evidence; anyone can produce this signature.");
+	if (!allowDev) {
+		console.log("\n  REJECTED (pass --allow-dev to accept development documents for local testing)\n");
+		process.exit(3);
+	}
 }
 
 console.log(

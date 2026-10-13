@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { isOwnHost, slugForCustomDomain } from "@/lib/vendors/custom-domain";
 
 /**
@@ -39,9 +40,14 @@ export async function proxy(request: NextRequest) {
 		// Only this vendor's own documents, and the shared pages a reader needs to
 		// check them. Without this, proof.acme.com/attest/rival.json served a
 		// rival's proof from Acme's domain.
-		if (SHARED_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-			// Letterprove's own pages, linked from the page chrome: sent home, not served as the vendor's.
-			return NextResponse.redirect(`https://app.letterprove.com${pathname}`, 308);
+		if (SENT_HOME.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+			// Letterprove's own pages, and everything a reader uses to CHECK a
+			// proof, are sent home rather than served as the vendor's. The vendor
+			// controls this hostname's DNS: if keys, discovery or verify pages
+			// were served here, a vendor pointing it at its own server could serve
+			// forged documents beside its own keys and a "verified" page for them.
+			// Verification only ever happens at app.letterprove.com.
+			return NextResponse.redirect(`${VERIFY_ORIGIN}${pathname}${request.nextUrl.search}`, 308);
 		}
 		if (!servesOnCustomDomain(pathname, slug)) return new NextResponse("Not found", { status: 404 });
 	}
@@ -58,22 +64,23 @@ export async function proxy(request: NextRequest) {
 	}
 }
 
-/** Letterprove's own pages, which a custom domain redirects to app.letterprove.com. */
-const SHARED_PAGES = ["/docs", "/privacy", "/terms"];
+/**
+ * What a custom domain redirects to app.letterprove.com: Letterprove's own
+ * pages, and the whole verification surface (keys, discovery, verify pages).
+ */
+const SENT_HOME = ["/docs", "/privacy", "/terms", "/keys", "/verify", "/.well-known", "/api/well-known"];
 
 /**
  * What a vendor's custom domain may serve besides its root: its own proof page,
- * attestations, chains and verify pages, plus the shared keys, discovery and
- * framework assets those pages load.
+ * attestations and chains, plus the framework assets those pages load. Keys,
+ * discovery and verify pages are never served here (see SENT_HOME).
  */
 function servesOnCustomDomain(pathname: string, slug: string): boolean {
-	const own = [`/proofs/${slug}`, `/attest/${slug}`, `/verify/${slug}`, `/api/proofs/${slug}`];
+	const own = [`/proofs/${slug}`, `/attest/${slug}`, `/api/proofs/${slug}`];
 	if (own.some((p) => pathname === p || pathname.startsWith(`${p}/`) || pathname.startsWith(`${p}.`))) return true;
 	return (
 		pathname.startsWith("/_next/") ||
-		pathname.startsWith("/.well-known/") ||
-		pathname.startsWith("/api/well-known/") ||
-		["/keys", "/verify", "/favicon.ico", "/icon.png", "/apple-icon.png", "/logo.svg", "/robots.txt"].includes(pathname)
+		["/favicon.ico", "/icon.png", "/apple-icon.png", "/logo.svg", "/robots.txt"].includes(pathname)
 	);
 }
 

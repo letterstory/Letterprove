@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isDemonstration, jwks, publicJwk, signingMode } from "./keys";
+import { createPublicKey } from "node:crypto";
+import { isDemonstration, jwks, jwksResult, keyFromSeedString, keyProblem, KeysUnavailableError, publicJwk, signingMode } from "./keys";
+
+/** A real Ed25519 public JWK, unrelated to the development key. */
+function realJwk(seed: string, kid: string) {
+	const { x } = createPublicKey(keyFromSeedString(seed)).export({ format: "jwk" }) as { x: string };
+	return { kty: "OKP" as const, crv: "Ed25519" as const, x, kid, alg: "EdDSA" as const, use: "sig" as const };
+}
+
+function countersigned() {
+	process.env.LETTERSTORY_COUNTERSIGN_URL = "https://letterstory.example/api/letterprove/countersign";
+	process.env.LETTERSTORY_COUNTERSIGN_SECRET = "shh";
+}
 
 const ENV_KEYS = [
 	"LETTERPROVE_PRODUCTION_JWK",
@@ -29,14 +41,7 @@ describe("jwks — LETTERPROVE_PRODUCTION_JWK override", () => {
 	});
 
 	it("serves the configured production key instead of the local one when set", () => {
-		const production = {
-			kty: "OKP" as const,
-			crv: "Ed25519" as const,
-			x: "not-the-dev-key-x-value",
-			kid: "lp-real-1",
-			alg: "EdDSA" as const,
-			use: "sig" as const,
-		};
+		const production = realJwk("production", "lp-real-1");
 		process.env.LETTERPROVE_PRODUCTION_JWK = JSON.stringify(production);
 
 		const keys = jwks().keys;
@@ -55,22 +60,36 @@ describe("jwks — LETTERPROVE_PRODUCTION_JWK override", () => {
 	});
 
 	it("still appends retired keys after a configured production key", () => {
-		process.env.LETTERPROVE_PRODUCTION_JWK = JSON.stringify({
-			kty: "OKP",
-			crv: "Ed25519",
-			x: "prod-x",
-			kid: "lp-real-1",
-			alg: "EdDSA",
-			use: "sig",
-		});
-		process.env.LETTERPROVE_RETIRED_JWKS = JSON.stringify([
-			{ kty: "OKP", crv: "Ed25519", x: "old-x", kid: "lp-retired-1", alg: "EdDSA", use: "sig" },
-		]);
+		process.env.LETTERPROVE_PRODUCTION_JWK = JSON.stringify(realJwk("production", "lp-real-1"));
+		process.env.LETTERPROVE_RETIRED_JWKS = JSON.stringify([realJwk("retired", "lp-retired-1")]);
 
 		const keys = jwks().keys;
 		expect(keys).toHaveLength(2);
 		expect(keys[0].kid).toBe("lp-real-1");
 		expect(keys[1].kid).toBe("lp-retired-1");
+	});
+});
+
+describe("jwks — fails closed when Letterstory signs", () => {
+	it("serves only the production key, never the local one", () => {
+		countersigned();
+		process.env.LETTERPROVE_PRODUCTION_JWK = JSON.stringify(realJwk("production", "lp-real-1"));
+		expect(jwks().keys.map((k) => k.kid)).toEqual(["lp-real-1"]);
+		expect(keyProblem()).toBeNull();
+	});
+
+	it.each([
+		["unset", undefined],
+		["malformed JSON", "{not json"],
+		["not a key", JSON.stringify({ kty: "OKP", crv: "Ed25519", x: "short", kid: "lp" })],
+		["the development key", JSON.stringify(publicJwk())],
+	])("refuses to serve any key when the production key is %s", (_label, raw) => {
+		countersigned();
+		if (raw !== undefined) process.env.LETTERPROVE_PRODUCTION_JWK = raw;
+		const result = jwksResult();
+		expect(result.ok).toBe(false);
+		expect(keyProblem()).toBeTruthy();
+		expect(() => jwks()).toThrow(KeysUnavailableError);
 	});
 });
 

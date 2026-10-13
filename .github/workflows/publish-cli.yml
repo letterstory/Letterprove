@@ -2,9 +2,10 @@ name: Publish CLI
 
 # Publishes @letterstory/letterprove-cli to npm when a new version lands on main.
 #
-# The merge to main IS the human approval gate (main is protected; every merge
-# is approved), so a merged version bump auto-publishes — no one runs `npm
-# publish` by hand. The version guard makes it idempotent: a merge that doesn't
+# The merge to main is the gate: main's ruleset (main-ci-required) requires CI
+# to pass, but it does NOT require a review approval — anyone who can merge can
+# publish. A merged version bump auto-publishes; no one runs `npm publish` by
+# hand. The version guard makes it idempotent: a merge that doesn't
 # change cli/package.json's version is a no-op, and a re-run never double-
 # publishes a version already on npm.
 #

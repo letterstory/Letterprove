@@ -125,21 +125,63 @@ export function publicJwk(): PublicJwk {
  * `publicJwk()` — is served as the active key. This service never holds the
  * real private key (see countersign.ts / the "signing seam"); the RPC signer
  * publishes its public half here so this service can still serve JWKS for
- * signatures it did not itself compute. Unset, `publicJwk()` is served, which
- * matches whatever countersign.ts actually signs with in that mode too (the
- * local dev key when the RPC isn't configured).
+ * signatures it did not itself compute.
+ *
+ * FAILS CLOSED in countersigned mode. There the only honest active key is the
+ * one Letterstory signs with; if it is missing or malformed, the only key this
+ * service could fall back to is the development key, whose seed is in this
+ * file. Serving it would let anyone mint documents that verify — so instead
+ * this throws, the endpoint answers 503, and discovery says why. An outage is
+ * recoverable; a published key anyone can sign with is not.
  */
 export function jwks(): Jwks {
+	const result = jwksResult();
+	if (!result.ok) throw new KeysUnavailableError(result.error);
+	return result.jwks;
+}
+
+export class KeysUnavailableError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "KeysUnavailableError";
+	}
+}
+
+export type JwksResult = { ok: true; jwks: Jwks } | { ok: false; error: string };
+
+export function jwksResult(): JwksResult {
 	const retired = parseRetired(process.env.LETTERPROVE_RETIRED_JWKS);
 	const production = parseProductionKey(process.env.LETTERPROVE_PRODUCTION_JWK);
-	return { keys: [production ?? publicJwk(), ...retired] };
+	if (signingMode() === "countersigned") {
+		const problem = keyProblem();
+		if (problem || !production) return { ok: false, error: problem ?? "production signing key unavailable" };
+		return { ok: true, jwks: { keys: [production, ...retired] } };
+	}
+	// Development and local-key modes sign with the local key, so the local
+	// key is the honest answer when no valid production key is configured.
+	return { ok: true, jwks: { keys: [production ?? publicJwk(), ...retired] } };
+}
+
+/**
+ * Why the published key set cannot be trusted right now, or null. Only
+ * countersigned mode can be misconfigured this way: it is the one mode whose
+ * active key comes from configuration rather than from the key that signs.
+ */
+export function keyProblem(): string | null {
+	if (signingMode() !== "countersigned") return null;
+	const raw = process.env.LETTERPROVE_PRODUCTION_JWK;
+	if (!raw) return "LETTERPROVE_PRODUCTION_JWK is unset, so the key Letterstory signs with cannot be published.";
+	const parsed = parseProductionKey(raw);
+	if (!parsed) return "LETTERPROVE_PRODUCTION_JWK is not a valid Ed25519 public key.";
+	if (parsed.x === publicJwk().x) return "LETTERPROVE_PRODUCTION_JWK is the published development key.";
+	return null;
 }
 
 function parseRetired(raw: string | undefined): PublicJwk[] {
 	if (!raw) return [];
 	try {
 		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? (parsed as PublicJwk[]) : [];
+		return Array.isArray(parsed) ? (parsed as unknown[]).filter(isPublicJwk) : [];
 	} catch {
 		// A malformed retired-key list must not take the endpoint down; it would
 		// break verification for current proofs too. Serve what we can.
@@ -150,17 +192,25 @@ function parseRetired(raw: string | undefined): PublicJwk[] {
 function parseProductionKey(raw: string | undefined): PublicJwk | null {
 	if (!raw) return null;
 	try {
-		const parsed = JSON.parse(raw);
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as PublicJwk) : null;
+		const parsed: unknown = JSON.parse(raw);
+		return isPublicJwk(parsed) ? parsed : null;
 	} catch {
-		// Same failure posture as parseRetired: never take the endpoint down.
-		// Falling back to publicJwk() here is safe, not silently wrong — it's
-		// still a real, servable key, just not the one signatures were
-		// actually made with, which is exactly what an operator debugging a
-		// verification failure needs to see: a *working* endpoint serving the
-		// *wrong* key, not a 500.
 		return null;
 	}
+}
+
+/** An Ed25519 public JWK: 32 bytes of `x`, base64url, and a key id. */
+function isPublicJwk(value: unknown): value is PublicJwk {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const k = value as Record<string, unknown>;
+	return (
+		k.kty === "OKP" &&
+		k.crv === "Ed25519" &&
+		typeof k.x === "string" &&
+		/^[A-Za-z0-9_-]{43}$/.test(k.x) &&
+		typeof k.kid === "string" &&
+		k.kid.length > 0
+	);
 }
 
 /** Exposed for tests that need a second, unrelated key. */

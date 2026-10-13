@@ -62,14 +62,29 @@ describe("proxy — a vendor's own proof domain", () => {
 		const { proxy: p } = await freshProxy({ "proof.acme.com": "acme" });
 		const get = (path: string) => p(new NextRequest(`https://proof.acme.com${path}`, { headers: { host: "proof.acme.com" } }));
 		expect(await get("/attest/acme.json")).toBeUndefined();
-		expect(await get("/verify/acme/20261012T160507661Z")).toBeUndefined();
-		expect(await get("/keys")).toBeUndefined();
 		expect((await get("/attest/rival.json"))!.status).toBe(404);
 		expect((await get("/proofs/rival"))!.status).toBe(404);
 		expect((await get("/admin"))!.status).toBe(404);
 		const docs = await get("/docs");
 		expect(docs!.status).toBe(308);
 		expect(docs!.headers.get("location")).toBe("https://app.letterprove.com/docs");
+	});
+
+	it("sends keys, discovery and verify pages home, so a vendor's DNS can never serve its own keys", async () => {
+		const { proxy: p } = await freshProxy({ "proof.acme.com": "acme" });
+		const get = (path: string) => p(new NextRequest(`https://proof.acme.com${path}`, { headers: { host: "proof.acme.com" } }));
+		for (const path of [
+			"/keys",
+			"/verify",
+			"/verify/acme/20261012T160507661Z?format=json",
+			"/.well-known/letterprove-jwks.json",
+			"/.well-known/letterprove.json",
+			"/api/well-known/letterprove",
+		]) {
+			const res = await get(path);
+			expect(res!.status, path).toBe(308);
+			expect(res!.headers.get("location"), path).toBe(`https://app.letterprove.com${path}`);
+		}
 	});
 
 	it("leaves our own root alone", async () => {

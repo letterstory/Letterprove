@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
-import { jwks } from "@/lib/attest/keys";
+import { jwksResult } from "@/lib/attest/keys";
 import { customerProof } from "@/lib/attest/proofs";
 import type { SignedAttestation } from "@/lib/attest/types";
 import { verifyAttestation } from "@/lib/attest/verify";
@@ -44,7 +44,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 	if (!chain || !entry) return missing(wantsJson);
 
 	const latest = chain[chain.length - 1];
-	const check = verifyAttestation(entry, jwks());
+	const keys = jwksResult();
+	if (!keys.ok) {
+		// Never check against a fallback key; see keys.ts.
+		return NextResponse.json({ error: "keys_unavailable", detail: keys.error }, { status: 503, headers: { "cache-control": "no-store" } });
+	}
+	const check = verifyAttestation(entry, keys.jwks);
 	const { signature: _signature, ...signed } = entry;
 	const latestUrl = parsed.customer
 		? `${VERIFY_ORIGIN}/attest/${vendor}/${parsed.customer}.json`
