@@ -468,6 +468,17 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 <code>logins</code>: measured totals behind those companies.
               </li>
               <li>
+                <code>logos</code>, when present: the vendor&apos;s own public
+                logo wall, checked. <code>page</code> is the page,{" "}
+                <code>listed</code> the companies the vendor declared,{" "}
+                <code>on_page</code> how many were found on that page, and{" "}
+                <code>verified</code> how many of those Letterprove observed.
+                Only verified companies are named, each with a{" "}
+                <code>status</code>: <code>active</code> (signed in, last 30
+                days) or <code>paying</code> (also a settled invoice in the
+                bound Stripe account). It never moves the tier.
+              </li>
+              <li>
                 <code>reported_history</code>, when present: company history
                 from the vendor&apos;s own PostHog project, read only, as
                 counts (<code>companies</code>, <code>since</code>,{" "}
@@ -920,6 +931,28 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
               statement, and only while the project records traffic on your
               verified domain. It also says how many of the companies we
               observed ourselves appear in that history.
+            </p>
+            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
+              Verify your logos
+            </h3>
+            <p>
+              If your site shows customer logos, list them in the{" "}
+              <strong>Logos</strong> panel with the page they appear on. We
+              fetch that page daily and keep only the companies actually on
+              it. Your proof then names the ones we observed signing in, marked
+              paying when your Stripe account confirms it, and shows how many of
+              your logos are verified. This is the only place a proof names a
+              company, and only one you already show in public.
+            </p>
+            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
+              Add your proof to your site
+            </h3>
+            <p>
+              AI assistants read your site, not ours. After you publish, add
+              the three snippets from setup: a footer link (&ldquo;For agents:
+              view attested customer proof&rdquo;), a Customer evidence section
+              for your <code>/llms.txt</code>, and a small JSON-LD block for
+              your homepage. Each points at your proof.
             </p>
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
               AI agents on your site

@@ -166,6 +166,14 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
 	}
 
+	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
+	if (logos && typeof logos.verified === "number" && typeof logos.page === "string") {
+		const items = (logos.companies ?? [])
+			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
+			.join("");
+		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
+	}
+
 	if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {
 		html += `<section><h2>Disclosure</h2><p class="disclosure">${esc(f.issuer_affiliation)}</p></section>`;
 	}
@@ -263,6 +271,10 @@ tr:last-child th,tr:last-child td{border-bottom:0}
 th{color:var(--fog);font-weight:500;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 td{word-break:break-all;color:var(--text)}
 .disclosure{background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:14px 16px;font-size:14px;color:var(--fog)}
+.logos{list-style:none;margin:12px 0 0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--edge);border:1px solid var(--edge);border-radius:12px;overflow:hidden}
+@media (max-width:640px){.logos{grid-template-columns:minmax(0,1fr)}}
+.logos li{background:var(--panel);padding:10px 14px;display:flex;justify-content:space-between;gap:12px;font-size:14px}
+.logos .muted{margin:0;font-size:12px}
 footer{color:var(--fog);font-size:13px;border-top:1px solid var(--edge);padding-top:16px}
 footer a{word-break:break-all}
 `;

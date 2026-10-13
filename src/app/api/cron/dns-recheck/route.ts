@@ -2,6 +2,7 @@ import { dbClient } from "@/lib/db/client";
 import { recheckAllDomains, type RecheckRunResult } from "@/lib/vendors/dns-recheck";
 import { recheckOwnDnsHosts } from "@/lib/vendors/hosts";
 import { sendAlert } from "@/lib/alerts/notify";
+import { recheckAllLogoWalls } from "@/lib/vendors/logo-wall";
 
 /**
  * Vercel Cron hits this daily (see vercel.json): re-resolves every verified
@@ -56,6 +57,18 @@ export async function GET(request: Request) {
 			hosts.errors.push({ host: "*", detail: `threw: ${error instanceof Error ? error.message : String(error)}` });
 		}
 	}
+
+	// Logo walls (README decision 36) are re-fetched daily here too: a company
+	// taken off the vendor's page must stop being named within a day.
+	let logos: Awaited<ReturnType<typeof recheckAllLogoWalls>> = { checked: 0, errors: [] };
+	if (db) {
+		try {
+			logos = await recheckAllLogoWalls();
+		} catch (error) {
+			logos.errors.push({ vendorId: "*", detail: `threw: ${error instanceof Error ? error.message : String(error)}` });
+		}
+	}
+	for (const e of logos.errors) console.error(`[letterprove:logo-wall] ${e.vendorId}: ${e.detail}`);
 
 	if (run.detail) await sendAlert("dns recheck could not run", run.detail);
 	for (const h of hosts.unverified) {

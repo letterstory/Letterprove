@@ -171,6 +171,13 @@ export const getInstallSnippetOutput = z.object({
 			supabase: z.string(),
 		})
 		.describe("Where to call Letterprove.identify(email) after sign-in, per stack. Only the domain after the @ leaves the browser."),
+	agent_kit: z
+		.object({
+			footer_html: z.string().describe("A low-profile footer link: \"For agents: view attested customer proof\"."),
+			llms_txt: z.string().describe("A \"## Customer evidence\" section to add to your /llms.txt."),
+			json_ld: z.string().describe("A <script type=\"application/ld+json\"> Organization block linking your proof, for your homepage."),
+		})
+		.describe("Three snippets for your own site so AI assistants reading it find your proof. Add them once your proofs are published."),
 });
 
 export const rotateKeyInput = empty;
@@ -789,3 +796,44 @@ export const getVisitorsOutput = z.object({
 	visitors: z.array(visitorPerson).describe("Identified people, newest first. Pulled live from Maverick; Letterprove stores none of it."),
 	total: z.number().describe("Identified people in the window before `limit` applied."),
 });
+
+/*
+ * --------------------------------------------------------------- logo wall
+ *
+ * Opt-in logo verification (README decision 36). Private shape: every listed
+ * company with its status. Only the attestation's `logos` block is public, and
+ * it names only companies on the vendor's page AND observed.
+ */
+const logoStatus = z.enum(["paying", "active", "not_observed"]);
+const logoWall = z.object({
+	configured: z.literal(true),
+	page_url: z.string().describe("Your public logo wall, on your verified domain or an accepted host."),
+	checked_at: z.string().nullable().describe("When the page was last fetched and matched. Re-checked daily."),
+	check_error: z.string().nullable().describe("Why the last check failed, when it did."),
+	total: z.number().int().describe("Companies you listed."),
+	on_page: z.number().int().describe("Of those, how many were found on the page."),
+	verified: z.number().int().describe("On the page and observed signing in (or paying). Only these are named on your proof."),
+	published: z.boolean().describe("Whether the logos block is on your proof now: needs a check in the last two days and a verified domain."),
+	companies: z.array(
+		z.object({
+			name: z.string(),
+			domain: z.string(),
+			on_page: z.boolean(),
+			status: logoStatus.describe("paying: observed and a settled invoice in your bound Stripe account. active: observed signing in, last 30 days. not_observed: no sign-ins seen."),
+		}),
+	),
+});
+
+export const setLogoWallInput = z.object({
+	page_url: z.string().min(1).describe("The https page on your own site that shows these logos, e.g. https://yourcompany.com/customers."),
+	companies: z
+		.array(z.object({ name: z.string().min(1), domain: z.string().min(1) }))
+		.min(1)
+		.max(200)
+		.describe("The companies on that page, by name and company domain. Only ones found on the page and observed by Letterprove are named on your proof."),
+});
+export const setLogoWallOutput = logoWall;
+export const getLogoWallInput = empty;
+export const getLogoWallOutput = z.union([z.object({ configured: z.literal(false) }), logoWall]);
+export const clearLogoWallInput = empty;
+export const clearLogoWallOutput = z.object({ cleared: z.literal(true).describe("The list is gone; the proof stops naming any company at the next snapshot.") });

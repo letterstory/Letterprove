@@ -54,10 +54,12 @@ import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
 import { withDisclosure } from "./issuer";
+import { publicLogos, readLogoWall, type PublicLogos } from "@/lib/vendors/logo-wall";
 import {
 	hostCount,
 	observedSince,
 	payingAmong,
+	payingDomainsAmong,
 	reportedHistory,
 	stripeBinding,
 	type ReportedHistory,
@@ -125,6 +127,17 @@ export interface AggregateBody {
 	 * before 2026-10-13.
 	 */
 	reported_history?: ReportedHistory;
+	/**
+	 * Logo verification (README decision 36), opt-in. The companies the vendor
+	 * already shows on its own public logo wall (`page`) that Letterprove
+	 * observed signing in over the window ("active"), or that also paid a
+	 * settled invoice in the bound Stripe account ("paying"). ONLY those are
+	 * named; `listed` and `on_page` count everything the vendor declared and
+	 * everything found on the page. Never moves the tier. Absent unless
+	 * configured, checked within two days, and the domain is verified. Absent
+	 * before 2026-10-13.
+	 */
+	logos?: PublicLogos;
 	/**
 	 * Which of the vendor's Stripe products its payment corroboration counts,
 	 * present only while Stripe is connected. Counts, never product names: a
@@ -261,6 +274,16 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 	// sync already clears evidence on a mismatch; this holds even if a row
 	// outlives that.
 	const paying = binding && vendor.id ? await payingAmong(vendor.id, attributable) : { companies: 0, since: null };
+	// Logos are named only from the vendor's own public wall, only when on that
+	// page and observed, and payment only counts from a bound account.
+	const logos =
+		vendor.id && vendor.domainVerified
+			? publicLogos(
+					await readLogoWall(vendor.id),
+					new Set(attributable),
+					binding ? await payingDomainsAmong(vendor.id, attributable) : new Set<string>(),
+				)
+			: null;
 	const now = new Date().toISOString();
 	const observed = attributable.length > 0;
 	return {
@@ -280,6 +303,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		tier: earnedAggregateTier(observed, vendor.domainVerified, paying.companies),
 		vendor_stated: history ? ["reported_history"] : [],
 		...(history ? { reported_history: history } : {}),
+		...(logos ? { logos } : {}),
 		...(scope ? { payment_scope: scope } : {}),
 		observed_through: now,
 		published_at: now,
