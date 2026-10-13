@@ -1924,7 +1924,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_visitors",
 		description:
-			"People and companies identified visiting the caller's vendor's own site (verified domain and accepted hosts), newest first, with a per-company rollup. Args: limit (default 50, max 200), days (default 30, max 90). Pulled live from Maverick each time (cached five minutes); Letterprove stores none of it and never publishes it. Also reports whether identification is on.",
+			"People and companies identified visiting the caller's vendor's own site (verified domain and accepted hosts), newest first, with a per-company rollup. Args: limit (default 50, max 200), days (default 30, max 90). Pulled live from the identification provider each time (cached five minutes); Letterprove stores none of it and never publishes it. Also reports whether identification is on.",
 		capability: "vendor:read",
 		inputSchema: S.getVisitorsInput,
 		outputSchema: S.getVisitorsOutput,
