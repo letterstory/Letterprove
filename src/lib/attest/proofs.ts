@@ -9,6 +9,8 @@
 import { attestationBody, earned } from "./body";
 import { SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { buildChain, head } from "./chain";
+import { createHourlyMemo } from "./hourly-memo";
+import { isDemonstration } from "./keys";
 import { GENESIS_HASH, snapshotHash } from "./verify";
 import {
 	allVendors,
@@ -79,61 +81,59 @@ export interface VendorProof {
 }
 
 /**
- * The hourly freeze (rollup/freeze.ts) is what makes history durable; this
- * module only ever reads what it already wrote, plus — on top — one live
- * entry for the current hour if that hour hasn't been frozen yet. So a
- * chain is never stale by more than the freeze cadence, and never blank
- * between deploy and the first cron tick either.
+ * What a customer chain serves: exactly the rows the hourly freeze
+ * (rollup/freeze.ts) has written, and nothing signed on the side.
  *
- * Memoising the composed result still matters for cost, and keying by hour
- * bounds staleness to SNAPSHOT_CADENCE_SECONDS: a mismatch between the proof page and the
- * JSON endpoints within that hour would look to a verifier exactly like
- * tampering, so both must read the same cached chain, not a fresh query
- * each time.
+ * WHY NOTHING LIVE. This used to append a freshly signed entry for the current
+ * hour whenever that hour was not frozen yet. Each server instance signed its
+ * own, and the freeze then signed another at :05, each with its own
+ * `published_at`, so its own `verify` link. Every document served before the
+ * freeze, or by a different instance, pointed at a snapshot that was never
+ * stored, and /verify answered it with "not issued by Letterprove" — a real
+ * document of ours, called a forgery by our own checker. Serving only frozen
+ * rows makes the rule simple: anything we hand out is in the database, and its
+ * link resolves. The cost is a head up to one freeze cadence old, which the
+ * document already says (`next_snapshot_at`).
+ *
+ * The one exception is development signing (no Letterstory signer, no local
+ * key). The freeze refuses to persist dev-key signatures (freeze.ts), so with
+ * no exception a local checkout would never show a proof at all. Those
+ * documents are worthless as evidence by construction and their `verify` links
+ * point at production, where they 404 — which is the honest answer for them.
  */
-const chains = new Map<string, Promise<SignedAttestation[]>>();
+const chains = createHourlyMemo<{ chain: SignedAttestation[]; complete: boolean }>((v) => v.complete);
 
 function hourBucket(): number {
 	return Math.floor(Date.now() / (SNAPSHOT_CADENCE_SECONDS * 1000));
 }
 
-async function loadChain(vendor: VendorFixture, customer: CustomerFixture): Promise<SignedAttestation[]> {
+async function loadChain(
+	vendor: VendorFixture,
+	customer: CustomerFixture,
+): Promise<{ chain: SignedAttestation[]; complete: boolean }> {
 	const persisted = await loadPersistedChain(vendor.slug, customer.slug);
-	const bucket = hourBucket();
+	const frozen = persisted.map((p) => p.attestation);
+	if (persisted.at(-1)?.hourBucket === hourBucket()) return { chain: frozen, complete: true };
+	if (!isDemonstration()) return { chain: frozen, complete: false };
 
-	if (persisted.length && persisted.at(-1)!.hourBucket === bucket) {
-		return persisted.map((p) => p.attestation);
-	}
-
-	const tail = persisted.at(-1)?.attestation;
-	const prevHash = tail ? snapshotHash(tail) : GENESIS_HASH;
-	// The live path deliberately ignores `snapshot.readOk`: this entry is
-	// recomputed every hour and never persisted, so a failed read degrades one
-	// hour's published claim and then self-heals. freeze.ts, which writes an
-	// immutable row, must not be so relaxed.
+	const tail = frozen.at(-1);
 	const { body } = await attestationBody(vendor, customer);
-	const [fresh] = await buildChain([body], prevHash);
-
-	return [...persisted.map((p) => p.attestation), fresh];
+	const [fresh] = await buildChain([body], tail ? snapshotHash(tail) : GENESIS_HASH);
+	return { chain: [...frozen, fresh], complete: false };
 }
 
+/**
+ * A customer's chain, oldest first. Empty — not null — when the customer is
+ * real but nothing has been frozen for it yet; null only when the vendor or
+ * customer does not exist.
+ */
 export async function customerChain(vendorSlug: string, customerSlug: string): Promise<SignedAttestation[] | null> {
 	const vendor = await findVendor(vendorSlug);
 	if (!vendor) return null;
 	const customer = findCustomer(vendor, customerSlug);
 	if (!customer) return null;
 
-	const key = `${vendorSlug}/${customerSlug}/${hourBucket()}`;
-	let chain = chains.get(key);
-	if (!chain) {
-		chain = loadChain(vendor, customer);
-		// Evict a rejected load so the next request retries. Without this the
-		// failed promise stays memoised for the rest of the hour, turning one
-		// transient history-read error into an hour of 500s long after the
-		// datastore recovered.
-		chain.catch(() => chains.delete(key));
-		chains.set(key, chain);
-	}
+	const { chain } = await chains(`${vendorSlug}/${customerSlug}/${hourBucket()}`, () => loadChain(vendor, customer));
 	return chain;
 }
 
@@ -171,7 +171,7 @@ export async function customerProof(vendorSlug: string, customerSlug: string): P
 	if (!customer || consentOf(customer) !== "named") return null;
 
 	const chain = await customerChain(vendorSlug, customerSlug);
-	if (!chain) return null;
+	if (!chain?.length) return null;
 	return { current: head(chain), chain };
 }
 
@@ -189,7 +189,9 @@ export async function vendorProof(vendorSlug: string): Promise<VendorProof | nul
 	const all: { proof: CustomerProof; named: boolean }[] = [];
 	for (const c of vendor.customers) {
 		const chain = await customerChain(vendor.slug, c.slug);
-		if (!chain) continue;
+		// Not frozen yet: nothing about this customer has been published, so it
+		// counts toward nothing until its first freeze.
+		if (!chain?.length) continue;
 		all.push({ proof: { current: head(chain), chain }, named: consentOf(c) === "named" });
 	}
 

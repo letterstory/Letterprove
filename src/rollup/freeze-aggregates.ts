@@ -17,10 +17,11 @@
  *     already returns null rather than reporting "0 companies observed", and a
  *     signed zero is a wrong claim rather than a missing one.
  *
- * Idempotent per (vendor, hour): a rerun upserts that hour's row rather than
- * forking the chain, and `prevHash` always comes from the latest row in an
- * EARLIER hour — never the row about to be overwritten, or a rerun would chain
- * an hour onto its own previous version.
+ * INSERT-ONLY, for the reason in freeze.ts: these rows are the only thing the
+ * aggregate routes serve, so a row that exists has been handed out and must
+ * never change. A rerun in the same hour skips a vendor already frozen; the
+ * write is ON CONFLICT DO NOTHING for overlapping runs; a database trigger
+ * refuses UPDATE. `prevHash` comes from the latest row in an EARLIER hour.
  */
 
 import { dbClient } from "@/lib/db/client";
@@ -39,6 +40,8 @@ function hourBucket(): number {
 export interface AggregateFreezeResult {
 	ok: boolean;
 	frozen: number;
+	/** Vendors whose row for this hour already existed and was left untouched. */
+	alreadyFrozen?: number;
 	/** Vendors deliberately not frozen this run — see the refusals above. */
 	skipped?: string[];
 	/** Present when ok is false. */
@@ -59,14 +62,15 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 
 	const bucket = hourBucket();
 	let frozen = 0;
+	let alreadyFrozen = 0;
 	const skipped: string[] = [];
 
 	for (const vendor of await allVendors()) {
 		const { data: last, error: lastError } = await db
 			.from("published_aggregates")
-			.select("attestation")
+			.select("hour_bucket, attestation")
 			.eq("vendor_slug", vendor.slug)
-			.lt("hour_bucket", bucket)
+			.lte("hour_bucket", bucket)
 			.order("hour_bucket", { ascending: false })
 			.limit(1)
 			.maybeSingle();
@@ -75,6 +79,12 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 		// scopes its own: the alert built from this detail has to name whose
 		// aggregate stopped publishing.
 		if (lastError) return { ok: false, frozen, detail: `${vendor.slug}: ${lastError.message}` };
+
+		// This hour is already frozen, and has very likely been served.
+		if (last?.hour_bucket === bucket) {
+			alreadyFrozen++;
+			continue;
+		}
 
 		const prevHash = last ? snapshotHash(last.attestation as SignedAggregate) : GENESIS_HASH;
 		const signed = await signAggregate(vendor.slug, prevHash);
@@ -94,11 +104,12 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 				published_at: signed.published_at,
 				attestation: signed,
 			},
-			{ onConflict: "vendor_slug,hour_bucket" }
+			// ON CONFLICT DO NOTHING: an overlapping run that froze this hour first wins.
+			{ onConflict: "vendor_slug,hour_bucket", ignoreDuplicates: true }
 		);
 		if (upsertError) return { ok: false, frozen, detail: `${vendor.slug}: ${upsertError.message}` };
 		frozen++;
 	}
 
-	return { ok: true, frozen, ...(skipped.length && { skipped }) };
+	return { ok: true, frozen, ...(alreadyFrozen && { alreadyFrozen }), ...(skipped.length && { skipped }) };
 }

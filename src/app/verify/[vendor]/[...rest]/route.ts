@@ -4,6 +4,7 @@ import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
 import { jwksResult } from "@/lib/attest/keys";
 import { customerProof } from "@/lib/attest/proofs";
 import type { SignedAttestation } from "@/lib/attest/types";
+import { methodUrl } from "@/lib/attest/method";
 import { verifyAttestation } from "@/lib/attest/verify";
 import { parseVerifyPath, snapshotStamp, VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { proofHtml, proofJson, namedProofJson } from "@/lib/http";
@@ -93,19 +94,43 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 	);
 }
 
+/**
+ * No snapshot at this address. Deliberately NOT a verdict of forgery.
+ *
+ * A miss has several innocent causes — the vendor unpublished, the customer is
+ * no longer named, the link was mistyped or truncated in transit — and one
+ * guilty one, and from a URL alone we cannot tell them apart. This page used
+ * to say "not issued by Letterprove" for all of them, which also meant every
+ * genuine document served before its hour was frozen got called a forgery by
+ * our own checker. The only thing that can establish forgery is the signature,
+ * so the page says what it knows and points at that check. The answer is the
+ * same for every cause, so it still confirms nothing about private vendors or
+ * customers.
+ */
 function missing(wantsJson: boolean): NextResponse {
 	const statement =
-		"Letterprove has no attestation at this address. A document whose `verify` link points here was not issued by Letterprove, or names a vendor or customer that is not public.";
+		"Letterprove has no public snapshot at this address. That alone does not mean a document pointing here is forged: the vendor may have unpublished, the customer may no longer be named, or the link may have been altered or cut short. " +
+		"To check a copy yourself, verify its signature against Letterprove's published keys — only a document signed by one of those keys was issued by Letterprove. " +
+		"Do not rely on figures you cannot verify either way.";
+	const keys = `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`;
+	const method = methodUrl("scripts/verify.mjs");
 	if (wantsJson) {
 		return NextResponse.json(
-			{ issued_by_letterprove: false, statement },
+			{ found: false, statement, jwks_uri: keys, verify_script: method },
 			{ status: 404, headers: { "access-control-allow-origin": "*", "x-letterprove": "on" } },
 		);
 	}
-	return new NextResponse(page("Not issued by Letterprove", `<p><strong>Not verified.</strong> ${esc(statement)}</p>`), {
-		status: 404,
-		headers: { "content-type": "text/html; charset=utf-8", "access-control-allow-origin": "*", "x-letterprove": "on" },
-	});
+	return new NextResponse(
+		page(
+			"No snapshot found",
+			`<p><strong>Not found.</strong> ${esc(statement)}</p>` +
+				`<p>Keys: <a href="${keys}">${keys}</a>. A reference verifier: <a href="${method}">scripts/verify.mjs</a>.</p>`,
+		),
+		{
+			status: 404,
+			headers: { "content-type": "text/html; charset=utf-8", "access-control-allow-origin": "*", "x-letterprove": "on" },
+		},
+	);
 }
 
 function page(title: string, body: string): string {

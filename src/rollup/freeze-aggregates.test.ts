@@ -24,7 +24,7 @@ function mockDb(opts: { last?: unknown; lastError?: string; upsertError?: string
 	const upsert = vi.fn().mockResolvedValue({
 		error: opts.upsertError ? { message: opts.upsertError } : null,
 	});
-	const chain = { maybeSingle, limit: () => chain, order: () => chain, lt: () => chain, eq: () => chain, select: () => chain };
+	const chain = { maybeSingle, limit: () => chain, order: () => chain, lt: () => chain, lte: () => chain, eq: () => chain, select: () => chain };
 	return { from: vi.fn(() => ({ ...chain, upsert })), upsert, maybeSingle };
 }
 
@@ -137,5 +137,18 @@ describe("freezeAggregates", () => {
 		// change to how the body is built alter what was already served.
 		expect(row.attestation).toEqual(signed);
 		expect(typeof row.hour_bucket).toBe("number");
+		// Insert-only: ON CONFLICT DO NOTHING, never an overwrite of a served row.
+		expect(db.upsert.mock.calls[0][1]).toEqual({ onConflict: "vendor_slug,hour_bucket", ignoreDuplicates: true });
+	});
+
+	it("leaves an hour that is already frozen untouched, without re-signing it", async () => {
+		const bucket = Math.floor(Date.now() / 3_600_000);
+		const db = mockDb({ last: { hour_bucket: bucket, attestation: {} } });
+		await setup(db);
+		const { signAggregate } = await import("@/lib/attest/aggregate");
+
+		await expect(freezeAggregates()).resolves.toEqual({ ok: true, frozen: 0, alreadyFrozen: 1 });
+		expect(db.upsert).not.toHaveBeenCalled();
+		expect(signAggregate).not.toHaveBeenCalled();
 	});
 });

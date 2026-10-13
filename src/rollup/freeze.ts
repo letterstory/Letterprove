@@ -6,11 +6,16 @@
  * Runs after rollup.ts in the cron schedule (vercel.json), so the hour it
  * freezes already has hot_rollups written for it.
  *
- * Idempotent per (vendor, customer, hour): reruns within the same hour
- * upsert onto that hour's row rather than forking the chain. `prevHash` is
- * always read from the latest row in an *earlier* hour, never the row
- * about to be overwritten — otherwise a rerun would chain the hour onto
- * its own previous version instead of the true predecessor.
+ * INSERT-ONLY. A frozen row is what the proof routes serve (attest/proofs.ts
+ * serves nothing else), so once written it has been handed out, and its
+ * `verify` link has to keep resolving to exactly those bytes. A rerun within
+ * the same hour therefore leaves that hour alone: it sees the row and skips
+ * the customer, and the write itself is ON CONFLICT DO NOTHING for the race
+ * where two runs overlap. A database trigger refuses any UPDATE as well
+ * (migration 20261013010049_published_rows_insert_only).
+ *
+ * `prevHash` comes from the latest row in an EARLIER hour — the same read that
+ * tells us whether this hour is already frozen.
  */
 
 import { dbClient } from "@/lib/db/client";
@@ -30,6 +35,8 @@ function hourBucket(): number {
 export interface FreezeResult {
 	ok: boolean;
 	frozen: number;
+	/** Customers whose row for this hour already existed and was left untouched. */
+	alreadyFrozen?: number;
 	/**
 	 * Customers deliberately not frozen this run because their telemetry read
 	 * failed. Not an error — see the skip in the loop below.
@@ -59,16 +66,17 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 
 	const bucket = hourBucket();
 	let frozen = 0;
+	let alreadyFrozen = 0;
 	const skipped: string[] = [];
 
 	for (const vendor of await allVendors()) {
 		for (const customer of vendor.customers) {
 			const { data: last, error: lastError } = await db
 				.from("published_snapshots")
-				.select("attestation")
+				.select("hour_bucket, attestation")
 				.eq("vendor_slug", vendor.slug)
 				.eq("customer_slug", customer.slug)
-				.lt("hour_bucket", bucket)
+				.lte("hour_bucket", bucket)
 				.order("hour_bucket", { ascending: false })
 				.limit(1)
 				.maybeSingle();
@@ -79,6 +87,12 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 			// proof somewhere stopped updating.
 			if (lastError) return { ok: false, frozen, detail: `${vendor.slug}/${customer.slug}: ${lastError.message}` };
 
+			// This hour is already frozen, and has very likely been served.
+			if (last?.hour_bucket === bucket) {
+				alreadyFrozen++;
+				continue;
+			}
+
 			const { body, snapshot } = await attestationBody(vendor, customer);
 
 			// A failed telemetry read produces a body indistinguishable from a
@@ -86,8 +100,8 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 			// record a permanent downgrade for a customer that may have been
 			// perfectly healthy, and the chain is immutable, so there is no
 			// correcting it afterwards. Skipping leaves this hour unfrozen —
-			// the live path still serves a current entry, and the next run
-			// picks the hour up if the read recovers.
+			// the proof routes keep serving the last frozen hour, and the next
+			// run picks the hour up if the read recovers.
 			if (!snapshot.readOk) {
 				skipped.push(`${vendor.slug}/${customer.slug}`);
 				continue;
@@ -110,8 +124,8 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 			 * above: this customer gets no entry for this hour, everyone else
 			 * carries on. A missing hour is already a designed-for state — the
 			 * chain links by prev_hash, not by contiguous hours, so a gap is a
-			 * less dense history rather than a broken one, and the live path
-			 * still serves a current entry.
+			 * less dense history rather than a broken one, and the proof routes
+			 * keep serving the last frozen hour.
 			 */
 			let signed;
 			try {
@@ -131,12 +145,13 @@ export async function freezeSnapshots(): Promise<FreezeResult> {
 					published_at: signed.published_at,
 					attestation: signed,
 				},
-				{ onConflict: "vendor_slug,customer_slug,hour_bucket" }
+				// ON CONFLICT DO NOTHING: an overlapping run that froze this hour first wins.
+				{ onConflict: "vendor_slug,customer_slug,hour_bucket", ignoreDuplicates: true }
 			);
 			if (upsertError) return { ok: false, frozen, detail: `${vendor.slug}/${customer.slug}: ${upsertError.message}` };
 			frozen++;
 		}
 	}
 
-	return { ok: true, frozen, ...(skipped.length && { skipped }) };
+	return { ok: true, frozen, ...(alreadyFrozen && { alreadyFrozen }), ...(skipped.length && { skipped }) };
 }

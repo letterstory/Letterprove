@@ -1,7 +1,7 @@
 /**
  * Reads a vendor's durable aggregate history — the rows the hourly freeze has
- * persisted. Never the whole story alone: the current hour is usually not
- * frozen yet, so attest/aggregate.ts appends one live entry on top.
+ * persisted. In production this IS the published aggregate chain:
+ * attest/aggregate.ts serves these rows and nothing else.
  *
  * Deliberately mirrors rollup/history.ts rather than generalising it. The two
  * read different tables with different subjects, and a shared "load a chain"

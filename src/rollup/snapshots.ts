@@ -40,8 +40,8 @@ export interface CustomerSnapshot {
 	 * Whether the telemetry read actually succeeded.
 	 *
 	 * `observed: false` still conflates two things one level up: "the query ran
-	 * and found nothing" and "the query never ran". The live path can treat
-	 * those alike, because it recomputes next hour and self-heals. The freeze
+	 * and found nothing" and "the query never ran". A development-signing
+	 * preview can treat those alike, because it is never stored. The freeze
 	 * path cannot — it writes an immutable row, so persisting a tier-0 claim
 	 * derived from a failed query records a permanent downgrade for a customer
 	 * that may have been fine.

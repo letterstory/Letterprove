@@ -83,7 +83,7 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		verify_links: {
 			pattern: `${VERIFY_ORIGIN}/verify/{vendor}[/{customer}]/{published_at as YYYYMMDDTHHMMSSmmmZ}`,
 			note:
-				"Every attestation signed since 2026-10-08 carries `verify`, a link to that exact snapshot on this host. Fetching it shows, in plain language, the figures Letterprove signed and whether the signature checks out. A copy whose figures differ from that page was altered; a `verify` link that 404s, or that points anywhere but this host, means the document was not issued by Letterprove.",
+				"Every attestation signed since 2026-10-08 carries `verify`, a link to that exact snapshot on this host. Fetching it shows, in plain language, the figures Letterprove signed and whether the signature checks out. A copy whose figures differ from that page was altered. A `verify` link that points anywhere but this host was not issued by Letterprove. One that 404s means Letterprove cannot vouch for that copy (the vendor or customer may no longer be public); only its signature, checked against `jwks_uri`, settles whether Letterprove issued it.",
 		},
 		// Beside the verifier on purpose. Those two answer the two separate
 		// questions an agent has — "is this document genuine" and "how much is
