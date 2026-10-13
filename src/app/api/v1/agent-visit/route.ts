@@ -6,7 +6,7 @@ import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { MAX_OBSERVE_BODY_BYTES, readBodyWithLimit } from "@/lib/telemetry/request-limits";
 import { hostnameOf, normalizeDomain } from "@/lib/vendors/domain";
-import { acceptedHosts } from "@/lib/vendors/hosts";
+import { acceptedHosts, isOriginAccepted } from "@/lib/vendors/hosts";
 
 /** Per source IP. A vendor's server forwards every request it serves, so this is far above /v1/observe's. */
 const AGENT_VISIT_IP_LIMIT_PER_MINUTE = 3000;
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
 			? normalizeDomain(record.host)
 			: vendor.domain;
 	if (!host) return collectorResponse(false);
-	if (host !== vendor.domain && !(await acceptedHosts(vendor.id)).has(host)) return collectorResponse(false);
+	if (!isOriginAccepted(host, vendor.domain, await acceptedHosts(vendor.id))) return collectorResponse(false);
 
 	const ip = clientMode ? clientIp(request.headers) : typeof record.ip === "string" && parseIp(record.ip.trim()) ? record.ip.trim() : null;
 

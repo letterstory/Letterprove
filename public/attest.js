@@ -34,6 +34,16 @@
  * product — README § Visitor identification — and nothing it sees passes
  * through this script.
  *
+ * Calls made before this script loads are kept, not lost. Put this one-line
+ * stub above any code that might call identify early (an auth callback that
+ * runs before an async script arrives), and the calls run once it boots:
+ *
+ *   window.Letterprove=window.Letterprove||{q:[],identify:function(e){this.q.push(['identify',e])},login:function(e){this.q.push(['login',e])},signup:function(e){this.q.push(['signup',e])}}
+ *
+ * Add `data-debug` to the script tag to see, in the browser console, the
+ * script booting, the config answer, each identify (domain only) and each
+ * event sent. Remove it once things work.
+ *
  * Every public method is wrapped so nothing here can throw into the host
  * page: a vendor's product must work identically whether this script loads,
  * fails, or is missing entirely.
@@ -49,6 +59,17 @@
 
 	var origin = scriptOrigin(scriptEl);
 	if (!origin) return;
+
+	var debug = scriptEl.hasAttribute("data-debug");
+	function log(msg, warn) {
+		if (!debug) return;
+		try {
+			var c = window.console;
+			if (c) (warn ? c.warn : c.info).call(c, "[Letterprove] " + msg);
+		} catch {
+			// never throw into the host page
+		}
+	}
 
 	var CONFIG_URL = origin + "/api/v1/config?k=" + encodeURIComponent(key);
 	var OBSERVE_URL = origin + "/api/v1/observe";
@@ -112,6 +133,7 @@
 		} catch {
 			return;
 		}
+		log("sent " + ev + " for " + domain + " from " + window.location.hostname);
 		beacon(OBSERVE_URL, body);
 	}
 
@@ -132,27 +154,31 @@
 
 	function boot() {
 		var req;
+		log("loaded on " + window.location.hostname + ", checking the key");
 		try {
 			req = fetch(CONFIG_URL, { credentials: "omit" });
 		} catch {
 			failed = true;
+			log("couldn't reach Letterprove; nothing will be sent from this page", true);
 			return;
 		}
 		req
 			.then(function (res) {
-				if (!res.ok) throw new Error("config unavailable");
+				if (!res.ok) throw new Error(res.status === 404 ? "the key isn't recognised (check data-key)" : "config unavailable (" + res.status + ")");
 				return res.json();
 			})
 			.then(function (body) {
 				if (!body || typeof body.cfg !== "number") throw new Error("malformed config");
 				cfg = body.cfg;
 				ready = true;
+				log("key accepted; ready" + (queue.length ? ", sending " + queue.length + " queued event(s)" : ""));
 				flush();
 				if (body.visitors && body.visitors.pixel) loadVisitorPixel(body.visitors.pixel);
 			})
-			.catch(function () {
+			.catch(function (e) {
 				failed = true;
 				queue = [];
+				log("not collecting on this page: " + (e && e.message ? e.message : "config failed"), true);
 			});
 	}
 
@@ -231,8 +257,12 @@
 	function identify(email) {
 		try {
 			var d = domainFromEmail(email);
-			if (!d) return;
+			if (!d) {
+				log("identify was called without an email address; ignored", true);
+				return;
+			}
 			domain = d;
+			log("identified a user at " + d);
 			if (!sessionFired) {
 				sessionFired = true;
 				fire("session");
@@ -261,10 +291,22 @@
 	}
 
 	var api = window.Letterprove || {};
+	// Calls the page made through the stub before this script arrived.
+	var early = api.q && api.q.length ? api.q.slice(0) : [];
+	api.q = [];
 	api.identify = identify;
 	api.signup = signup;
 	api.login = login;
 	window.Letterprove = api;
+	var calls = { identify: identify, signup: signup, login: login };
+	for (var c = 0; c < early.length; c++) {
+		try {
+			var call = early[c];
+			if (call && calls[call[0]]) calls[call[0]](call[1]);
+		} catch {
+			// never throw into the host page
+		}
+	}
 
 	boot();
 	agentView();

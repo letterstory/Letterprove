@@ -3,7 +3,7 @@ import { z } from "zod";
 import * as S from "@/lib/tools/schemas";
 import { dbClient } from "@/lib/db/client";
 import { findVendorByOrg } from "@/lib/fixtures/vendors";
-import { provisionVendorForOrg } from "@/lib/vendors/provision";
+import { normalizeContactEmail, provisionVendorForOrg } from "@/lib/vendors/provision";
 import { domainRejectionReason, normalizeDomain } from "@/lib/vendors/domain";
 import {
 	checkDomainVerification,
@@ -27,7 +27,7 @@ import { vendorRoster } from "@/lib/staff/vendors";
 import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
-import { installSnippet, serverSnippets } from "@/lib/vendors/install";
+import { installRecipes, installSnippet, serverSnippets } from "@/lib/vendors/install";
 import { agentVisitsReport } from "@/lib/agents/visits";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
 import { MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, type HostRow } from "@/lib/vendors/hosts";
@@ -159,7 +159,7 @@ function requireVendorId(principal: OAuthPrincipal): string | ToolResult {
 			status: 404,
 			body: {
 				error: "vendor_not_linked",
-				detail: "This organization has no Letterprove vendor yet. Create one with create_vendor.",
+				detail: "This organization hasn't set up Letterprove yet. Add your company name and domain to start.",
 			},
 		};
 	}
@@ -300,7 +300,7 @@ export const TOOLS: BoundTool[] = [
 		// the org 1:1. Authorized by the Letterstory service secret (the org
 		// context), NOT by a vendor:* grant — no vendor exists to grant against.
 		name: "create_vendor",
-		description: "Create the Letterprove vendor for a Letterstory org, linked 1:1. Args: name, domain. Returns { linked }.",
+		description: "Create the Letterprove vendor for a Letterstory org, linked 1:1. Args: name, domain, contact_email (optional: where Letterprove emails the vendor if its proof breaks). Returns { linked }.",
 		capability: "vendor:write",
 		inputSchema: S.createVendorInput,
 		outputSchema: S.createVendorOutput,
@@ -315,7 +315,7 @@ export const TOOLS: BoundTool[] = [
 				return { ok: false, status: 400, body: { error: "name and domain are required" } };
 			}
 
-			const result = await provisionVendorForOrg(orgId, { name, domain });
+			const result = await provisionVendorForOrg(orgId, { name, domain, contactEmail: typeof record.contact_email === "string" ? record.contact_email : null });
 			if (!result.ok) return { ok: false, status: result.status, body: { error: result.error } };
 			return { ok: true, status: 201, body: { linked: true, slug: result.slug, domain: result.domain } };
 		},
@@ -497,7 +497,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_status",
 		description:
-			"Whether the caller's vendor has received any events in the last 24h and how many, whether the tracking script has ever successfully checked in at all, and whether the vendor's proofs are public yet.",
+			"Whether the caller's vendor has received any events in the last 24h and how many, when it first and last received one, whether the tracking script has ever checked in, which origins had events dropped (and whether adding them as a host would help), and whether the vendor's proofs are public yet.",
 		capability: "vendor:read",
 		inputSchema: S.getStatusInput,
 		outputSchema: S.getStatusOutput,
@@ -518,6 +518,9 @@ export const TOOLS: BoundTool[] = [
 					// own proof URL and interpreting a 404.
 					published: result.publishedAt !== null,
 					published_at: result.publishedAt,
+					ever_received_at: result.everReceivedAt,
+					last_received_at: result.lastReceivedAt,
+					rejected_origins: result.rejectedOrigins,
 				},
 			};
 		},
@@ -726,7 +729,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "get_install_snippet",
-		description: "The <script> tag to install on the caller's site, pointed at this server's own origin; the optional server snippet (server_snippet) that forwards AI-agent and crawler requests, which never run JavaScript, so get_agent_visits can count them; and the \"Attested and proven by Letterprove\" footer badge (show it only when badge.live — before publishing its link is a 404). Args: none.",
+		description: "The <script> tag to install on the caller's site, pointed at this server's own origin; copy-paste recipes (recipes) for calling identify with Next.js, plain JS, Clerk, Auth0 and Supabase, plus the stub that keeps calls made before the script loads; the optional server snippet (server_snippet) that forwards AI-agent and crawler requests, which never run JavaScript, so get_agent_visits can count them; and the \"Attested and proven by Letterprove\" footer badge (show it only when badge.live — before publishing its link is a 404). Args: none.",
 		capability: "vendor:read",
 		inputSchema: S.getInstallSnippetInput,
 		outputSchema: S.getInstallSnippetOutput,
@@ -757,6 +760,7 @@ export const TOOLS: BoundTool[] = [
 					// Optional second line for the vendor's server. The script tag
 					// only sees agents that render pages; most never do.
 					server_snippet: serverSnippets(context.origin, vendor.key),
+					recipes: installRecipes(context.origin, vendor.key),
 					// The footer badge rides the same call: it is the other thing a
 					// vendor pastes into their site. `live` is false until the vendor
 					// publishes, because until then the page it links to is a 404.
@@ -942,7 +946,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "update_vendor",
-		description: "Update the caller's own vendor account. Args: any of name, domain, category.",
+		description: "Update the caller's own vendor account. Args: any of name, domain, category, contact_email (where Letterprove emails you if your proof breaks: DNS record gone, collection quiet for two days, Stripe or PostHog reads failing; empty clears it).",
 		capability: "vendor:write",
 		inputSchema: S.updateVendorInput,
 		outputSchema: S.updateVendorOutput,
@@ -962,8 +966,15 @@ export const TOOLS: BoundTool[] = [
 				update.domain = normalized;
 			}
 			if (typeof record.category === "string" && record.category.trim()) update.category = record.category.trim();
+			if (typeof record.contact_email === "string" || record.contact_email === null) {
+				// Empty or null clears it; anything else must look like an address.
+				const raw = typeof record.contact_email === "string" ? record.contact_email.trim() : "";
+				const email = raw ? normalizeContactEmail(raw) : null;
+				if (raw && !email) return { ok: false, status: 400, body: { error: "contact_email isn't an email address." } };
+				update.contact_email = email;
+			}
 			if (Object.keys(update).length === 0) {
-				return { ok: false, status: 400, body: { error: "at least one of name, domain, category is required" } };
+				return { ok: false, status: 400, body: { error: "at least one of name, domain, category, contact_email is required" } };
 			}
 
 			const vendorId = requireVendorId(principal);
@@ -972,7 +983,7 @@ export const TOOLS: BoundTool[] = [
 			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			const { data: vendor } = await db
 				.from("vendors")
-				.select("slug, name, domain, category, domain_verified_at")
+				.select("slug, name, domain, category, domain_verified_at, contact_email")
 				.eq("id", vendorId)
 				.maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
@@ -1189,7 +1200,7 @@ export const TOOLS: BoundTool[] = [
 				return {
 					ok: false,
 					status: 409,
-					body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first with connect_stripe." },
+					body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." },
 				};
 			}
 
@@ -1233,7 +1244,7 @@ export const TOOLS: BoundTool[] = [
 
 			const credential = await credentialFor(vendorId);
 			if (!credential) {
-				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first with connect_stripe." } };
+				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." } };
 			}
 			const listed = await fetchProducts(credential.key);
 			if (!listed.ok) return { ok: false, status: 502, body: { error: "stripe_read_failed", detail: listed.error } };
@@ -1266,7 +1277,7 @@ export const TOOLS: BoundTool[] = [
 				return { ok: false, status: 400, body: { error: "invalid_product_ids", detail: "product_ids must be a list of Stripe product ids (prod_…)." } };
 			}
 			if (!(await connectionFor(vendorId))) {
-				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first with connect_stripe." } };
+				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." } };
 			}
 			if (!(await setProductScope(vendorId, productIds))) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 
@@ -1448,7 +1459,7 @@ export const TOOLS: BoundTool[] = [
 			const vendorId = requireVendorId(principal);
 			if (typeof vendorId !== "string") return vendorId;
 			if (!(await posthogStatus(vendorId))) {
-				return { ok: false, status: 409, body: { error: "posthog_not_connected", detail: "Connect PostHog first with connect_posthog." } };
+				return { ok: false, status: 409, body: { error: "posthog_not_connected", detail: "Connect PostHog first." } };
 			}
 			const result = await syncVendorPosthog(vendorId);
 			if (!result.ok) return { ok: false, status: 502, body: { error: "posthog_sync_failed", detail: result.error } };

@@ -256,6 +256,9 @@ describe("dispatchTool", () => {
 			installed: true,
 			count: 3,
 			publishedAt: "2026-01-01T00:00:00.000Z",
+			everReceivedAt: "2025-12-01T00:00:00.000Z",
+			lastReceivedAt: "2026-01-02T00:00:00.000Z",
+			rejectedOrigins: [{ host: "staging.acme.com", events_24h: 4, last_at: "2026-01-02T00:00:00.000Z", addable: true, reason: "needs_proof" }],
 		});
 
 		const outcome = await dispatchTool("get_status", {}, principal(["vendor:read"]));
@@ -271,6 +274,9 @@ describe("dispatchTool", () => {
 					count: 3,
 					published: true,
 					published_at: "2026-01-01T00:00:00.000Z",
+					ever_received_at: "2025-12-01T00:00:00.000Z",
+					last_received_at: "2026-01-02T00:00:00.000Z",
+					rejected_origins: [{ host: "staging.acme.com", events_24h: 4, last_at: "2026-01-02T00:00:00.000Z", addable: true, reason: "needs_proof" }],
 				},
 			},
 		});
@@ -319,7 +325,7 @@ describe("dispatchTool", () => {
 				status: 404,
 				body: {
 					error: "vendor_not_linked",
-					detail: "This organization has no Letterprove vendor yet. Create one with create_vendor.",
+					detail: "This organization hasn't set up Letterprove yet. Add your company name and domain to start.",
 				},
 			},
 		});
@@ -551,7 +557,7 @@ describe("dispatchTool", () => {
 	it("builds an install snippet from the caller's vendor key and the request's own origin", async () => {
 		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", proofs_published_at: null };
 		const { dispatchTool } = await import("./registry");
-		const { installSnippet, serverSnippets } = await import("@/lib/vendors/install");
+		const { installRecipes, installSnippet, serverSnippets } = await import("@/lib/vendors/install");
 		const { badgeHtml } = await import("@/lib/vendors/badge");
 		const origin = "https://acme.example.com";
 
@@ -566,6 +572,7 @@ describe("dispatchTool", () => {
 					origin,
 					publishable_key: "lp_live_acme_9f2c",
 					server_snippet: serverSnippets(origin, "lp_live_acme_9f2c"),
+					recipes: installRecipes(origin, "lp_live_acme_9f2c"),
 					badge: { html: badgeHtml(origin, "acme"), href: `${origin}/proofs/acme`, live: false },
 				},
 			},
@@ -575,7 +582,8 @@ describe("dispatchTool", () => {
 		const body = (outcome as { result: { body: { server_snippet: { endpoint: string; nextjs_middleware: string } } } }).result.body;
 		expect(body.server_snippet.endpoint).toBe(`${origin}/api/v1/agent-visit`);
 		expect(body.server_snippet.nextjs_middleware).toContain(`"${origin}/api/v1/agent-visit"`);
-		expect(body.server_snippet.nextjs_middleware).toContain("keepalive: true");
+		expect(body.server_snippet.nextjs_middleware).toContain("event.waitUntil(");
+		expect(body.server_snippet.nextjs_middleware).toContain("export function proxy(");
 	});
 
 	// Until a vendor publishes, the page the badge links to is a 404, so the
@@ -624,7 +632,7 @@ describe("dispatchTool", () => {
 		expect(fromCalls.some(([table]) => table === "vendors")).toBe(false);
 		expect(outcome).toEqual({
 			kind: "result",
-			result: { ok: false, status: 400, body: { error: "at least one of name, domain, category is required" } },
+			result: { ok: false, status: 400, body: { error: "at least one of name, domain, category, contact_email is required" } },
 		});
 	});
 

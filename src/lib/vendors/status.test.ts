@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getVendorStatus } from "./status";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
+vi.mock("@/lib/telemetry/rejected-origins", () => ({ rejectedOriginsFor: vi.fn(async () => []) }));
 
 function mockDb({
 	vendor,
@@ -19,7 +20,11 @@ function mockDb({
 	const vendorSelect = vi.fn().mockReturnValue({ eq: vendorEq });
 
 	const eventsGte = vi.fn().mockResolvedValue({ count: count ?? null, error: error ?? null });
-	const eventsEq = vi.fn().mockReturnValue({ gte: eventsGte });
+	const latestMaybeSingle = vi.fn().mockResolvedValue({ data: count ? { receipt_ts: "2026-10-13T10:00:00Z" } : null });
+	const eventsEq = vi.fn().mockReturnValue({
+		gte: eventsGte,
+		order: () => ({ limit: () => ({ maybeSingle: latestMaybeSingle }) }),
+	});
 	const eventsSelect = vi.fn().mockReturnValue({ eq: eventsEq });
 
 	const pingMaybeSingle = vi.fn().mockResolvedValue({ data: ping });
@@ -55,7 +60,7 @@ describe("getVendorStatus", () => {
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, count: 0, ping: null }) as never);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0, publishedAt: null });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0, publishedAt: null, everReceivedAt: null, lastReceivedAt: null, rejectedOrigins: [] });
 	});
 
 	it("reports receiving=false, installed=true when config has been fetched but no event has landed", async () => {
@@ -64,7 +69,7 @@ describe("getVendorStatus", () => {
 			mockDb({ vendor: { slug: "acme" }, count: 0, ping: { vendor_slug: "acme" } }) as never
 		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0, publishedAt: null });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0, publishedAt: null, everReceivedAt: null, lastReceivedAt: null, rejectedOrigins: [] });
 	});
 
 	it("reports receiving=true once at least one event landed", async () => {
@@ -73,7 +78,7 @@ describe("getVendorStatus", () => {
 			mockDb({ vendor: { slug: "acme" }, count: 5, ping: { vendor_slug: "acme" } }) as never
 		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5, publishedAt: null });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5, publishedAt: null, everReceivedAt: "2026-10-13T10:00:00.000Z", lastReceivedAt: "2026-10-13T10:00:00.000Z", rejectedOrigins: [] });
 	});
 
 	/*
@@ -99,6 +104,9 @@ describe("getVendorStatus", () => {
 			installed: true,
 			count: 5,
 			publishedAt: "2026-09-14T10:00:00.000Z",
+			everReceivedAt: "2026-10-13T10:00:00.000Z",
+			lastReceivedAt: "2026-10-13T10:00:00.000Z",
+			rejectedOrigins: [],
 		});
 	});
 
@@ -107,5 +115,14 @@ describe("getVendorStatus", () => {
 		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, error: new Error("boom") }) as never);
 
 		expect(await getVendorStatus("v1")).toEqual({ ok: false, status: 500, error: "Count failed" });
+	});
+
+	it("reports the first event ever from the vendor row, so a quiet month doesn't read as never installed", async () => {
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue(
+			mockDb({ vendor: { slug: "acme", first_event_at: "2026-08-01T00:00:00+00:00" }, count: 0, ping: { vendor_slug: "acme" } }) as never,
+		);
+		const r = await getVendorStatus("v1");
+		expect(r).toMatchObject({ ok: true, receiving: false, everReceivedAt: "2026-08-01T00:00:00.000Z", lastReceivedAt: null });
 	});
 });

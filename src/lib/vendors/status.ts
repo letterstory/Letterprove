@@ -1,7 +1,20 @@
 import { dbClient } from "@/lib/db/client";
+import { rejectedOriginsFor, type RejectedOrigin } from "@/lib/telemetry/rejected-origins";
 
 export type VendorStatusResult =
-	| { ok: true; receiving: boolean; installed: boolean; count: number; publishedAt: string | null }
+	| {
+			ok: true;
+			receiving: boolean;
+			installed: boolean;
+			count: number;
+			publishedAt: string | null;
+			/** First accepted event ever. Survives hot_events' 35-day retention. */
+			everReceivedAt: string | null;
+			/** Latest accepted event still held (35 days), or null. */
+			lastReceivedAt: string | null;
+			/** Origins whose events were dropped in the last 24h. */
+			rejectedOrigins: RejectedOrigin[];
+	  }
 	| { ok: false; status: number; error: string };
 
 /**
@@ -30,16 +43,24 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 
 	const { data: vendor } = await db
 		.from("vendors")
-		.select("slug, proofs_published_at")
+		.select("slug, domain, proofs_published_at, first_event_at")
 		.eq("id", vendorId)
 		.maybeSingle();
 	if (!vendor) return { ok: false, status: 404, error: "Not configured" };
 
 	const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-	const [{ count, error }, { data: ping }] = await Promise.all([
+	const [{ count, error }, { data: ping }, { data: latest }, rejectedOrigins] = await Promise.all([
 		db.from("hot_events").select("*", { count: "exact", head: true }).eq("vendor_slug", vendor.slug).gte("receipt_ts", since),
 		db.from("config_pings").select("vendor_slug").eq("vendor_slug", vendor.slug).maybeSingle(),
+		db
+			.from("hot_events")
+			.select("receipt_ts")
+			.eq("vendor_slug", vendor.slug)
+			.order("receipt_ts", { ascending: false })
+			.limit(1)
+			.maybeSingle<{ receipt_ts: string }>(),
+		rejectedOriginsFor(vendorId, vendor.domain ?? ""),
 	]);
 
 	if (error) return { ok: false, status: 500, error: "Count failed" };
@@ -51,5 +72,14 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 		installed: ping != null,
 		count: total,
 		publishedAt: vendor.proofs_published_at ?? null,
+		everReceivedAt: iso(vendor.first_event_at ?? latest?.receipt_ts ?? null),
+		lastReceivedAt: iso(latest?.receipt_ts ?? null),
+		rejectedOrigins,
 	};
+}
+
+function iso(v: string | null): string | null {
+	if (!v) return null;
+	const t = Date.parse(v);
+	return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }

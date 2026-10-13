@@ -1,7 +1,9 @@
 import { hostnameOf } from "@/lib/vendors/domain";
 import { requestGeo } from "@/lib/telemetry/geo";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
-import { acceptedHosts } from "@/lib/vendors/hosts";
+import { acceptedHosts, isOriginAccepted } from "@/lib/vendors/hosts";
+import { recordRejectedOrigin } from "@/lib/telemetry/rejected-origins";
+import { markFirstEvent } from "@/lib/telemetry/first-event";
 import { collectorResponse } from "@/lib/http";
 import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { parseObservePayload } from "@/lib/telemetry/events";
@@ -77,10 +79,18 @@ export async function POST(request: Request) {
 	 */
 	const origin = hostnameOf(request.headers.get("origin"));
 	if (!origin) return collectorResponse(false);
-	// The vendor's domain, or one of the extra hosts its DNS proof covers
-	// (src/lib/vendors/hosts.ts holds the rule). Looked up only on a miss, so
-	// the common single-host vendor pays nothing for the feature.
-	if (origin !== vendor.domain && !(await acceptedHosts(vendor.id)).has(origin)) return collectorResponse(false);
+	// The vendor's domain, any host beneath it, or one of the extra hosts its
+	// DNS proof covers (src/lib/vendors/hosts.ts holds the rule). The extra
+	// list is looked up only on a miss, so the common vendor pays nothing.
+	const accepted =
+		origin === vendor.domain ||
+		isOriginAccepted(origin, vendor.domain, origin.endsWith(`.${vendor.domain}`) ? new Set() : await acceptedHosts(vendor.id));
+	if (!accepted) {
+		// Counted, never stored as an event: the vendor sees "events are arriving
+		// from staging.acme.com" instead of a step that stays quiet forever.
+		await recordRejectedOrigin(vendor.id, origin);
+		return collectorResponse(false);
+	}
 
 	/*
 	 * Refuse anything from a vendor who has not proven DNS control of the
@@ -100,6 +110,7 @@ export async function POST(request: Request) {
 	 */
 	if (!vendor.domainVerified) return collectorResponse(false);
 
+	markFirstEvent(vendor.id);
 	await recordObservation({
 		vendor: vendor.slug,
 		domain: payload.domain,

@@ -20,6 +20,7 @@
  */
 
 import { dbClient } from "@/lib/db/client";
+import { notifyVendor } from "@/lib/notify/vendor-email";
 import { readAllRows } from "@/lib/db/read-all";
 import { partitionDomains } from "@/lib/identity/domains";
 import { acceptedHosts } from "@/lib/vendors/hosts";
@@ -167,6 +168,7 @@ async function recordFailure(vendorId: string, error: string): Promise<PosthogSy
 	if (failures >= FAILURES_BEFORE_CLEARING) {
 		await db.from("vendor_posthog_domains").delete().eq("vendor_id", vendorId);
 	}
+	if (failures === FAILURES_BEFORE_CLEARING) await notifyVendor(vendorId, "posthog_failing", `streak@${new Date().toISOString()}`, { detail: error });
 	return { ok: false, error };
 }
 

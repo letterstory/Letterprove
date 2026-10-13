@@ -41,6 +41,7 @@
  */
 
 import { readAllRows } from "@/lib/db/read-all";
+import { notifyVendor } from "@/lib/notify/vendor-email";
 import { dbClient } from "@/lib/db/client";
 import { checkStripeAccount, recordAccount } from "./account";
 import { credentialFor } from "./credentials";
@@ -268,6 +269,8 @@ async function recordFailure(vendorId: string, error: string): Promise<SyncResul
 		.eq("vendor_id", vendorId);
 
 	if (failures >= FAILURES_BEFORE_CLEARING) await clearEvidence(vendorId);
+	// Exactly at the threshold, so one failing streak is one email.
+	if (failures === FAILURES_BEFORE_CLEARING) await notifyVendor(vendorId, "stripe_failing", `streak@${new Date().toISOString()}`, { detail: error });
 
 	return { ok: false, error };
 }

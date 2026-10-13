@@ -1,6 +1,7 @@
 import { checkCollectorHealth } from "@/lib/telemetry/health";
 import { checkPublicationFreshness, type PublicationFreshness } from "@/rollup/freshness";
 import { sendAlert } from "@/lib/alerts/notify";
+import { notifyQuietVendors } from "@/lib/notify/quiet-collection";
 
 /**
  * Vercel Cron hits this every 15 minutes (see vercel.json). It is the watchdog
@@ -80,6 +81,11 @@ export async function GET(request: Request) {
 	// the route itself worked perfectly. A stale published record is the same
 	// kind of verdict, so it gets the same 500, which puts it on Vercel's
 	// failed-cron display as a second channel that costs nothing.
+	// Once an hour (this route runs every 15 minutes): email vendors whose
+	// collection has been quiet for two days after working. Theirs to fix, so
+	// it goes to them rather than to our Slack, and never fails this route.
+	const quiet = new Date().getUTCMinutes() < 15 ? await notifyQuietVendors() : null;
+
 	const ok = collector.ok && publication.ok;
-	return Response.json({ ok, collector, publication }, { status: ok ? 200 : 500 });
+	return Response.json({ ok, collector, publication, quiet }, { status: ok ? 200 : 500 });
 }

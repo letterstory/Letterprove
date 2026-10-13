@@ -82,7 +82,7 @@ describe("create_vendor", () => {
 	it("provisions and returns the linked vendor (201)", async () => {
 		provisionVendorForOrg.mockResolvedValue({ ok: true, vendorId: "v1", slug: "acme", domain: "acme.com" });
 		const o = await dispatchTool("create_vendor", { name: "Acme", domain: "acme.com" }, service());
-		expect(provisionVendorForOrg).toHaveBeenCalledWith(ORG, { name: "Acme", domain: "acme.com" });
+		expect(provisionVendorForOrg).toHaveBeenCalledWith(ORG, { name: "Acme", domain: "acme.com", contactEmail: null });
 		expect(o).toMatchObject({ kind: "result", result: { ok: true, status: 201, body: { linked: true, slug: "acme" } } });
 	});
 

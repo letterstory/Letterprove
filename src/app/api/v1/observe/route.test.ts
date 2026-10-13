@@ -3,12 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/oauth/ratelimit", () => ({ oauthRateLimit: vi.fn(), oauthClientIp: vi.fn(() => "203.0.113.9") }));
 vi.mock("@/lib/fixtures/vendors", () => ({ findVendorByKey: vi.fn() }));
 vi.mock("@/lib/telemetry/record", () => ({ recordObservation: vi.fn() }));
-vi.mock("@/lib/vendors/hosts", () => ({ acceptedHosts: vi.fn(async () => new Set<string>()) }));
+vi.mock("@/lib/vendors/hosts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/vendors/hosts")>()),
+	acceptedHosts: vi.fn(async () => new Set<string>()),
+}));
+vi.mock("@/lib/telemetry/rejected-origins", () => ({ recordRejectedOrigin: vi.fn() }));
+vi.mock("@/lib/telemetry/first-event", () => ({ markFirstEvent: vi.fn() }));
 
 import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { recordObservation } from "@/lib/telemetry/record";
 import { acceptedHosts } from "@/lib/vendors/hosts";
+import { recordRejectedOrigin } from "@/lib/telemetry/rejected-origins";
+import { markFirstEvent } from "@/lib/telemetry/first-event";
 import { POST } from "./route";
 
 // Verified, because every test below the refusal ones is about some other
@@ -138,30 +145,35 @@ describe("POST /api/v1/observe", () => {
 		expect(recordObservation).not.toHaveBeenCalled();
 	});
 
-	it("rejects when Origin doesn't match the vendor's registered domain", async () => {
+	it("rejects when Origin doesn't match the vendor's registered domain, and counts the origin", async () => {
 		const res = await post(VALID_BODY, { origin: "https://evil.example" });
 
 		expect(res.headers.get("x-letterprove")).toBe("off");
 		expect(recordObservation).not.toHaveBeenCalled();
+		expect(recordRejectedOrigin).toHaveBeenCalledWith("v-1", "evil.example");
 	});
 
-	it("accepts an extra host the vendor's DNS proof covers, and records its real origin", async () => {
-		vi.mocked(acceptedHosts).mockResolvedValueOnce(new Set(["app.lettertrace.com"]));
-		const res = await post(VALID_BODY, { origin: "https://app.lettertrace.com" });
+	it("accepts any host beneath the verified domain without a lookup, and records its real origin", async () => {
+		for (const origin of ["https://app.lettertrace.com", "https://www.lettertrace.com", "https://eu.app.lettertrace.com"]) {
+			const res = await post(VALID_BODY, { origin });
+			expect(res.headers.get("x-letterprove")).not.toBe("off");
+		}
+		expect(acceptedHosts).not.toHaveBeenCalled();
+		expect(vi.mocked(recordObservation).mock.calls.at(-1)?.[0].origin).toBe("eu.app.lettertrace.com");
+		expect(markFirstEvent).toHaveBeenCalledWith("v-1");
+	});
 
-		expect(res.headers.get("x-letterprove")).not.toBe("off");
+	it("accepts a sibling host only once it is added and proven", async () => {
+		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domain: "app.lettertrace.com" } as never);
+		vi.mocked(acceptedHosts).mockResolvedValueOnce(new Set(["www.lettertrace.com"]));
+		const ok = await post(VALID_BODY, { origin: "https://www.lettertrace.com" });
+		expect(ok.headers.get("x-letterprove")).not.toBe("off");
 		expect(acceptedHosts).toHaveBeenCalledWith("v-1");
-		expect(vi.mocked(recordObservation).mock.calls.at(-1)?.[0].origin).toBe("app.lettertrace.com");
-	});
 
-	it("rejects a host the vendor never added, or one whose proof is outstanding", async () => {
-		// acceptedHosts returns only hosts whose proof holds; an own-DNS host
-		// still waiting on its record is simply absent from the set.
-		vi.mocked(acceptedHosts).mockResolvedValueOnce(new Set(["app.lettertrace.com"]));
+		vi.mocked(acceptedHosts).mockResolvedValueOnce(new Set(["www.lettertrace.com"]));
 		const res = await post(VALID_BODY, { origin: "https://eu.lettertrace.com" });
-
 		expect(res.headers.get("x-letterprove")).toBe("off");
-		expect(recordObservation).not.toHaveBeenCalled();
+		expect(recordRejectedOrigin).toHaveBeenCalledWith("v-1", "eu.lettertrace.com");
 	});
 
 	it("never looks up hosts for the vendor's own domain", async () => {

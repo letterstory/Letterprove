@@ -51,7 +51,7 @@ export async function bootstrapPglite(): Promise<PGlite> {
 	return pg;
 }
 
-type Op = "=" | ">" | ">=" | "<" | "<=" | "= any";
+type Op = "=" | ">" | ">=" | "<" | "<=" | "= any" | "is not distinct from" | "is distinct from";
 type Where = { col: string; op: Op; val: unknown };
 type PgError = { code?: string; message: string };
 
@@ -261,6 +261,18 @@ export function pgliteSupabase(pg: PGlite, opts: { withAuthAdmin?: boolean } = {
 				},
 				eq(col: string, val: unknown) {
 					wheres.push({ col, op: "=", val });
+					return builder;
+				},
+				// `.not(col, "is", null)`, the one negation the code uses.
+				not(col: string, op: string, val: unknown) {
+					if (op !== "is") throw new Error(`pglite shim: .not(${col}, "${op}") is not supported`);
+					wheres.push({ col, op: "is distinct from", val });
+					return builder;
+				},
+				// `.is(col, null)`. "is not distinct from" takes a parameter, so the
+				// shared placeholder numbering still works.
+				is(col: string, val: unknown) {
+					wheres.push({ col, op: "is not distinct from", val });
 					return builder;
 				},
 				gt(col: string, val: unknown) {
