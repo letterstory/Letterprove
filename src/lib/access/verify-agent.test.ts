@@ -89,4 +89,11 @@ describe("clientIp", () => {
 		expect(clientIp(new Headers({ "x-forwarded-for": "20.171.206.44, 10.0.0.1" }))).toBe("20.171.206.44");
 		expect(clientIp(new Headers())).toBeNull();
 	});
+
+	it("through the lettervisit.com proxy, takes the visitor from the first x-forwarded-for hop", () => {
+		const proxied = { "x-forwarded-host": "lettervisit.com", "x-vercel-forwarded-for": "76.76.21.9", "x-forwarded-for": "20.171.206.44, 76.76.21.9" };
+		expect(clientIp(new Headers(proxied))).toBe("20.171.206.44");
+		// Any other forwarded host keeps Vercel's own header.
+		expect(clientIp(new Headers({ ...proxied, "x-forwarded-host": "app.letterprove.com" }))).toBe("76.76.21.9");
+	});
 });

@@ -4,7 +4,7 @@ import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { CURRENT_CONFIG_VERSION } from "@/lib/telemetry/events";
 import { recordConfigPing } from "@/lib/telemetry/ping";
 import { visitorPixel } from "@/lib/vendors/visitors";
-import { collectorModules } from "@/lib/vendors/script";
+import { collectorModules, recordScriptSeen, scriptNameOf } from "@/lib/vendors/script";
 
 /** Per source IP — same backstop as POST /v1/observe (see that route's comment); unauthenticated and unmetered otherwise, so a burst against every key costs nothing without this. */
 const CONFIG_IP_LIMIT_PER_MINUTE = 300;
@@ -19,25 +19,33 @@ const CONFIG_IP_LIMIT_PER_MINUTE = 300;
  * breaking response-shape change later.
  *
  * `visitors` is present only when the vendor turned visitor identification on
- * and its domain is registered with Maverick: attest.js then loads the
- * Maverick pixel (src/lib/vendors/visitors.ts). Absent otherwise, so a vendor
+ * and its domain is registered for identification: visit.js (or, on the legacy
+ * path, attest.js) then loads the pixel (src/lib/vendors/visitors.ts). Absent otherwise, so a vendor
  * who never opted in ships exactly the script they always did.
  *
  * `modules` says which parts of the one script run (src/lib/vendors/script.ts):
  * sign-ins for the proof, agent-visit beacons, and the visitor pixel. An older
  * cached response without it means everything that was on stays on.
+ *
+ * `s` names the script asking: `visit` (public/visit.js, the Visitors script)
+ * or `attest` (public/attest.js). No `s` is an attest.js from before the split.
+ * It stamps that script's first-seen time (recordScriptSeen); config_pings
+ * still records "either script". The answer is the same for both: each script
+ * reads only the parts it runs.
  */
 export async function GET(request: Request) {
 	if (!(await oauthRateLimit(`config:ip:${oauthClientIp(request)}`, 60, CONFIG_IP_LIMIT_PER_MINUTE))) {
 		return rateLimited();
 	}
 
-	const key = new URL(request.url).searchParams.get("k");
+	const params = new URL(request.url).searchParams;
+	const key = params.get("k");
 	const vendor = key ? await findVendorByKey(key) : undefined;
 	if (!vendor) return notFound("unknown key");
 
-	const [, pixel, modules] = await Promise.all([
+	const [, , pixel, modules] = await Promise.all([
 		recordConfigPing(vendor.slug),
+		vendor.id ? recordScriptSeen(vendor.id, scriptNameOf(params.get("s"))) : null,
 		vendor.id ? visitorPixel(vendor.id) : null,
 		vendor.id ? collectorModules(vendor.id) : { proofs: true, agent_visitors: true },
 	]);

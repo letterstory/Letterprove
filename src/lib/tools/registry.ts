@@ -27,7 +27,7 @@ import { vendorRoster } from "@/lib/staff/vendors";
 import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
-import { installRecipes, installSnippet, serverSnippets } from "@/lib/vendors/install";
+import { installRecipes, installSnippet, serverSnippets, VISITORS_ORIGIN, visitorsSnippet } from "@/lib/vendors/install";
 import { agentVisitsReport } from "@/lib/agents/visits";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
 import { acceptedHosts, MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, isOriginAccepted, type HostRow } from "@/lib/vendors/hosts";
@@ -294,8 +294,11 @@ async function scriptBody(vendorId: string, origin: string) {
 	const proofUrl = customDomain ? `https://${customDomain}/` : `${VERIFY_ORIGIN}/proofs/${encodeURIComponent(vendor.slug)}`;
 	return {
 		key: vendor.key,
+		// snippet is the legacy alias of proofs_snippet (installs before the split).
 		snippet: installSnippet(origin, vendor.key),
-		server_snippet: serverSnippets(origin, vendor.key),
+		proofs_snippet: installSnippet(origin, vendor.key),
+		visitors_snippet: visitorsSnippet(vendor.key),
+		server_snippet: serverSnippets(VISITORS_ORIGIN, vendor.key),
 		recipes: installRecipes(origin, vendor.key),
 		agent_kit: agentKit({
 			vendorName: vendor.name,
@@ -803,7 +806,7 @@ export const TOOLS: BoundTool[] = [
 					publishable_key: vendor.key,
 					// Optional second line for the vendor's server. The script tag
 					// only sees agents that render pages; most never do.
-					server_snippet: serverSnippets(context.origin, vendor.key),
+					server_snippet: serverSnippets(VISITORS_ORIGIN, vendor.key),
 					recipes: installRecipes(context.origin, vendor.key),
 					// So an AI assistant reading the vendor's own site finds the proof.
 					agent_kit: agentKit({

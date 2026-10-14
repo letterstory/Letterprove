@@ -58,8 +58,33 @@ export function _resetRangeCache(): void {
 	cache.clear();
 }
 
-/** The client address as Vercel reports it. Vercel sets these itself; a client cannot forge them. */
+/** The Visitors host (lettervisit.com), whose /api/v1/* is a rewrite to this app. See src/lib/vendors/install.ts. */
+function visitorsProxyHosts(): Set<string> {
+	let host = "lettervisit.com";
+	try {
+		host = new URL(process.env.VISITORS_ORIGIN || "https://lettervisit.com").hostname;
+	} catch {
+		// default
+	}
+	return new Set([host, `www.${host}`]);
+}
+
+/**
+ * The client address as Vercel reports it. Vercel sets these itself; a client cannot forge them.
+ *
+ * One exception: a request proxied from lettervisit.com (its rewrites of
+ * /api/v1/config and /api/v1/agent-visit to this app, recognised by
+ * x-forwarded-host naming that host). There x-vercel-forwarded-for can be the
+ * proxy, and the visitor is the first hop of x-forwarded-for, which the
+ * proxy's own edge wrote. Only agent verification reads this address, and
+ * agent visits are private analytics, never evidence (README § Agent visits).
+ */
 export function clientIp(headers: Headers): string | null {
+	const forwardedHost = headers.get("x-forwarded-host")?.split(",")[0]?.trim().toLowerCase();
+	if (forwardedHost && visitorsProxyHosts().has(forwardedHost)) {
+		const first = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+		if (first) return first;
+	}
 	const raw =
 		headers.get("x-vercel-forwarded-for") ?? headers.get("x-real-ip") ?? headers.get("x-forwarded-for");
 	const first = raw?.split(",")[0]?.trim();

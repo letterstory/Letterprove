@@ -849,13 +849,21 @@ const scriptModules = z.object({
 export const getScriptInput = empty;
 export const getScriptOutput = z.object({
 	key: z.string().describe("The publishable key in the script tag. Not a secret."),
-	snippet: getInstallSnippetOutput.shape.snippet,
+	snippet: getInstallSnippetOutput.shape.snippet.describe("Legacy alias of proofs_snippet, kept for callers from before the two scripts."),
+	proofs_snippet: z.string().describe("The Letterprove (attestation) tag, attest.js: sign-ins for the proof. Pair it with identify calls (recipes)."),
+	visitors_snippet: z
+		.string()
+		.describe(
+			"The Visitors tag, lettervisit.com/v.js: AI agents and people visiting your site (agent_visitors and human_visitors). Install both tags for both products; with both on the page each visit is counted once.",
+		),
 	server_snippet: getInstallSnippetOutput.shape.server_snippet,
 	recipes: getInstallSnippetOutput.shape.recipes,
 	agent_kit: getInstallSnippetOutput.shape.agent_kit,
 	modules: scriptModules,
 	status: z.object({
-		script_seen_at: z.string().nullable().describe("First time the script tag loaded on a page."),
+		script_seen_at: z.string().nullable().describe("First time either script tag loaded on a page."),
+		visitors_script_seen_at: z.string().nullable().describe("First time the Visitors tag (lettervisit.com/v.js) loaded on a page."),
+		proofs_script_seen_at: z.string().nullable().describe("First time the Letterprove tag (attest.js) loaded on a page."),
 		last_script_seen_at: z.string().nullable().describe("Most recent load we saw. Coarse: the config is cached for minutes."),
 		server_seen_at: z.string().nullable().describe("First request your server snippet forwarded, of any kind."),
 		first_agent_visit_at: z.string().nullable().describe("First AI agent or crawler visit counted."),

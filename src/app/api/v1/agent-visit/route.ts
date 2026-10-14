@@ -27,9 +27,18 @@ const AGENT_VISIT_VENDOR_LIMIT_PER_MINUTE = 6000;
  *           From the vendor's own server, forwarding a request it served.
  *           `host` defaults to the vendor's verified domain.
  *   client  { k, path, client: true, webdriver? }
- *           From attest.js. The user-agent, address and Signature-Agent come
- *           from this request's own headers and the host from its Origin —
- *           nothing about the visitor is taken from the body.
+ *           From visit.js (or, on the legacy path, attest.js). The user-agent,
+ *           address and Signature-Agent come from this request's own headers
+ *           and the host from its Origin — nothing about the visitor is taken
+ *           from the body.
+ *
+ * Both modes also arrive proxied, from lettervisit.com/api/v1/agent-visit (a
+ * rewrite to here; src/lib/vendors/install.ts VISITORS_ORIGIN). The rewrite
+ * passes Origin, User-Agent and Signature-Agent through untouched; the address
+ * is read proxy-aware by clientIp, and the per-IP limit keys on the first
+ * x-forwarded-for hop (oauthClientIp), so one proxy does not share one bucket.
+ * The response's `access-control-allow-origin: *` covers vendor pages calling
+ * lettervisit.com as it does this origin.
  *
  * Always 204, like /v1/observe: the client mode runs inside a vendor's page,
  * and the server mode is fire-and-forget from inside the vendor's request
