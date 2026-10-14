@@ -1,4 +1,8 @@
-import { DOMAIN_PROOF_LABEL, docDomainProof, domainProofLine } from "@/lib/attest/domain-proof";
+import {
+  DOMAIN_PROOF_LABEL,
+  docDomainProof,
+  domainProofLine,
+} from "@/lib/attest/domain-proof";
 import { displayForSlug } from "@/lib/attest/display";
 import { NextResponse } from "next/server";
 import { logProofAccess } from "@/lib/access/log";
@@ -8,7 +12,11 @@ import type { SignedAttestation } from "@/lib/attest/types";
 import { methodUrl } from "@/lib/attest/method";
 import { verifyAttestation } from "@/lib/attest/verify";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
-import { parseVerifyPath, snapshotStamp, VERIFY_ORIGIN } from "@/lib/attest/verify-link";
+import {
+  parseVerifyPath,
+  snapshotStamp,
+  VERIFY_ORIGIN,
+} from "@/lib/attest/verify-link";
 import { proofHtml, proofJson, retiredCustomerProof } from "@/lib/http";
 
 /**
@@ -30,95 +38,127 @@ import { proofHtml, proofJson, retiredCustomerProof } from "@/lib/http";
  * HTML by default — that is what a browser and an answer engine's fetch tool
  * ask for — and JSON for `Accept: application/json` or `?format=json`.
  */
-export async function GET(request: Request, { params }: { params: Promise<{ vendor: string; rest: string[] }> }) {
-	const { vendor, rest } = await params;
-	const wantsJson =
-		new URL(request.url).searchParams.get("format") === "json" ||
-		(request.headers.get("accept") ?? "").startsWith("application/json");
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ vendor: string; rest: string[] }> },
+) {
+  const { vendor, rest } = await params;
+  const wantsJson =
+    new URL(request.url).searchParams.get("format") === "json" ||
+    (request.headers.get("accept") ?? "").startsWith("application/json");
 
-	const parsed = parseVerifyPath(rest);
-	if (parsed?.customer) return retiredCustomerProof(vendor, { html: !wantsJson });
-	logProofAccess(request, `${vendor}/aggregate/verify`);
-	if (!parsed) return missing(wantsJson);
+  const parsed = parseVerifyPath(rest);
+  if (parsed?.customer)
+    return retiredCustomerProof(vendor, { html: !wantsJson });
+  logProofAccess(request, `${vendor}/aggregate/verify`);
+  if (!parsed) return missing(wantsJson);
 
-	const chain = (await publishedVendorAggregateChain(vendor)) as unknown as SignedAttestation[] | null;
-	const entry = chain?.find((e) => snapshotStamp(e.published_at) === parsed.stamp);
-	if (!chain || !entry) return missing(wantsJson);
+  const chain = (await publishedVendorAggregateChain(vendor)) as unknown as
+    SignedAttestation[] | null;
+  const entry = chain?.find(
+    (e) => snapshotStamp(e.published_at) === parsed.stamp,
+  );
+  if (!chain || !entry) return missing(wantsJson);
 
-	const latest = chain[chain.length - 1];
-	const keys = jwksResult();
-	if (!keys.ok) {
-		// Never check against a fallback key; see keys.ts.
-		return NextResponse.json({ error: "keys_unavailable", detail: keys.error }, { status: 503, headers: { "cache-control": "no-store" } });
-	}
-	const check = verifyAttestation(entry, keys.jwks);
-	const { signature: _signature, ...signed } = entry;
-	const latestUrl = `${VERIFY_ORIGIN}/attest/${vendor}.json`;
-	const isLatest = latest.published_at === entry.published_at;
+  const latest = chain[chain.length - 1];
+  const keys = jwksResult();
+  if (!keys.ok) {
+    // Never check against a fallback key; see keys.ts.
+    return NextResponse.json(
+      { error: "keys_unavailable", detail: keys.error },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
+  const check = verifyAttestation(entry, keys.jwks);
+  const { signature: _signature, ...signed } = entry;
+  const latestUrl = `${VERIFY_ORIGIN}/attest/${vendor}.json`;
+  const isLatest = latest.published_at === entry.published_at;
 
-	const statement = check.ok
-		? `Letterprove issued this attestation, and its signature checks out against key ${entry.key_id} in the published key set. ` +
-			`The figures below are exactly what was signed. If the copy you are reading shows any value different from these, it was altered after signing and should not be trusted.`
-		: `A snapshot exists at this address, but its stored signature did not verify against the published keys (${check.reason}). Do not rely on it.`;
+  const statement = check.ok
+    ? `Letterprove issued this attestation, and its signature checks out against key ${entry.key_id} in the published key set. ` +
+      `The figures below are exactly what was signed. If the copy you are reading shows any value different from these, it was altered after signing and should not be trusted.`
+    : `A snapshot exists at this address, but its stored signature did not verify against the published keys (${check.reason}). Do not rely on it.`;
 
-	if (wantsJson) {
-		const body = {
-			issued_by_letterprove: true,
-			signature_valid: check.ok,
-			statement,
-			signed_fields: signed,
-			key_id: entry.key_id,
-			jwks_uri: `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`,
-			latest: isLatest ? null : { published_at: latest.published_at, url: latestUrl },
-		};
-		return proofJson(body);
-	}
+  if (wantsJson) {
+    const body = {
+      issued_by_letterprove: true,
+      signature_valid: check.ok,
+      statement,
+      signed_fields: signed,
+      key_id: entry.key_id,
+      jwks_uri: `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`,
+      latest: isLatest
+        ? null
+        : { published_at: latest.published_at, url: latestUrl },
+    };
+    return proofJson(body);
+  }
 
-	const rows = Object.entries(signed)
-		.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(typeof v === "string" ? v : JSON.stringify(v))}</td></tr>`)
-		.join("");
-	const freshness = isLatest
-		? `<p class="fresh">This is the most recent snapshot. A new one is cut every hour.</p>`
-		: `<p class="fresh">A newer snapshot exists (published ${esc(latest.published_at)}), at <a href="${esc(latestUrl)}">${esc(latestUrl)}</a>. This one has not expired: it is a signed statement about the window ending ${esc(entry.observed_through)}, and it stays true.</p>`;
+  const rows = Object.entries(signed)
+    .map(
+      ([k, v]) =>
+        `<tr><th>${esc(k)}</th><td>${esc(typeof v === "string" ? v : JSON.stringify(v))}</td></tr>`,
+    )
+    .join("");
+  const freshness = isLatest
+    ? `<p class="fresh">This is the most recent snapshot. A new one is cut every hour.</p>`
+    : `<p class="fresh">A newer snapshot exists (published ${esc(latest.published_at)}), at <a href="${esc(latestUrl)}">${esc(latestUrl)}</a>. This one has not expired: it is a signed statement about the window ending ${esc(entry.observed_through)}, and it stays true.</p>`;
 
-	return proofHtml(
-		page(
-			check.ok ? "Verified: issued by Letterprove" : "Not verified",
-			verdict(check.ok, statement) +
-				freshness +
-				summary(signed as Record<string, unknown>, vendor, (await displayForSlug(vendor)).logos) +
-				`<section><h2>Every signed field</h2><p class="muted">Exactly what was signed, in full. Compare any copy against these values.</p><div class="table"><table>${rows}</table></div></section>` +
-				`<footer><p>Keys: <a href="${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json">${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json</a>. ` +
-				`Machine-readable: <a href="?format=json">?format=json</a>.</p></footer>`,
-			check.ok ? "ok" : "bad",
-		),
-	);
+  return proofHtml(
+    page(
+      check.ok ? "Verified: issued by Letterprove" : "Not verified",
+      verdict(check.ok, statement) +
+        freshness +
+        summary(
+          signed as Record<string, unknown>,
+          vendor,
+          (await displayForSlug(vendor)).logos,
+        ) +
+        `<section><h2>Every signed field</h2><p class="muted">Exactly what was signed, in full. Compare any copy against these values.</p><div class="table"><table>${rows}</table></div></section>` +
+        `<footer><p>Keys: <a href="${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json">${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json</a>. ` +
+        `Machine-readable: <a href="?format=json">?format=json</a>.</p></footer>`,
+      check.ok ? "ok" : "bad",
+    ),
+  );
 }
 
 /** The headline: a seal, the verdict, and the plain statement. */
 function verdict(ok: boolean, statement: string): string {
-	const icon = ok
-		? `<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 3 3 5-6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`
-		: `<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v5M12 16.5v.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
-	return `<div class="verdict">${icon}<p><strong>${ok ? "Verified." : "Not verified."}</strong> ${esc(statement)}</p></div>`;
+  const icon = ok
+    ? `<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 3 3 5-6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`
+    : `<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v5M12 16.5v.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+  return `<div class="verdict">${icon}<p><strong>${ok ? "Verified." : "Not verified."}</strong> ${esc(statement)}</p></div>`;
 }
 
 function fmtDate(v: unknown): string | null {
-	if (typeof v !== "string") return null;
-	const t = Date.parse(v);
-	if (!Number.isFinite(t)) return null;
-	return new Date(t).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
+  if (typeof v !== "string") return null;
+  const t = Date.parse(v);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
 }
 
 function fmtDay(v: unknown): string | null {
-	if (typeof v !== "string") return null;
-	const t = Date.parse(v);
-	if (!Number.isFinite(t)) return null;
-	return new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+  if (typeof v !== "string") return null;
+  const t = Date.parse(v);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function num(v: unknown): string {
-	return typeof v === "number" ? v.toLocaleString("en-US") : "—";
+  return typeof v === "number" ? v.toLocaleString("en-US") : "—";
 }
 
 /**
@@ -128,141 +168,249 @@ function num(v: unknown): string {
  */
 /** How each hideable section reads in the "Hidden by the vendor" line. */
 const HIDDEN_LABELS: Record<string, string> = {
-	sessions: "session counts",
-	reported_history: "PostHog history",
-	logos: "logo verification",
-	stripe_business: "Stripe business details",
-	payment_details: "payment details",
-	observed_since: "first observed date",
-	hosts: "extra hosts",
-	growth: "companies per month",
-	retention: "retention",
+  sessions: "session counts",
+  reported_history: "PostHog history",
+  logos: "logo verification",
+  stripe_business: "Stripe business details",
+  payment_details: "payment details",
+  observed_since: "first observed date",
+  hosts: "extra hosts",
+  growth: "companies per month",
+  retention: "retention",
 };
 
 /** "2026-10" → "Oct 2026". */
 function monthLabel(month: string): string {
-	const [y, m] = month.split("-").map(Number);
-	if (!y || !m) return month;
-	return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  const [y, m] = month.split("-").map(Number);
+  if (!y || !m) return month;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
-function summary(f: Record<string, unknown>, vendor: string, showLogos = true): string {
-	const tier = typeof f.tier === "number" ? f.tier : null;
-	const window = typeof f.window_days === "number" ? f.window_days : 30;
-	const domainProof = docDomainProof(f as Parameters<typeof docDomainProof>[0]);
-	const business = f.stripe_business as
-		| { verified?: boolean; name?: string | null; country?: string | null; website?: string | null; website_matches_domain?: boolean; binding?: string }
-		| undefined;
-	const tierLine =
-		tier === 3
-			? business
-				? "Companies were observed signing in on the vendor's DNS-proven domain, and Stripe has verified the business behind the vendor's own Stripe account at that domain."
-				: "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them were corroborated by settled invoices in its own Stripe account (signed before 2026-10-14, when payments were still read)."
-			: tier === 1
-				? domainProof === "site"
-					? "Companies were observed signing in on the vendor's domain, which is site verified (its script and key are on a page there), not proven by DNS."
-					: "Companies were observed signing in on the vendor's DNS-proven domain."
-				: tier === 0
-					? domainProof === "none"
-						? "Nothing is corroborated: the vendor has not proven it controls this domain."
-						: "Nothing is corroborated yet."
-					: "";
-	const tile = (k: string, v: string, sub = "") => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
-	// Legacy payment fields: only on documents signed before 2026-10-14.
-	const legacyPayments = "payment_scope" in f || "paying_since" in f || "paying" in f;
-	const payingSince = fmtDay(f.paying_since);
-	const binding = f.stripe_binding === "domain_match" ? "Bound to its domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : "Not connected";
-	const businessLine = business
-		? [
-				business.verified ? "Verified by Stripe" : "Not verified by Stripe",
-				[business.name, business.country].filter(Boolean).join(", "),
-				business.website ? `website ${business.website}${business.website_matches_domain ? "" : " (not on this domain)"}` : "",
-				business.binding === "staff_override" ? "related company, approved by Letterprove" : "",
-			]
-				.filter(Boolean)
-				.join(" · ")
-		: binding;
-	const history = f.reported_history as { companies?: number; since?: string; active_companies_30d?: number; observed_also_reported?: number } | undefined;
+function summary(
+  f: Record<string, unknown>,
+  vendor: string,
+  showLogos = true,
+): string {
+  const tier = typeof f.tier === "number" ? f.tier : null;
+  const window = typeof f.window_days === "number" ? f.window_days : 30;
+  const domainProof = docDomainProof(f as Parameters<typeof docDomainProof>[0]);
+  const business = f.stripe_business as
+    | {
+        verified?: boolean;
+        name?: string | null;
+        country?: string | null;
+        website?: string | null;
+        website_matches_domain?: boolean;
+        binding?: string;
+      }
+    | undefined;
+  const tierLine =
+    tier === 3
+      ? business
+        ? "Companies were observed signing in on the vendor's DNS-proven domain, and Stripe has verified the business behind the vendor's own Stripe account at that domain."
+        : "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them were corroborated by settled invoices in its own Stripe account (signed before 2026-10-14, when payments were still read)."
+      : tier === 1
+        ? domainProof === "site"
+          ? "Companies were observed signing in on the vendor's domain, which is site verified (its script and key are on a page there), not proven by DNS."
+          : "Companies were observed signing in on the vendor's DNS-proven domain."
+        : tier === 0
+          ? domainProof === "none"
+            ? "Nothing is corroborated: the vendor has not proven it controls this domain."
+            : "Nothing is corroborated yet."
+          : "";
+  const tile = (k: string, v: string, sub = "") =>
+    `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
+  // Legacy payment fields: only on documents signed before 2026-10-14.
+  const legacyPayments =
+    "payment_scope" in f || "paying_since" in f || "paying" in f;
+  const payingSince = fmtDay(f.paying_since);
+  const binding =
+    f.stripe_binding === "domain_match"
+      ? "Bound to its domain"
+      : f.stripe_binding === "staff_override"
+        ? "Approved by Letterprove"
+        : "Not connected";
+  const businessLine = business
+    ? [
+        business.verified ? "Verified by Stripe" : "Not verified by Stripe",
+        [business.name, business.country].filter(Boolean).join(", "),
+        business.website
+          ? `website ${business.website}${business.website_matches_domain ? "" : " (not on this domain)"}`
+          : "",
+        business.binding === "staff_override"
+          ? "related company, approved by Letterprove"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : binding;
+  const history = f.reported_history as
+    | {
+        companies?: number;
+        since?: string;
+        active_companies_30d?: number;
+        observed_also_reported?: number;
+      }
+    | undefined;
 
-	const method = typeof f.method === "string" && f.method ? f.method : METHODOLOGY_URL;
-	const affiliated = typeof f.issuer_affiliation === "string" && f.issuer_affiliation !== "";
-	const domainName = typeof f.domain === "string" ? f.domain : null;
-	let html = `<p class="lead">${esc(leadSentence(affiliated, domainProof, domainName))} <a href="${esc(method)}">Open-source methodology</a>.</p>`;
-	html += `<section class="vendor"><div class="eyebrow">Snapshot of ${esc(vendor)}</div><h2 class="big">${esc(String(f.domain ?? vendor))}</h2>`;
-	if (tier !== null) html += `<p class="tierline"><span class="tier">Tier ${tier}</span> ${esc(tierLine)}</p>`;
-	html += `</section>`;
+  const method =
+    typeof f.method === "string" && f.method ? f.method : METHODOLOGY_URL;
+  const affiliated =
+    typeof f.issuer_affiliation === "string" && f.issuer_affiliation !== "";
+  const domainName = typeof f.domain === "string" ? f.domain : null;
+  let html = `<p class="lead">${esc(leadSentence(affiliated, domainProof, domainName))} <a href="${esc(method)}">Open-source methodology</a>.</p>`;
+  html += `<section class="vendor"><div class="eyebrow">Snapshot of ${esc(vendor)}</div><h2 class="big">${esc(String(f.domain ?? vendor))}</h2>`;
+  if (tier !== null)
+    html += `<p class="tierline"><span class="tier">Tier ${tier}</span> ${esc(tierLine)}</p>`;
+  html += `</section>`;
 
-	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
-	if (showLogos && logos && typeof logos.verified === "number" && typeof logos.page === "string") {
-		const items = (logos.companies ?? [])
-			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe (signed before 2026-10-14)" : "Signed in, last 30 days"}</span></li>`)
-			.join("");
-		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>. Verified means Letterprove observed someone from that company signing in over the last 30 days.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
-	}
+  const logos = f.logos as
+    | {
+        page?: string;
+        on_page?: number;
+        verified?: number;
+        companies?: { name: string; status: string }[];
+      }
+    | undefined;
+  if (
+    showLogos &&
+    logos &&
+    typeof logos.verified === "number" &&
+    typeof logos.page === "string"
+  ) {
+    const items = (logos.companies ?? [])
+      .map(
+        (c) =>
+          `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe (signed before 2026-10-14)" : "Signed in, last 30 days"}</span></li>`,
+      )
+      .join("");
+    html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>. Verified means Letterprove observed someone from that company signing in over the last 30 days.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
+  }
 
-	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
-		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
-		(legacyPayments ? tile("Payments, via Stripe", tier === 3 ? "Corroborated" : "Not corroborated", payingSince ? `first verified payment ${payingSince}` : "signed before 2026-10-14") : "") +
-		(typeof f.sessions === "number" ? tile("Sessions", num(f.sessions)) : "") +
-		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
-		`</div><p class="muted">Counts only. No customer is named here except verified companies from the vendor's own public logo wall.</p></section>`;
+  html +=
+    `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
+    tile(
+      "Companies observed",
+      num(f.companies_observed),
+      "signing in, by company domain",
+    ) +
+    (legacyPayments
+      ? tile(
+          "Payments, via Stripe",
+          tier === 3 ? "Corroborated" : "Not corroborated",
+          payingSince
+            ? `first verified payment ${payingSince}`
+            : "signed before 2026-10-14",
+        )
+      : "") +
+    (typeof f.sessions === "number" ? tile("Sessions", num(f.sessions)) : "") +
+    tile(
+      "Excluded domains",
+      num(f.domains_excluded),
+      "free mail and unattributable",
+    ) +
+    `</div><p class="muted">Counts only. No customer is named here except verified companies from the vendor's own public logo wall.</p></section>`;
 
-	html += `<section><h2>Who the vendor is</h2><dl class="facts">` +
-		`<div><dt>Domain</dt><dd>${esc(
-			domainProof === "dns"
-				? fmtDay(f.domain_verified_since)
-					? `${DOMAIN_PROOF_LABEL.dns}, since ${fmtDay(f.domain_verified_since)}`
-					: DOMAIN_PROOF_LABEL.dns
-				: domainProofLine(domainProof, domainName) ?? DOMAIN_PROOF_LABEL[domainProof],
-		)}</dd></div>` +
-		`<div><dt>Business</dt><dd>${esc(businessLine)}</dd></div>` +
-		("observed_since" in f ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` : "") +
-		`</dl></section>`;
+  html +=
+    `<section><h2>Who the vendor is</h2><dl class="facts">` +
+    `<div><dt>Domain</dt><dd>${esc(
+      domainProof === "dns"
+        ? fmtDay(f.domain_verified_since)
+          ? `${DOMAIN_PROOF_LABEL.dns}, since ${fmtDay(f.domain_verified_since)}`
+          : DOMAIN_PROOF_LABEL.dns
+        : (domainProofLine(domainProof, domainName) ??
+            DOMAIN_PROOF_LABEL[domainProof]),
+    )}</dd></div>` +
+    `<div><dt>Business</dt><dd>${esc(businessLine)}</dd></div>` +
+    ("observed_since" in f
+      ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>`
+      : "") +
+    `</dl></section>`;
 
-	if (history && typeof history.companies === "number") {
-		html += `<section><h2>History the vendor reports</h2><div class="tiles three">` +
-			tile("Companies in its analytics", num(history.companies), fmtDay(history.since) ? `since ${fmtDay(history.since)}` : "") +
-			tile("Active, last 30 days", num(history.active_companies_30d)) +
-			tile("Also observed by Letterprove", `${num(history.observed_also_reported)} of ${num(f.companies_observed)}`) +
-			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
-	}
+  if (history && typeof history.companies === "number") {
+    html +=
+      `<section><h2>History the vendor reports</h2><div class="tiles three">` +
+      tile(
+        "Companies in its analytics",
+        num(history.companies),
+        fmtDay(history.since) ? `since ${fmtDay(history.since)}` : "",
+      ) +
+      tile("Active, last 30 days", num(history.active_companies_30d)) +
+      tile(
+        "Also observed by Letterprove",
+        `${num(history.observed_also_reported)} of ${num(f.companies_observed)}`,
+      ) +
+      `</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
+  }
 
-	const growth = Array.isArray(f.growth) ? (f.growth as { month: string; companies_observed: number; partial?: boolean }[]) : [];
-	if (growth.length > 0) {
-		html += `<section><h2>Companies observed per month</h2><div class="tiles">` +
-			growth.map((g) => tile(g.partial ? `${monthLabel(g.month)} (partial)` : monthLabel(g.month), num(g.companies_observed))).join("") +
-			`</div><p class="muted">The highest number of companies observed in any signed snapshot that month.${growth.some((g) => g.partial) ? " Partial means observation started less than 30 days before that month's count, so it is lower partly because observation had only just begun." : ""}</p></section>`;
-	}
-	const retention = f.retention as { cohort?: number; retained?: number } | undefined;
-	if (retention && typeof retention.cohort === "number" && typeof retention.retained === "number") {
-		html += `<section><h2>Retention</h2><p><strong>Of ${num(retention.cohort)} companies observed 90 to 60 days ago, ${num(retention.retained)} were also observed in the last 30 days.</strong></p></section>`;
-	}
+  const growth = Array.isArray(f.growth)
+    ? (f.growth as {
+        month: string;
+        companies_observed: number;
+        partial?: boolean;
+        in_progress?: boolean;
+      }[])
+    : [];
+  if (growth.length > 0) {
+    html +=
+      `<section><h2>Companies observed per month</h2><div class="tiles">` +
+      growth
+        .map((g) =>
+          tile(
+            `${monthLabel(g.month)}${g.in_progress ? " (so far)" : g.partial ? " (partial)" : ""}`,
+            num(g.companies_observed),
+          ),
+        )
+        .join("") +
+      `</div><p class="muted">The highest number of companies observed in any signed snapshot that month.${growth.some((g) => g.partial) ? " Partial means observation started less than 30 days before that month's count, so it is lower partly because observation had only just begun." : ""}${growth.some((g) => g.in_progress) ? " So far means the month is still under way: its count can only rise, so a lower figure than last month is not a decline." : ""}</p></section>`;
+  }
+  const retention = f.retention as
+    { cohort?: number; retained?: number } | undefined;
+  if (
+    retention &&
+    typeof retention.cohort === "number" &&
+    typeof retention.retained === "number"
+  ) {
+    html += `<section><h2>Retention</h2><p><strong>Of ${num(retention.cohort)} companies observed 90 to 60 days ago, ${num(retention.retained)} were also observed in the last 30 days.</strong></p></section>`;
+  }
 
-	const omitted = f.omitted && typeof f.omitted === "object" ? Object.entries(f.omitted as Record<string, string>).filter(([, r]) => r !== "hidden") : [];
-	if (omitted.length > 0) {
-		const reasons: Record<string, string> = {
-			insufficient_history: "not enough history yet",
-			not_connected: "not connected",
-			not_configured: "not set up",
-			domain_not_verified: "needs a verified domain",
-		};
-		html += `<p class="muted">Not shown: ${esc(omitted.map(([k, r]) => `${HIDDEN_LABELS[k] ?? k} (${reasons[r] ?? r})`).join(", "))}.</p>`;
-	}
-	const hidden = Array.isArray(f.hidden_by_vendor) ? (f.hidden_by_vendor as string[]) : [];
-	if (hidden.length > 0) {
-		html += `<p class="muted">Hidden by the vendor: ${esc(hidden.map((h) => HIDDEN_LABELS[h] ?? h).join(", "))}. These fields are left out of this document by the vendor's choice.</p>`;
-	}
+  const omitted =
+    f.omitted && typeof f.omitted === "object"
+      ? Object.entries(f.omitted as Record<string, string>).filter(
+          ([, r]) => r !== "hidden",
+        )
+      : [];
+  if (omitted.length > 0) {
+    const reasons: Record<string, string> = {
+      insufficient_history: "not enough history yet",
+      not_connected: "not connected",
+      not_configured: "not set up",
+      domain_not_verified: "needs a verified domain",
+    };
+    html += `<p class="muted">Not shown: ${esc(omitted.map(([k, r]) => `${HIDDEN_LABELS[k] ?? k} (${reasons[r] ?? r})`).join(", "))}.</p>`;
+  }
+  const hidden = Array.isArray(f.hidden_by_vendor)
+    ? (f.hidden_by_vendor as string[])
+    : [];
+  if (hidden.length > 0) {
+    html += `<p class="muted">Hidden by the vendor: ${esc(hidden.map((h) => HIDDEN_LABELS[h] ?? h).join(", "))}. These fields are left out of this document by the vendor's choice.</p>`;
+  }
 
-	if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {
-		html += `<section><h2>Disclosure</h2><p class="disclosure">${esc(f.issuer_affiliation)}</p></section>`;
-	}
+  if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {
+    html += `<section><h2>Disclosure</h2><p class="disclosure">${esc(f.issuer_affiliation)}</p></section>`;
+  }
 
-	html += `<section><h2>This snapshot</h2><dl class="facts">` +
-		`<div><dt>Published</dt><dd>${esc(fmtDate(f.published_at) ?? "—")}</dd></div>` +
-		`<div><dt>Next snapshot</dt><dd>${esc(fmtDate(f.next_snapshot_at) ?? "—")}</dd></div>` +
-		`<div><dt>Signing key</dt><dd class="mono">${esc(String(f.key_id ?? "—"))}</dd></div>` +
-		`</dl></section>`;
-	return html;
+  html +=
+    `<section><h2>This snapshot</h2><dl class="facts">` +
+    `<div><dt>Published</dt><dd>${esc(fmtDate(f.published_at) ?? "—")}</dd></div>` +
+    `<div><dt>Next snapshot</dt><dd>${esc(fmtDate(f.next_snapshot_at) ?? "—")}</dd></div>` +
+    `<div><dt>Signing key</dt><dd class="mono">${esc(String(f.key_id ?? "—"))}</dd></div>` +
+    `</dl></section>`;
+  return html;
 }
 
 /**
@@ -277,33 +425,44 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
  * same for every cause, so it still confirms nothing about private vendors.
  */
 function missing(wantsJson: boolean): NextResponse {
-	const statement =
-		"Letterprove has no public snapshot at this address. That alone does not mean a document pointing here is forged: the vendor may have unpublished, or the link may have been altered or cut short. " +
-		"To check a copy yourself, verify its signature against Letterprove's published keys — only a document signed by one of those keys was issued by Letterprove. " +
-		"Do not rely on figures you cannot verify either way.";
-	const keys = `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`;
-	const method = methodUrl("scripts/verify.mjs");
-	if (wantsJson) {
-		return NextResponse.json(
-			{ found: false, statement, jwks_uri: keys, verify_script: method },
-			{ status: 404, headers: { "access-control-allow-origin": "*", "x-letterprove": "on" } },
-		);
-	}
-	return new NextResponse(
-		page(
-			"No snapshot found",
-			`<p><strong>Not found.</strong> ${esc(statement)}</p>` +
-				`<p>Keys: <a href="${keys}">${keys}</a>. A reference verifier: <a href="${method}">scripts/verify.mjs</a>.</p>`,
-		),
-		{
-			status: 404,
-			headers: { "content-type": "text/html; charset=utf-8", "access-control-allow-origin": "*", "x-letterprove": "on" },
-		},
-	);
+  const statement =
+    "Letterprove has no public snapshot at this address. That alone does not mean a document pointing here is forged: the vendor may have unpublished, or the link may have been altered or cut short. " +
+    "To check a copy yourself, verify its signature against Letterprove's published keys — only a document signed by one of those keys was issued by Letterprove. " +
+    "Do not rely on figures you cannot verify either way.";
+  const keys = `${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json`;
+  const method = methodUrl("scripts/verify.mjs");
+  if (wantsJson) {
+    return NextResponse.json(
+      { found: false, statement, jwks_uri: keys, verify_script: method },
+      {
+        status: 404,
+        headers: { "access-control-allow-origin": "*", "x-letterprove": "on" },
+      },
+    );
+  }
+  return new NextResponse(
+    page(
+      "No snapshot found",
+      `<p><strong>Not found.</strong> ${esc(statement)}</p>` +
+        `<p>Keys: <a href="${keys}">${keys}</a>. A reference verifier: <a href="${method}">scripts/verify.mjs</a>.</p>`,
+    ),
+    {
+      status: 404,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "access-control-allow-origin": "*",
+        "x-letterprove": "on",
+      },
+    },
+  );
 }
 
-function page(title: string, body: string, tone: "ok" | "bad" | "none" = "none"): string {
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} — Letterprove</title><meta name="robots" content="noindex"><style>${STYLE}</style></head><body class="${tone}"><main><a class="brand" href="${VERIFY_ORIGIN}">Letterprove</a><h1>${esc(title)}</h1>${body}</main></body></html>`;
+function page(
+  title: string,
+  body: string,
+  tone: "ok" | "bad" | "none" = "none",
+): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} — Letterprove</title><meta name="robots" content="noindex"><style>${STYLE}</style></head><body class="${tone}"><main><a class="brand" href="${VERIFY_ORIGIN}">Letterprove</a><h1>${esc(title)}</h1>${body}</main></body></html>`;
 }
 
 /** Inline, because this is a route handler: the page must stand alone for any fetcher. */
@@ -360,5 +519,11 @@ footer a{word-break:break-all}
 `;
 
 function esc(s: string): string {
-	return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
 }

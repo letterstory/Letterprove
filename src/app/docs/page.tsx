@@ -82,12 +82,12 @@ export default async function DocsPage() {
           Letterprove publishes signed, machine-readable evidence that a
           software vendor is who it says it is, backed by data: its domain,
           proven by DNS (or, more weakly, by its script on a page there); the
-          business behind its own Stripe account, as Stripe has verified it;
-          and how many companies were observed signing in to it. Counts, never
+          business behind its own Stripe account, as Stripe has verified it; and
+          how many companies were observed signing in to it. Counts, never
           names, and no payments: Stripe is read only to confirm the business.
-          This page is the whole of it: how to install the
-          script, what it sends, what the attestation says, what the tiers
-          mean, and how to verify any of it without trusting us.
+          This page is the whole of it: how to install the script, what it
+          sends, what the attestation says, what the tiers mean, and how to
+          verify any of it without trusting us.
         </p>
         <p className="mt-4 leading-relaxed text-fog">
           If you are here to check somebody else&apos;s claim rather than
@@ -172,9 +172,9 @@ export default async function DocsPage() {
               processing agreement with every vendor, and a breach story. The
               same discipline runs through the rest of the payload. No user ids,
               no cookies, no local storage, no IP address, no page URLs, no
-              referrer. The one exception is agent counting, below: on a page
-              an automated browser renders, the script sends that page&apos;s
-              path and nothing about any person.
+              referrer. The one exception is agent counting, below: on a page an
+              automated browser renders, the script sends that page&apos;s path
+              and nothing about any person.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -212,22 +212,21 @@ export default async function DocsPage() {
             <p>
               Every event is pinned to the browser&apos;s <code>Origin</code>{" "}
               header, which page script cannot override, and compared against
-              the domain on your account. Any host under the domain you
-              verified is accepted automatically: verify{" "}
-              <code>example.com</code> and events from{" "}
-              <code>www.example.com</code> and <code>app.example.com</code>{" "}
-              count too, because the same DNS record covers them.
+              the domain on your account. Any host under the domain you verified
+              is accepted automatically: verify <code>example.com</code> and
+              events from <code>www.example.com</code> and{" "}
+              <code>app.example.com</code> count too, because the same DNS
+              record covers them.
             </p>
             <p>
               A host outside it is not. A sibling or parent (
               <code>eu.example.com</code> when you verified{" "}
               <code>app.example.com</code>), or a different domain entirely,
-              needs adding under <strong>Other sign-in hosts</strong>, with
-              your verification record on that host or on its registrable
-              domain. It is re-checked daily like your domain. If the script
-              sees sign-ins from a host you have not added, the Proofs
-              dashboard says so and offers to add it, so a mismatch no longer
-              fails silently.
+              needs adding under <strong>Other sign-in hosts</strong>, with your
+              verification record on that host or on its registrable domain. It
+              is re-checked daily like your domain. If the script sees sign-ins
+              from a host you have not added, the Proofs dashboard says so and
+              offers to add it, so a mismatch no longer fails silently.
             </p>
             <p>
               Origin-pinning is a real constraint on a browser and no constraint
@@ -250,13 +249,13 @@ export default async function DocsPage() {
             </p>
             <p>
               The Proofs dashboard separates two questions that look identical
-              from outside. <em>Installed</em> means the script has
-              successfully fetched its config at least once, so it is really on
-              the page. <em>Receiving</em> means an event has actually arrived.
-              Installed but not receiving is normal on a marketing site with no
-              sign-in, and is not a fault. While you are setting up, the
-              dashboard refreshes on its own, so you see the script load and
-              the first sign-in arrive as they happen.
+              from outside. <em>Installed</em> means the script has successfully
+              fetched its config at least once, so it is really on the page.{" "}
+              <em>Receiving</em> means an event has actually arrived. Installed
+              but not receiving is normal on a marketing site with no sign-in,
+              and is not a fault. While you are setting up, the dashboard
+              refreshes on its own, so you see the script load and the first
+              sign-in arrive as they happen.
             </p>
             <p>
               To watch it from the page itself, add <code>data-debug</code> to
@@ -293,18 +292,17 @@ export default async function DocsPage() {
               <strong>Install reference</strong> on the Proofs dashboard (a
               Next.js version and a plain Node version). It forwards each
               request&apos;s user-agent, address and path to{" "}
-              <code>/api/v1/agent-visit</code> without waiting for an answer,
-              so it can never slow or break your page.
+              <code>/api/v1/agent-visit</code> without waiting for an answer, so
+              it can never slow or break your page.
             </p>
             <p>
               The counts appear in the <strong>AI agents on your site</strong>{" "}
               panel: per agent, the most-read paths and a daily series.{" "}
               <em>Verified</em> means the request came from an address the
               operator publishes for its agents; <em>claimed only</em> means
-              only the user-agent said so. We
-              keep the classification and drop the address and user-agent. This
-              is for you alone. It is never published and never affects your
-              proof.
+              only the user-agent said so. We keep the classification and drop
+              the address and user-agent. This is for you alone. It is never
+              published and never affects your proof.
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -373,11 +371,11 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               <li>
                 <strong>Calls made before it loads are kept.</strong> If your
                 code can run before the script tag has loaded (an{" "}
-                <code>async</code> tag, or a framework that hydrates first),
-                use the snippet from the Proofs dashboard, which includes a
-                one-line stub. The stub holds <code>identify</code>,{" "}
-                <code>signup</code> and <code>login</code> calls and the script
-                replays them once it starts.
+                <code>async</code> tag, or a framework that hydrates first), use
+                the snippet from the Proofs dashboard, which includes a one-line
+                stub. The stub holds <code>identify</code>, <code>signup</code>{" "}
+                and <code>login</code> calls and the script replays them once it
+                starts.
               </li>
               <li>
                 <strong>It fails closed.</strong> The script fetches its
@@ -439,12 +437,12 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 Letterprove found the vendor&apos;s script and key on a page of
                 the domain, which proves control of a page rather than the
                 domain&apos;s DNS, so the tier stops at 1 and the logo wall
-                doesn&apos;t count. <code>none</code> (Domain not
-                verified): the counts are the vendor&apos;s claim, tier 0.{" "}
+                doesn&apos;t count. <code>none</code> (Domain not verified): the
+                counts are the vendor&apos;s claim, tier 0.{" "}
                 <code>domain_verified</code> is true only for <code>dns</code>.
                 DNS is optional; a vendor site-verifies with{" "}
-                <code>verify_site</code>, or automatically once the script
-                loads on a page of its domain.
+                <code>verify_site</code>, or automatically once the script loads
+                on a page of its domain.
               </li>
               <li>
                 <code>hosts</code>: how many extra hosts on that domain the
@@ -474,7 +472,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 revenue figure.
               </li>
             </ul>
-            <p>What backs it, over the last <code>window_days</code> (30):</p>
+            <p>
+              What backs it, over the last <code>window_days</code> (30):
+            </p>
             <ul>
               <li>
                 <code>companies_observed</code>: distinct company email domains
@@ -489,14 +489,15 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 months, from Letterprove&apos;s own signed history. A month
                 marked <code>partial</code> had less than a full 30-day window
                 of observation behind it, so its count is lower partly because
-                observation had just begun.{" "}
-                <code>retention</code>: of the companies observed from 90 to 60
-                days ago, how many were also observed in the last 30 days. Both
-                are counts and never change the tier.
+                observation had just begun. A month marked{" "}
+                <code>in_progress</code> is still under way; its count can only
+                rise. <code>retention</code>: of the companies observed from 90
+                to 60 days ago, how many were also observed in the last 30 days.
+                Both are counts and never change the tier.
               </li>
               <li>
-                <code>sessions</code>, <code>signups</code>,{" "}
-                <code>logins</code>: measured totals behind those companies.
+                <code>sessions</code>, <code>signups</code>, <code>logins</code>
+                : measured totals behind those companies.
               </li>
               <li>
                 <code>logos</code>, when present: the vendor&apos;s own public
@@ -509,8 +510,8 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               </li>
               <li>
                 <code>reported_history</code>, when present: company history
-                from the vendor&apos;s own PostHog project, read only, as
-                counts (<code>companies</code>, <code>since</code>,{" "}
+                from the vendor&apos;s own PostHog project, read only, as counts
+                (<code>companies</code>, <code>since</code>,{" "}
                 <code>active_companies_30d</code>,{" "}
                 <code>observed_also_reported</code>). It is listed in{" "}
                 <code>vendor_stated</code> because the vendor controls that
@@ -523,24 +524,24 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               </li>
               <li>
                 <code>vendor_stated</code> lists any field that is the
-                vendor&apos;s statement rather than evidence. It is empty
-                unless <code>reported_history</code> is present, and then it
-                names that field.
+                vendor&apos;s statement rather than evidence. It is empty unless{" "}
+                <code>reported_history</code> is present, and then it names that
+                field.
               </li>
               <li>
                 <code>hidden_by_vendor</code> lists the optional sections the
                 vendor chose not to show, and <code>omitted</code> gives the
                 reason every optional field is absent: <code>hidden</code>,{" "}
                 <code>insufficient_history</code>, <code>not_connected</code>,{" "}
-                <code>not_configured</code> or{" "}
-                <code>domain_not_verified</code>. Absent never means zero.
+                <code>not_configured</code> or <code>domain_not_verified</code>.
+                Absent never means zero.
               </li>
               <li>
                 Documents signed before 2026-10-14 may carry{" "}
                 <code>paying_since</code>, <code>payment_scope</code>,{" "}
-                <code>paying</code>, and logo <code>paying</code> counts: payment
-                fields from when Stripe payments were still read. They describe
-                that snapshot only.
+                <code>paying</code>, and logo <code>paying</code> counts:
+                payment fields from when Stripe payments were still read. They
+                describe that snapshot only.
               </li>
               <li>
                 <code>observed_through</code> is the end of the window
@@ -625,8 +626,8 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 0, whatever was observed: an observation on a domain nobody has
                 proven is only the vendor asserting. Proof is by DNS, or more
                 weakly by your script and key on a page of the domain (site
-                proof, which stops at tier 1). Both are re-checked daily; a proof
-                that stays gone is cleared.
+                proof, which stops at tier 1). Both are re-checked daily; a
+                proof that stays gone is cleared.
               </li>
               <li>
                 If no company was observed in the window, the published tier is
@@ -676,30 +677,27 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               From the account we read whether Stripe lets it accept payments,
               which Stripe turns on only after verifying the business (its legal
               entity, the people behind it and a bank account), plus the
-              business name, country and website it shows. The account has to
-              be yours: one of the domains it publishes (business website,
-              support email) must share your domain, or the key is refused. If
-              a related company holds the account, for example a parent, use{" "}
+              business name, country and website it shows. The account has to be
+              yours: one of the domains it publishes (business website, support
+              email) must share your domain, or the key is refused. If a related
+              company holds the account, for example a parent, use{" "}
               <strong>Request review</strong> in the Stripe panel and we will
-              look at it; an approval is stated in{" "}
-              <code>stripe_binding</code>.
+              look at it; an approval is stated in <code>stripe_binding</code>.
             </p>
             <p>
               Tier 3 needs all of it at once: companies observed on a domain
               proven by DNS, a live-mode key, Stripe&apos;s verification, and
-              the account&apos;s website on your domain (or a staff approval).
-              A test-mode key reads the account but never counts as verified.
-              The account is re-read hourly; if reads keep failing, the
-              recorded business is cleared, so revoking your key cannot freeze a
+              the account&apos;s website on your domain (or a staff approval). A
+              test-mode key reads the account but never counts as verified. The
+              account is re-read hourly; if reads keep failing, the recorded
+              business is cleared, so revoking your key cannot freeze a
               favourable answer in place.
             </p>
             <p>
               The honest limit:{" "}
-              <strong>
-                tier 3 confirms identity, not usage or revenue.
-              </strong>{" "}
-              A real, Stripe-verified business can still script sign-ins (see
-              tier 1). Read tier 3 as a third party vouching for who you are.
+              <strong>tier 3 confirms identity, not usage or revenue.</strong> A
+              real, Stripe-verified business can still script sign-ins (see tier
+              1). Read tier 3 as a third party vouching for who you are.
               Documents signed before 2026-10-14 without{" "}
               <code>stripe_business</code> used tier 3 for payment from an
               observed company; read them as describing that snapshot.
@@ -709,17 +707,17 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
           <Section n={5} id="customers" title="Your customers stay private">
             <p>
               Letterprove never contacts your customers, and never names them
-              unless you opt in to logo verification, which names only
-              companies already on your own public logo wall that we observed
-              signing in. Otherwise the attestation carries counts only.
-              Company domains are used inside Letterprove only to count
-              distinct companies and to check your logo wall.
+              unless you opt in to logo verification, which names only companies
+              already on your own public logo wall that we observed signing in.
+              Otherwise the attestation carries counts only. Company domains are
+              used inside Letterprove only to count distinct companies and to
+              check your logo wall.
             </p>
             <p>
               You can see the domains behind your own counts on the{" "}
-              <strong>Observed</strong> tab. Only you see them. Nothing there
-              is published, and nothing there changes a figure: the
-              attestation counts what was observed.
+              <strong>Observed</strong> tab. Only you see them. Nothing there is
+              published, and nothing there changes a figure: the attestation
+              counts what was observed.
             </p>
             <p>
               Per-customer documents, which named a company when the vendor said
@@ -732,25 +730,23 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
           <Section n={6} id="showing" title="Badge and your own domain">
             <p>
               <strong>The footer badge.</strong> Once your proofs are public,
-              the Proofs dashboard gives you a
-              small &ldquo;Attested and proven by Letterprove&rdquo; badge to
-              paste into your site&apos;s footer. It is self-contained HTML that
-              loads nothing, inherits your footer&apos;s colour, and links to
-              your public proof page. Until your proofs are published it would
-              link to a page that answers 404, so the dashboard holds it back
-              until you publish. You also get a short paragraph to post with
-              the link.
+              the Proofs dashboard gives you a small &ldquo;Attested and proven
+              by Letterprove&rdquo; badge to paste into your site&apos;s footer.
+              It is self-contained HTML that loads nothing, inherits your
+              footer&apos;s colour, and links to your public proof page. Until
+              your proofs are published it would link to a page that answers
+              404, so the dashboard holds it back until you publish. You also
+              get a short paragraph to post with the link.
             </p>
             <p>
               <strong>Your proof page on your own domain.</strong> You can serve
               the same page at a subdomain of the domain you verified, such as{" "}
               <code>proof.yourcompany.com</code>. Set it under{" "}
               <strong>Your own domain</strong> on the Proofs dashboard, add the
-              one CNAME record it shows
-              you at your DNS provider, then check again. It has to sit under
-              your verified domain, so nobody can claim a hostname that belongs
-              to another company, and it cannot be the bare domain itself,
-              because a CNAME cannot sit there.
+              one CNAME record it shows you at your DNS provider, then check
+              again. It has to sit under your verified domain, so nobody can
+              claim a hostname that belongs to another company, and it cannot be
+              the bare domain itself, because a CNAME cannot sit there.
             </p>
             <p>
               Nothing about the proof changes on your domain. It is the same
@@ -883,18 +879,18 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
             </h3>
             <p>
               If you use PostHog, the <strong>Company history</strong> panel
-              reads how long companies have been using your product, from
-              before you installed the script. Letterprove only reads; it never
-              sends anything to PostHog. Create a personal API key with project
-              access to your product&apos;s project, 
-              <strong>Product analytics: Read</strong> and 
+              reads how long companies have been using your product, from before
+              you installed the script. Letterprove only reads; it never sends
+              anything to PostHog. Create a personal API key with project access
+              to your product&apos;s project,
+              <strong>Product analytics: Read</strong> and
               <strong>Events, people &amp; data model: Read</strong>, and
               nothing else.
             </p>
             <p>
               Once a day we read which company email domains PostHog has
-              identified people from, since when, and how active each was in
-              the last 30 days. The split from address to domain happens inside
+              identified people from, since when, and how active each was in the
+              last 30 days. The split from address to domain happens inside
               PostHog, so no address or name reaches us. Your attestation
               carries it as <code>reported_history</code>, labelled as your
               statement, and only while the project records traffic on your
@@ -907,30 +903,31 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
             <p>
               If your site shows customer logos, list them in the{" "}
               <strong>Logos</strong> panel with the page they appear on. We
-              fetch that page daily and keep only the companies actually on
-              it. Your proof then names the ones we observed signing in over the
-              last 30 days, and shows how many of your logos are verified. This is the only place a proof names a
-              company, and only one you already show in public.
+              fetch that page daily and keep only the companies actually on it.
+              Your proof then names the ones we observed signing in over the
+              last 30 days, and shows how many of your logos are verified. This
+              is the only place a proof names a company, and only one you
+              already show in public.
             </p>
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
               Add your proof to your site
             </h3>
             <p>
-              AI assistants read your site, not ours. After you publish, add
-              the three snippets from setup: a footer link (&ldquo;For agents:
-              view attested customer proof&rdquo;), a Customer evidence section
-              for your <code>/llms.txt</code>, and a small JSON-LD block for
-              your homepage. Each points at your proof.
+              AI assistants read your site, not ours. After you publish, add the
+              three snippets from setup: a footer link (&ldquo;For agents: view
+              attested customer proof&rdquo;), a Customer evidence section for
+              your <code>/llms.txt</code>, and a small JSON-LD block for your
+              homepage. Each points at your proof.
             </p>
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
               AI agents on your site
             </h3>
             <p>
-              Covered under 
+              Covered under
               <a href="#install" className="text-mint hover:underline">
                 Install
               </a>
-              : the script plus the optional server snippet, shown in the 
+              : the script plus the optional server snippet, shown in the
               <strong>AI agents on your site</strong> panel. Private to you.
             </p>
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -938,12 +935,12 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
             </h3>
             <p>
               Turn on <strong>Identify visitors</strong> and the same script
-              also loads a visitor identification pixel on your site, so the 
+              also loads a visitor identification pixel on your site, so the
               <strong>Who visits your site</strong> panel can show the people
               and companies visiting. It is off by default and needs a verified
-              domain. Visitors are fetched from our identification provider when you open the
-              panel; Letterprove stores none of it, and it never appears on
-              your proof. Identifying visitors is processing of your
+              domain. Visitors are fetched from our identification provider when
+              you open the panel; Letterprove stores none of it, and it never
+              appears on your proof. Identifying visitors is processing of your
               visitors&apos; data, so mention it in your own privacy policy
               first.
             </p>
@@ -984,12 +981,11 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
               <code>/proofs/&lt;vendor&gt;</code> is content-negotiated. A
               browser gets the human page; a <code>.json</code> suffix or an
               explicit JSON <code>Accept</code> with no HTML alternative gets
-              the machine document, which carries the summary, the signed
-              vendor attestation, and the tier ladder inline so an agent that
-              landed there directly can weight what it reads without a second
-              fetch. <code>/attest/&lt;vendor&gt;</code> accepts a{" "}
-              <code>.json</code> suffix as well, for clients that cannot set a
-              header.
+              the machine document, which carries the summary, the signed vendor
+              attestation, and the tier ladder inline so an agent that landed
+              there directly can weight what it reads without a second fetch.{" "}
+              <code>/attest/&lt;vendor&gt;</code> accepts a <code>.json</code>{" "}
+              suffix as well, for clients that cannot set a header.
             </p>
             <p>
               The two collection endpoints are called by the script, not by you.
@@ -1018,10 +1014,10 @@ POST ${origin}/api/v1/observe`}</Snippet>
 
           <Section n={11} id="agents" title="For agents">
             <p>
-              Everything the Proofs dashboard does is also a tool your own
-              agent can call, through the Letterstory MCP server (the same
-              names with a <code>letterprove_</code> prefix). The ones behind
-              the panels on this page:
+              Everything the Proofs dashboard does is also a tool your own agent
+              can call, through the Letterstory MCP server (the same names with
+              a <code>letterprove_</code> prefix). The ones behind the panels on
+              this page:
             </p>
             <ul>
               <li>
@@ -1153,7 +1149,8 @@ function Endpoints({ origin }: { origin: string }) {
     },
     {
       path: "/attest/<vendor>/<customer>",
-      serves: "Retired 2026-10-13: answers 410. Per-customer documents are no longer published",
+      serves:
+        "Retired 2026-10-13: answers 410. Per-customer documents are no longer published",
     },
     { path: "/.well-known/letterprove.json", serves: "Discovery. Start here" },
     {
