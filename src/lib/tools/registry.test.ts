@@ -9,6 +9,8 @@ vi.mock("@/lib/vendors/customers", () => ({
 	deleteCustomer: vi.fn(),
 }));
 vi.mock("@/lib/vendors/status", () => ({ getVendorStatus: vi.fn() }));
+vi.mock("@/lib/vendors/site-proof", () => ({ verifySite: vi.fn() }));
+vi.mock("@/lib/vendors/domain-claim", () => ({ rivalHoldsDomain: vi.fn(async () => false), unpublishRivals: vi.fn(async () => []) }));
 vi.mock("@/lib/staff/promote", () => ({ promoteDomain: vi.fn() }));
 vi.mock("@/lib/tiers/report", () => ({ tierReport: vi.fn() }));
 vi.mock("@/lib/attest/proofs", () => ({ vendorSlugs: vi.fn(), vendorSnapshots: vi.fn() }));
@@ -259,6 +261,9 @@ describe("dispatchTool", () => {
 			everReceivedAt: "2025-12-01T00:00:00.000Z",
 			lastReceivedAt: "2026-01-02T00:00:00.000Z",
 			rejectedOrigins: [{ host: "staging.acme.com", events_24h: 4, last_at: "2026-01-02T00:00:00.000Z", addable: true, reason: "needs_proof" }],
+			domainProof: "site",
+			siteVerifiedAt: "2026-10-14T00:00:00.000Z",
+			siteVerifiedUrl: "https://app.acme.com/login",
 		});
 
 		const outcome = await dispatchTool("get_status", {}, principal(["vendor:read"]));
@@ -277,6 +282,10 @@ describe("dispatchTool", () => {
 					ever_received_at: "2025-12-01T00:00:00.000Z",
 					last_received_at: "2026-01-02T00:00:00.000Z",
 					rejected_origins: [{ host: "staging.acme.com", events_24h: 4, last_at: "2026-01-02T00:00:00.000Z", addable: true, reason: "needs_proof" }],
+					domain_proof: "site",
+					domain_verified: false,
+					site_verified_at: "2026-10-14T00:00:00.000Z",
+					site_verified_url: "https://app.acme.com/login",
 				},
 			},
 		});
@@ -1062,6 +1071,47 @@ describe("responses carry what their caller needs", () => {
  * that it writes a date rather than a boolean — the timestamp is what tells a
  * vendor and support when the proofs actually went out.
  */
+describe("verify_site", () => {
+	it("passes the url through and answers the proof state without the ok flag", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { verifySite } = await import("@/lib/vendors/site-proof");
+		vi.mocked(verifySite).mockResolvedValue({
+			ok: true,
+			verified: true,
+			domain_proof: "site",
+			checked_url: "https://app.acme.com/login",
+			reason: "Found your Letterprove script on https://app.acme.com/login.",
+			site_verified_at: "2026-10-14T00:00:00.000Z",
+			site_verified_url: "https://app.acme.com/login",
+		});
+
+		const outcome = await dispatchTool("verify_site", { url: "https://app.acme.com/login" }, principal(["vendor:write"]));
+
+		expect(verifySite).toHaveBeenCalledWith("v1", "https://app.acme.com/login");
+		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toEqual({
+			verified: true,
+			domain_proof: "site",
+			checked_url: "https://app.acme.com/login",
+			reason: "Found your Letterprove script on https://app.acme.com/login.",
+			site_verified_at: "2026-10-14T00:00:00.000Z",
+			site_verified_url: "https://app.acme.com/login",
+		});
+	});
+
+	it("answers 400 with the reason for a page off the vendor's domain", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { verifySite } = await import("@/lib/vendors/site-proof");
+		vi.mocked(verifySite).mockResolvedValue({ ok: false, error: "not_your_domain", detail: "The page must be on acme.com or a host beneath it." });
+
+		const outcome = await dispatchTool("verify_site", { url: "https://evil.com" }, principal(["vendor:write"]));
+
+		expect(outcome).toEqual({
+			kind: "result",
+			result: { ok: false, status: 400, body: { error: "not_your_domain", detail: "The page must be on acme.com or a host beneath it." } },
+		});
+	});
+});
+
 describe("publish_proofs and unpublish_proofs", () => {
 	it("publishes the caller's own vendor and reports when it went public", async () => {
 		const { dispatchTool } = await import("./registry");
@@ -1079,20 +1129,30 @@ describe("publish_proofs and unpublish_proofs", () => {
 	});
 
 	/*
-	 * Nothing is collected for an unverified domain, so the only document we
-	 * could sign for one is a zero — a confident public claim with no evidence
-	 * under it, which is the thing this product exists to stop being normal.
+	 * DNS is optional since 2026-10-14: an unproven vendor publishes, at tier 0
+	 * and labelled "Domain not verified" on every surface (domain-proof.ts).
 	 */
-	it("refuses to publish a vendor whose domain is unverified", async () => {
+	it("publishes a vendor whose domain is not verified by DNS", async () => {
 		const { dispatchTool } = await import("./registry");
-		vendorRow = { slug: "acme", domain_verified_at: null, proofs_published_at: null };
+		vendorRow = { slug: "acme", domain: "acme.com", domain_verified_at: null, proofs_published_at: null };
 
 		const outcome = await dispatchTool("publish_proofs", {}, principal(["vendor:write"]));
 
-		expect(outcome).toEqual({
-			kind: "result",
-			result: { ok: false, status: 409, body: { error: "domain_not_verified" } },
-		});
+		expect(outcome.kind === "result" && outcome.result.ok).toBe(true);
+		expect(vendorUpdates).toHaveLength(1);
+	});
+
+	// DNS outranks every unproven claim: a domain someone else proved can't be published.
+	it("refuses with domain_claimed when another vendor has proven the domain by DNS", async () => {
+		const { dispatchTool } = await import("./registry");
+		const { rivalHoldsDomain } = await import("@/lib/vendors/domain-claim");
+		vi.mocked(rivalHoldsDomain).mockResolvedValueOnce(true);
+		vendorRow = { slug: "acme", domain: "acme.com", domain_verified_at: null, proofs_published_at: null };
+
+		const outcome = await dispatchTool("publish_proofs", {}, principal(["vendor:write"]));
+
+		expect(outcome.kind === "result" && !outcome.result.ok && outcome.result.status).toBe(409);
+		expect(outcome.kind === "result" && !outcome.result.ok && (outcome.result.body as { error: string }).error).toBe("domain_claimed");
 		expect(vendorUpdates).toEqual([]);
 	});
 

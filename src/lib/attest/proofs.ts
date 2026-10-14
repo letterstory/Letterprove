@@ -1,3 +1,4 @@
+import { domainProofOf, type DomainProof } from "./domain-proof";
 /**
  * The vendor proof — what `/proofs/{vendor}` and `/api/proofs/{vendor}` serve,
  * and what `get_proof_summary` reads back to the vendor.
@@ -29,6 +30,8 @@ export interface VendorProof {
 		category: string;
 		/** The owner this vendor shares with Letterprove's operator, or null — see ./issuer.ts. */
 		issuer_affiliation: string | null;
+		/** How the domain is proven NOW (./domain-proof.ts). The signed document carries its own `domain_proof`. */
+		domain_proof: DomainProof;
 	};
 	/** The newest signed vendor attestation, or null before the first hourly freeze. */
 	attestation: SignedAggregate | null;
@@ -58,6 +61,7 @@ function toProof(
 			domain: vendor.domain,
 			category: vendor.category,
 			issuer_affiliation: vendor.issuerAffiliation,
+			domain_proof: domainProofOf(vendor),
 		},
 		attestation,
 		summary: {

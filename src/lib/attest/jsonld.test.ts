@@ -14,7 +14,7 @@ import type { VendorProof } from "./proofs";
  */
 
 const PROOF: VendorProof = {
-	vendor: { slug: "vantage", name: "Vantage", domain: "vantage.example", category: "customer data platforms", issuer_affiliation: null },
+	vendor: { slug: "vantage", name: "Vantage", domain: "vantage.example", category: "customer data platforms", issuer_affiliation: null, domain_proof: "dns" },
 	attestation: null,
 	summary: {
 		tier: 3,
@@ -130,5 +130,16 @@ describe("vendorJsonLd", () => {
 
 	it("serialises to JSON without throwing, since it is emitted inside a script tag", () => {
 		expect(() => JSON.stringify(vendorJsonLd(PROOF, ORIGIN))).not.toThrow();
+	});
+
+	it("says 'proven by DNS' only for a DNS-proven domain, and labels the other two states", () => {
+		const desc = (proof: VendorProof) => String((vendorJsonLd(proof, ORIGIN).subjectOf as Record<string, unknown>).description);
+		expect(desc(PROOF)).toContain("controls vantage.example (proven by DNS)");
+		const site = desc({ ...PROOF, vendor: { ...PROOF.vendor, domain_proof: "site" } });
+		expect(site).toContain("Site verified");
+		expect(site).not.toContain("proven by DNS)");
+		const none = desc({ ...PROOF, vendor: { ...PROOF.vendor, domain_proof: "none" } });
+		expect(none).toContain("Domain not verified");
+		expect(none).not.toContain("verified by Letterprove");
 	});
 });

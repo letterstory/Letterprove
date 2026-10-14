@@ -10,6 +10,7 @@ import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
 import { logoSplit, payingSentence } from "@/lib/attest/paying-copy";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
+import { DOMAIN_PROOF_LABEL, docDomainProof, domainProofOf } from "@/lib/attest/domain-proof";
 
 function hostOf(url: string): string {
 	try {
@@ -49,10 +50,14 @@ export async function generateMetadata({ params }: { params: Promise<{ vendor: s
 	// Once a vendor's own proof domain is live, it is the canonical home of this
 	// page, so search engines credit the vendor's domain rather than ours.
 	const customDomain = await liveCustomDomain(slug);
+	const proof = domainProofOf(vendor);
 	return {
 		title: `${vendor.name} · Letterprove`,
-		description: leadSentence(Boolean(vendor.issuerAffiliation)),
+		description: leadSentence(Boolean(vendor.issuerAffiliation), proof, vendor.domain),
 		...(customDomain ? { alternates: { canonical: `https://${customDomain}/` } } : {}),
+		// A proof whose domain nothing proves is the vendor's claim: readable at
+		// its link, never pushed into search results under that domain's name.
+		...(proof === "none" ? { robots: { index: false } } : {}),
 	};
 }
 
@@ -77,6 +82,9 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	const checkUrl = a ? (a.verify ?? verifyLink(slug, null, a.published_at)) : null;
 	const affiliation = proof.vendor.issuer_affiliation;
 	const verifiedSince = a?.domain_verified_since ?? null;
+	// How the domain is proven, from the signed document when there is one.
+	const domainProof = a ? docDomainProof(a) : proof.vendor.domain_proof;
+	const shownDomain = a?.domain ?? proof.vendor.domain;
 	const binding = a?.stripe_binding ?? null;
 	const hidden = new Set<string>(a?.hidden_by_vendor ?? []);
 
@@ -90,7 +98,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 				<h1 className="mt-3 text-4xl font-semibold tracking-tight">{proof.vendor.name}</h1>
 				<p className="mt-2 text-fog">{a?.domain ?? proof.vendor.domain}</p>
 				<p className="mt-4 max-w-2xl text-fog">
-					{leadSentence(Boolean(proof.vendor.issuer_affiliation))}{" "}
+					{leadSentence(Boolean(proof.vendor.issuer_affiliation), domainProof, shownDomain)}{" "}
 					<a className="text-mint hover:underline" href={a?.method ?? METHODOLOGY_URL}>
 						Open-source methodology
 					</a>
@@ -149,13 +157,17 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						>
 							<Tile
 								label="Domain"
-								value={verifiedSince ? "Verified by DNS" : "Not verified"}
+								value={DOMAIN_PROOF_LABEL[domainProof]}
 								sub={
-									verifiedSince ? (
+									domainProof === "dns" && verifiedSince ? (
 										<span className="text-xs text-fog">
 											since <AttestedAt iso={verifiedSince} />, checked daily
 										</span>
-									) : undefined
+									) : domainProof === "site" ? (
+										<span className="text-xs text-fog">script and key found on a page of {shownDomain}, checked daily</span>
+									) : (
+										<span className="text-xs text-fog">not proven by DNS or by the site</span>
+									)
 								}
 							/>
 							<Tile

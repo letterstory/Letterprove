@@ -1,3 +1,4 @@
+import { DOMAIN_PROOF_LABEL, docDomainProof, domainProofLine } from "@/lib/attest/domain-proof";
 import { NextResponse } from "next/server";
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
@@ -147,13 +148,18 @@ function monthLabel(month: string): string {
 function summary(f: Record<string, unknown>, vendor: string): string {
 	const tier = typeof f.tier === "number" ? f.tier : null;
 	const window = typeof f.window_days === "number" ? f.window_days : 30;
+	const domainProof = docDomainProof(f as Parameters<typeof docDomainProof>[0]);
 	const tierLine =
 		tier === 3
 			? "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them are corroborated by settled invoices in its own Stripe account."
 			: tier === 1
-				? "Companies were observed signing in on the vendor's DNS-proven domain."
+				? domainProof === "site"
+					? "Companies were observed signing in on the vendor's domain, which is site verified (its script and key are on a page there), not proven by DNS."
+					: "Companies were observed signing in on the vendor's DNS-proven domain."
 				: tier === 0
-					? "Nothing is corroborated yet."
+					? domainProof === "none"
+						? "Nothing is corroborated: the vendor has not proven it controls this domain."
+						: "Nothing is corroborated yet."
 					: "";
 	const tile = (k: string, v: string, sub = "") => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
 	const payments = tier === 3 ? "Corroborated" : f.stripe_account_bound ? "Not yet" : "Not connected";
@@ -164,7 +170,8 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 
 	const method = typeof f.method === "string" && f.method ? f.method : METHODOLOGY_URL;
 	const affiliated = typeof f.issuer_affiliation === "string" && f.issuer_affiliation !== "";
-	let html = `<p class="lead">${esc(leadSentence(affiliated))} <a href="${esc(method)}">Open-source methodology</a>.</p>`;
+	const domainName = typeof f.domain === "string" ? f.domain : null;
+	let html = `<p class="lead">${esc(leadSentence(affiliated, domainProof, domainName))} <a href="${esc(method)}">Open-source methodology</a>.</p>`;
 	html += `<section class="vendor"><div class="eyebrow">Snapshot of ${esc(vendor)}</div><h2 class="big">${esc(String(f.domain ?? vendor))}</h2>`;
 	if (tier !== null) html += `<p class="tierline"><span class="tier">Tier ${tier}</span> ${esc(tierLine)}</p>`;
 	html += `</section>`;
@@ -190,7 +197,13 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope && tier === 3 ? (scope.mode === "selected" ? " Payments verified by Stripe, for the products the vendor chose." : " Payments verified by Stripe.") : ""}</p></section>`;
 
 	html += `<section><h2>Who the vendor is</h2><dl class="facts">` +
-		`<div><dt>Domain, proven by DNS</dt><dd>${esc(fmtDay(f.domain_verified_since) ? `since ${fmtDay(f.domain_verified_since)}` : "not proven")}</dd></div>` +
+		`<div><dt>Domain</dt><dd>${esc(
+			domainProof === "dns"
+				? fmtDay(f.domain_verified_since)
+					? `${DOMAIN_PROOF_LABEL.dns}, since ${fmtDay(f.domain_verified_since)}`
+					: DOMAIN_PROOF_LABEL.dns
+				: domainProofLine(domainProof, domainName) ?? DOMAIN_PROOF_LABEL[domainProof],
+		)}</dd></div>` +
 		`<div><dt>Stripe account</dt><dd>${esc(binding)}</dd></div>` +
 		("observed_since" in f ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` : "") +
 		`</dl></section>`;

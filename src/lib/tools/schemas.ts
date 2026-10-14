@@ -116,7 +116,15 @@ export const getStatusOutput = z.object({
 					.describe("development: localhost or a preview host, never counted. needs_proof: a sibling of your verified domain, add it as a host. other_company: a different domain."),
 			}),
 		)
-		.describe("Events dropped in the last 24h because of where they came from. Hosts beneath your verified domain are accepted automatically and never appear here."),
+		.describe("Events dropped in the last 24h because of where they came from. Hosts beneath your DNS-verified domain are accepted automatically and never appear here."),
+	domain_proof: z
+		.enum(["none", "site", "dns"])
+		.describe(
+			"How your domain is proven. none: nothing proven, proof publishes as 'Domain not verified' at tier 0. site: Letterprove found attest.js with your key on site_verified_url; 'Site verified', tier 1 at most. dns: your TXT record; tiers 1 and 3, Stripe and the logo wall.",
+		),
+	domain_verified: z.boolean().describe("True only when the domain is proven by DNS (domain_proof dns)."),
+	site_verified_at: z.string().nullable().describe("When attest.js with your key was last found on site_verified_url. Null when not site-verified."),
+	site_verified_url: z.string().nullable().describe("The page site proof was found on, re-checked daily."),
 });
 
 /**
@@ -209,6 +217,23 @@ export const verifyDomainOutput = z.union([
 		hosts: z.array(z.string()),
 	}),
 ]);
+
+export const verifySiteInput = z.object({
+	url: z
+		.string()
+		.optional()
+		.describe(
+			"An https page on your domain (or a host beneath it) whose HTML carries your Letterprove script, e.g. https://app.acme.com/login. Defaults to the page that last verified, else https://<your domain>/.",
+		),
+});
+export const verifySiteOutput = z.object({
+	verified: z.boolean().describe("Whether site proof stands now. A failed check never clears an earlier proof; the daily re-check does."),
+	domain_proof: z.enum(["none", "site", "dns"]),
+	checked_url: z.string().describe("The page this check fetched."),
+	reason: z.string().describe("What was found, in plain words."),
+	site_verified_at: z.string().nullable(),
+	site_verified_url: z.string().nullable(),
+});
 
 export const updateVendorInput = z
 	.object({

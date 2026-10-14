@@ -3,6 +3,7 @@ import { recheckAllDomains, type RecheckRunResult } from "@/lib/vendors/dns-rech
 import { recheckOwnDnsHosts } from "@/lib/vendors/hosts";
 import { sendAlert } from "@/lib/alerts/notify";
 import { recheckAllLogoWalls } from "@/lib/vendors/logo-wall";
+import { recheckAllSites } from "@/lib/vendors/site-proof";
 
 /**
  * Vercel Cron hits this daily (see vercel.json): re-resolves every verified
@@ -70,6 +71,24 @@ export async function GET(request: Request) {
 	}
 	for (const e of logos.errors) console.error(`[letterprove:logo-wall] ${e.vendorId}: ${e.detail}`);
 
+	// Site proofs (lib/vendors/site-proof.ts) for vendors without DNS: the page
+	// is re-fetched daily, and three answered misses over two days clear it.
+	let sites: Awaited<ReturnType<typeof recheckAllSites>> = { checked: 0, cleared: [], errors: [] };
+	if (db) {
+		try {
+			sites = await recheckAllSites();
+		} catch (error) {
+			sites.errors.push({ slug: "*", detail: `threw: ${error instanceof Error ? error.message : String(error)}` });
+		}
+	}
+	for (const slug of sites.cleared) {
+		await sendAlert(
+			`site verification cleared: ${slug}`,
+			"its Letterprove script was missing from its verified page for three daily checks over two days; its proof falls to Domain not verified (tier 0) at the next freeze until the script is back or the domain is verified by DNS",
+		);
+	}
+	for (const e of sites.errors) console.error(`[letterprove:site-proof] ${e.slug}: ${e.detail}`);
+
 	if (run.detail) await sendAlert("dns recheck could not run", run.detail);
 	for (const h of hosts.unverified) {
 		await sendAlert(
@@ -92,5 +111,5 @@ export async function GET(request: Request) {
 		await sendAlert(`dns recheck error: ${e.slug}`, e.detail);
 	}
 
-	return Response.json({ ...run, hosts }, { status: run.ok ? 200 : 500 });
+	return Response.json({ ...run, hosts, sites }, { status: run.ok ? 200 : 500 });
 }

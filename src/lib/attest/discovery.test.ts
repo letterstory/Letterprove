@@ -87,7 +87,7 @@ describe("discoveryDocument", () => {
 		const doc = await discoveryDocument("https://app.letterprove.com");
 		expect(doc.proofs).toHaveLength(2);
 		for (const p of doc.proofs) {
-			expect(Object.keys(p).sort()).toEqual(["aggregate", "aggregate_chain", "url", "vendor"]);
+			expect(Object.keys(p).sort()).toEqual(["aggregate", "aggregate_chain", "domain_proof", "url", "vendor"]);
 		}
 	});
 

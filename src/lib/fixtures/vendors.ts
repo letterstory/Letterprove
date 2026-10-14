@@ -62,6 +62,14 @@ export interface VendorFixture {
 	/** When DNS control was last proven, or null. Published as `domain_verified_since`. */
 	domainVerifiedAt?: string | null;
 	/**
+	 * When Letterprove last found attest.js with this vendor's key on a page of
+	 * its domain (lib/vendors/site-proof.ts), or null. The middle domain proof:
+	 * weaker than DNS, caps the tier at 1. Absent on static fixtures.
+	 */
+	siteVerifiedAt?: string | null;
+	/** The page that site proof was found on, or null. Its host is accepted by the collector. */
+	siteVerifiedUrl?: string | null;
+	/**
 	 * When this vendor's proofs became public, or null while they are private.
 	 *
 	 * A vendor is private until someone publishes it. Everything internal runs
@@ -96,7 +104,7 @@ export const FEATURES = ["sso", "audit_log", "api", "analytics", "sla"] as const
  * vendor's proofs dark instead.
  */
 const VENDOR_COLUMNS =
-	"id, slug, name, domain, category, key, domain_verified_at, proofs_published_at, issuer_affiliation";
+	"id, slug, name, domain, category, key, domain_verified_at, site_verified_at, site_verified_url, proofs_published_at, issuer_affiliation";
 
 /**
  * The columns every vendor_customers read here selects, for the same reason.
@@ -112,6 +120,8 @@ interface VendorRow {
 	name: string;
 	domain: string;
 	domain_verified_at?: string | null;
+	site_verified_at?: string | null;
+	site_verified_url?: string | null;
 	proofs_published_at?: string | null;
 	issuer_affiliation?: string | null;
 	category: string;
@@ -139,6 +149,8 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 		key: row.key,
 		domainVerified: Boolean(row.domain_verified_at),
 		domainVerifiedAt: row.domain_verified_at ?? null,
+		siteVerifiedAt: row.site_verified_at ?? null,
+		siteVerifiedUrl: row.site_verified_url ?? null,
 		proofsPublishedAt: row.proofs_published_at ?? null,
 		issuerAffiliation: row.issuer_affiliation ?? null,
 		customers: customers.map((c) => ({

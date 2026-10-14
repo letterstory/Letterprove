@@ -304,8 +304,33 @@ describe("aggregateBody", () => {
 
 			const b = (await aggregateBody("lettertrace"))!;
 			expect(b.domain_verified_since).toBeNull();
+			expect(b.domain_proof).toBe("none");
+			expect(b.domain_verified).toBe(false);
 			expect(b.hosts).toBe(0);
 			expect(b.tier).toBe(0);
+		});
+
+		it("grades a site-verified domain at tier 1 at most, and never binds Stripe to it", async () => {
+			await withRollups([row("globex.com", 2)], false);
+			await asVendor({ domainVerified: false, domainVerifiedAt: null, siteVerifiedAt: "2026-10-14T00:00:00.000Z" });
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.payingAmong).mockResolvedValue({ companies: 3, since: "2025-11-03T00:00:00.000Z" });
+
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.domain_proof).toBe("site");
+			expect(b.domain_verified).toBe(false);
+			expect(b.tier).toBe(1);
+			expect(b.stripe_account_bound).toBe(false);
+			expect(b.stripe_binding).toBeNull();
+		});
+
+		it("states a DNS-proven domain as domain_proof dns", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor();
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.domain_proof).toBe("dns");
+			expect(b.domain_verified).toBe(true);
 		});
 
 		it("names a logo only when it is on the vendor's page and observed, without moving the tier", async () => {

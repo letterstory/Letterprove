@@ -75,6 +75,9 @@ import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/bill
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
 import { fetchVendorVisitors, setVisitorIdentification, visitorIdentificationStatus } from "@/lib/vendors/visitors";
 import { scriptModules, scriptStatus, setPlainModules } from "@/lib/vendors/script";
+import { verifySite } from "@/lib/vendors/site-proof";
+import { rivalHoldsDomain, unpublishRivals } from "@/lib/vendors/domain-claim";
+
 import { displayFor, LOCKED as LOCKED_DISPLAY, setDisplay } from "@/lib/attest/display";
 
 /**
@@ -542,7 +545,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_status",
 		description:
-			"Whether the caller's vendor has received any events in the last 24h and how many, when it first and last received one, whether the tracking script has ever checked in, which origins had events dropped (and whether adding them as a host would help), and whether the vendor's proofs are public yet.",
+			"Whether the caller's vendor has received any events in the last 24h and how many, when it first and last received one, whether the tracking script has ever checked in, which origins had events dropped (and whether adding them as a host would help), whether the vendor's proofs are public yet, and how its domain is proven (domain_proof: none, site or dns).",
 		capability: "vendor:read",
 		inputSchema: S.getStatusInput,
 		outputSchema: S.getStatusOutput,
@@ -566,6 +569,10 @@ export const TOOLS: BoundTool[] = [
 					ever_received_at: result.everReceivedAt,
 					last_received_at: result.lastReceivedAt,
 					rejected_origins: result.rejectedOrigins,
+					domain_proof: result.domainProof,
+					domain_verified: result.domainProof === "dns",
+					site_verified_at: result.siteVerifiedAt,
+					site_verified_url: result.siteVerifiedUrl,
 				},
 			};
 		},
@@ -1005,10 +1012,41 @@ export const TOOLS: BoundTool[] = [
 				.update({ domain_verified_at: verifiedAt, domain_dns_failures: 0, domain_dns_failing_since: null })
 				.eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			// DNS outranks every unproven claim to the same domain
+			// (src/lib/vendors/domain-claim.ts): other vendors still naming it
+			// without DNS go private now.
+			await unpublishRivals(vendor.domain, vendorId);
 			return {
 				ok: true,
 				body: { domain: vendor.domain, verified: true, checked: true, message, verified_at: verifiedAt },
 			};
+		},
+	}),
+	defineTool({
+		/*
+		 * Site proof, the middle domain state (src/lib/vendors/site-proof.ts):
+		 * the vendor names a page on its domain, we fetch it and look for
+		 * attest.js with the vendor's current key. Weaker than DNS (it proves a
+		 * page, not the domain), so it lifts a proof from tier 0 to tier 1 at
+		 * most. Also tried automatically when attest.js pings /v1/config.
+		 */
+		name: "verify_site",
+		description:
+			"Site-verify the caller's vendor domain without DNS: Letterprove fetches an https page on your domain (or a host beneath it) and looks for your Letterprove script (attest.js with your key) in its HTML. Args: url (optional, e.g. https://app.acme.com/login; defaults to the last verified page, else your domain's home page). Site proof shows 'Site verified' on your proof and allows tier 1; DNS (verify_domain) is still needed for tier 3, Stripe and the logo wall.",
+		capability: "vendor:write",
+		inputSchema: S.verifySiteInput,
+		outputSchema: S.verifySiteOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const url = asRecord(args).url;
+			const result = await verifySite(vendorId, typeof url === "string" ? url : null);
+			if (!result.ok) {
+				const status = result.error === "not_found" ? 404 : result.error === "storage_unavailable" ? 503 : 400;
+				return { ok: false, status, body: { error: result.error, detail: result.detail } };
+			}
+			const { ok: _ok, ...body } = result;
+			return { ok: true, body };
 		},
 	}),
 	defineTool({
@@ -1027,11 +1065,12 @@ export const TOOLS: BoundTool[] = [
 		 * — and a second path to a gate is how gates rot. When self-serve
 		 * lands, this tool is already it.
 		 *
-		 * REFUSES AN UNVERIFIED DOMAIN. `POST /v1/observe` records nothing for
-		 * a vendor whose domain is unproven, so publishing one publishes a
-		 * signed document that can only ever say zero — a confident public
-		 * claim with no evidence under it, which is the thing this product
-		 * exists to stop being normal.
+		 * DNS IS OPTIONAL since 2026-10-14 (Matthew: it was too much setup
+		 * friction). An unproven vendor publishes at tier 0, a site-verified
+		 * one at tier 1 at most, and every public surface labels which
+		 * (src/lib/attest/domain-proof.ts). What is still refused: publishing
+		 * a domain another vendor has proven by DNS (`domain_claimed`), since
+		 * DNS outranks every unproven claim (src/lib/vendors/domain-claim.ts).
 		 */
 		name: "publish_proofs",
 		description:
@@ -1047,12 +1086,16 @@ export const TOOLS: BoundTool[] = [
 
 			const { data: vendor } = await db
 				.from("vendors")
-				.select("slug, domain_verified_at, proofs_published_at")
+				.select("slug, domain, domain_verified_at, proofs_published_at")
 				.eq("id", vendorId)
 				.maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
-			if (!vendor.domain_verified_at) {
-				return { ok: false, status: 409, body: { error: "domain_not_verified" } };
+			if (!vendor.domain_verified_at && (await rivalHoldsDomain(vendor.domain, vendorId))) {
+				return {
+					ok: false,
+					status: 409,
+					body: { error: "domain_claimed", detail: `Another vendor has proven ${vendor.domain} by DNS. Verify it by DNS yourself if it is yours.` },
+				};
 			}
 
 			// Idempotent: publishing an already-public vendor returns the date
@@ -1257,7 +1300,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "connect_stripe",
 		description:
-			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key, which needs read access to Subscriptions, Invoices and Accounts; product_ids (optional) — the Stripe products that are this product, when the account bills several. The Stripe account must be the vendor's own: one of the domains it publishes (business website, support email) has to share the vendor's verified domain, or the key is refused. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
+			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key, which needs read access to Subscriptions, Invoices and Accounts; product_ids (optional) — the Stripe products that are this product, when the account bills several. The Stripe account must be the vendor's own: one of the domains it publishes (business website, support email) has to share the vendor's domain, or the key is refused. The binding counts on the proof only once the domain is verified by DNS (site proof is not enough). An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
 		capability: "vendor:write",
 		inputSchema: S.connectStripeInput,
 		outputSchema: S.connectStripeOutput,
@@ -1786,10 +1829,9 @@ export const TOOLS: BoundTool[] = [
 				.eq("id", vendorId)
 				.maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
-			// Every host's acceptance rests on DNS control of the domain.
-			if (!vendor.domain_verified_at) {
-				return { ok: false, status: 409, body: { error: "domain_not_verified", detail: "Verify your domain first; extra hosts are proven relative to it." } };
-			}
+			// No DNS gate since 2026-10-14. Before DNS proof a host is accepted
+			// exactly as added (nothing beneath it automatically) and counts at
+			// the vendor's own proof level (src/lib/vendors/hosts.ts).
 			const check = classifyHost(String(asRecord(args).host ?? ""), vendor.domain);
 			if (!check.ok) return { ok: false, status: 400, body: { error: check.error, detail: check.detail } };
 
@@ -1953,7 +1995,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_logo_wall",
 		description:
-			"Verify the logos you already show publicly. Args: page_url (the https page on your own verified domain that shows them) and companies ([{name, domain}], up to 200). Letterprove fetches the page, keeps only companies actually on it, and names on your proof only those it has observed signing in (or paying). Everyone else is a count. Re-checked daily.",
+			"Verify the logos you already show publicly. Args: page_url (the https page on your own verified domain that shows them) and companies ([{name, domain}], up to 200). Letterprove fetches the page, keeps only companies actually on it, and names on your proof only those it has observed signing in (or paying). Everyone else is a count. Re-checked daily. Published only once your domain is verified by DNS (site proof is not enough).",
 		capability: "vendor:write",
 		inputSchema: S.setLogoWallInput,
 		outputSchema: S.setLogoWallOutput,

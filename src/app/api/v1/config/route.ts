@@ -5,6 +5,7 @@ import { CURRENT_CONFIG_VERSION } from "@/lib/telemetry/events";
 import { recordConfigPing } from "@/lib/telemetry/ping";
 import { visitorPixel } from "@/lib/vendors/visitors";
 import { collectorModules, recordScriptSeen, scriptNameOf } from "@/lib/vendors/script";
+import { autoCheckUrl, scheduleSiteAutoVerify } from "@/lib/vendors/site-proof";
 
 /** Per source IP — same backstop as POST /v1/observe (see that route's comment); unauthenticated and unmetered otherwise, so a burst against every key costs nothing without this. */
 const CONFIG_IP_LIMIT_PER_MINUTE = 300;
@@ -32,6 +33,11 @@ const CONFIG_IP_LIMIT_PER_MINUTE = 300;
  * It stamps that script's first-seen time (recordScriptSeen); config_pings
  * still records "either script". The answer is the same for both: each script
  * reads only the parts it runs.
+ *
+ * Site proof (lib/vendors/site-proof.ts): when attest.js asks from a page on
+ * the vendor's domain and the vendor has neither DNS nor site proof yet, we
+ * fetch that page (the Referer, else the origin's root) after responding, at
+ * most every ten minutes. The ping itself proves nothing; the fetch does.
  */
 export async function GET(request: Request) {
 	if (!(await oauthRateLimit(`config:ip:${oauthClientIp(request)}`, 60, CONFIG_IP_LIMIT_PER_MINUTE))) {
@@ -49,6 +55,12 @@ export async function GET(request: Request) {
 		vendor.id ? visitorPixel(vendor.id) : null,
 		vendor.id ? collectorModules(vendor.id) : { proofs: true, agent_visitors: true },
 	]);
+
+	const script = scriptNameOf(params.get("s"));
+	if (vendor.id && script === "attest" && !vendor.domainVerified && !vendor.siteVerifiedAt) {
+		const page = autoCheckUrl(request.headers.get("origin"), request.headers.get("referer"), vendor.domain);
+		if (page) scheduleSiteAutoVerify(vendor.id, page);
+	}
 
 	return configJson({
 		cfg: CURRENT_CONFIG_VERSION,
