@@ -92,3 +92,20 @@ export async function setDisplay(vendorId: string, patch: Partial<DisplaySetting
 	const { error } = await db.from("vendors").update({ proof_display: next }).eq("id", vendorId);
 	return error ? null : next;
 }
+
+/**
+ * The vendor's CURRENT display settings by slug. Pages read the signed snapshot,
+ * which only picks up a change at the next hourly cut; a vendor who hides a
+ * section expects it gone now, so the human pages also check this.
+ */
+export async function displayForSlug(slug: string): Promise<DisplaySettings> {
+	const db = dbClient();
+	if (!db) return { ...DEFAULT_DISPLAY };
+	try {
+		const { data, error } = await db.from("vendors").select("proof_display").eq("slug", slug).maybeSingle<{ proof_display: unknown }>();
+		if (error || !data) return { ...DEFAULT_DISPLAY };
+		return normalizeDisplay(data.proof_display);
+	} catch {
+		return { ...DEFAULT_DISPLAY };
+	}
+}
