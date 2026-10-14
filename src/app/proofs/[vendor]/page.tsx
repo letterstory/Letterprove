@@ -5,7 +5,7 @@ import { DevKeyBanner, SiteFooter, SiteHeader } from "@/components/chrome";
 import { vendorJsonLd } from "@/lib/attest/jsonld";
 import { publishedVendorProof } from "@/lib/attest/proofs";
 import { AttestedAt, RelativeAge } from "./AttestedAt";
-import { findPublishedVendor } from "@/lib/fixtures/vendors";
+import { findPublishedVendor, isListed } from "@/lib/fixtures/vendors";
 import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
@@ -78,7 +78,13 @@ export async function generateMetadata({
       : {}),
     // A proof whose domain nothing proves is the vendor's claim: readable at
     // its link, never pushed into search results under that domain's name.
-    ...(proof === "none" ? { robots: { index: false } } : {}),
+    // An unlisted proof (set_proof_listing) is readable at its link too, and
+    // asks not to be indexed or followed.
+    ...(!isListed(vendor)
+      ? { robots: { index: false, follow: false } }
+      : proof === "none"
+        ? { robots: { index: false } }
+        : {}),
   };
 }
 
@@ -95,6 +101,8 @@ export default async function ProofPage({
   // same document /attest/{vendor}.json serves, so a human and an agent see the
   // same numbers from the same source. Nothing here names a customer.
   const a = proof.attestation;
+  const listedVendor = await findPublishedVendor(slug);
+  const unlisted = listedVendor ? !isListed(listedVendor) : false;
   const showLogos = (await displayForSlug(slug)).logos;
 
   const host = (await headers()).get("host") ?? "localhost";
@@ -145,6 +153,12 @@ export default async function ProofPage({
           </a>
           .
         </p>
+
+        {unlisted && (
+          <p className="mt-6 text-sm text-fog">
+            This proof is unlisted: it isn&apos;t in Letterprove&apos;s directory.
+          </p>
+        )}
 
         {checkUrl && (
           <p className="mt-6 text-sm text-fog">

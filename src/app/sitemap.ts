@@ -1,13 +1,14 @@
 import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
-import { publishedVendors } from "@/lib/fixtures/vendors";
+import { listedVendors } from "@/lib/fixtures/vendors";
 
 /**
  * Every published vendor's proof page, plus the pages that explain how to
  * check one. Built per request (reading `headers()` makes it dynamic), so a
  * vendor appears the moment it is published and disappears the moment it is
- * unpublished — `publishedVendors()` is the same gate every public proof route
- * resolves through, so the sitemap can never list a private vendor.
+ * unpublished or unlisted — `listedVendors()` is `publishedVendors()` (the gate
+ * every public proof route resolves through) minus unlisted vendors, so the
+ * sitemap never lists a private or unlisted vendor.
  *
  * Only the human-readable /proofs/{vendor} page is listed, not the JSON under
  * /attest: the page carries the JSON-LD and links to the attestations, and an
@@ -17,7 +18,7 @@ import { publishedVendors } from "@/lib/fixtures/vendors";
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 	const host = (await headers()).get("host") ?? "localhost";
 	const origin = `${host.startsWith("localhost") ? "http" : "https"}://${host}`;
-	const vendors = await publishedVendors();
+	const vendors = await listedVendors();
 
 	return [
 		...vendors.map((v) => ({

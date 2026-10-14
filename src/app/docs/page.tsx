@@ -1048,7 +1048,7 @@ POST ${origin}/api/v1/observe`}</Snippet>
               </li>
               <li>
                 Publishing and your own domain: <code>publish_proofs</code>,{" "}
-                <code>unpublish_proofs</code>, <code>set_custom_domain</code>,{" "}
+                <code>unpublish_proofs</code>, <code>set_proof_listing</code>, <code>set_custom_domain</code>,{" "}
                 <code>check_custom_domain</code>,{" "}
                 <code>remove_custom_domain</code>.
               </li>

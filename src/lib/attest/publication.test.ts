@@ -101,6 +101,7 @@ vi.mock("@/lib/fixtures/vendors", async (importOriginal) => {
 		...original,
 		allVendors: async () => VENDORS,
 		publishedVendors: async () => VENDORS.filter((v) => v.proofsPublishedAt !== null),
+		listedVendors: async () => VENDORS.filter((v) => v.proofsPublishedAt !== null),
 		findVendor: async (slug: string) => VENDORS.find((v) => v.slug === slug),
 		findPublishedVendor: async (slug: string) => {
 			const vendor = VENDORS.find((v) => v.slug === slug);

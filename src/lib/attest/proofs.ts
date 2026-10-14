@@ -16,7 +16,7 @@ import { domainProofOf, type DomainProof } from "./domain-proof";
 import { earned } from "./body";
 import { head } from "./chain";
 import { publishedVendorAggregate, vendorAggregate, type SignedAggregate } from "./aggregate";
-import { allVendors, findPublishedVendor, findVendor, publishedVendors } from "../fixtures/vendors";
+import { allVendors, findPublishedVendor, findVendor, listedVendors } from "../fixtures/vendors";
 import { loadPersistedChain } from "@/rollup/history";
 import type { Tier } from "./types";
 
@@ -106,7 +106,9 @@ export async function vendorSlugs(): Promise<string[]> {
  * formality rather than a gate.
  */
 export async function publishedVendorSlugs(): Promise<string[]> {
-	return (await publishedVendors()).map((v) => v.slug);
+	// Listed only: an unlisted vendor's proof resolves by URL but is never
+	// enumerated here.
+	return (await listedVendors()).map((v) => v.slug);
 }
 
 export interface CustomerSnapshotSummary {
