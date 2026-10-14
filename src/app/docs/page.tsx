@@ -276,33 +276,16 @@ export default async function DocsPage() {
               install has to be updated in the same change.
             </p>
 
-            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              Counting AI agents on your site
-            </h3>
             <p>
-              The same install tells you which AI agents and crawlers read your
-              site. On any page rendered by an automated browser (ChatGPT&apos;s
-              agent, Comet, a headless browser), the script sends one beacon
-              with the page&apos;s path. Ordinary visitors send nothing.
-            </p>
-            <p>
-              Most agents never run JavaScript: ChatGPT, Claude and Perplexity
-              fetch your HTML and leave, and so do the search crawlers. To count
-              them, add the optional server snippet from{" "}
-              <strong>Install reference</strong> on the Proofs dashboard (a
-              Next.js version and a plain Node version). It forwards each
-              request&apos;s user-agent, address and path to{" "}
-              <code>/api/v1/agent-visit</code> without waiting for an answer, so
-              it can never slow or break your page.
-            </p>
-            <p>
-              The counts appear in the <strong>AI agents on your site</strong>{" "}
-              panel: per agent, the most-read paths and a daily series.{" "}
-              <em>Verified</em> means the request came from an address the
-              operator publishes for its agents; <em>claimed only</em> means
-              only the user-agent said so. We keep the classification and drop
-              the address and user-agent. This is for you alone. It is never
-              published and never affects your proof.
+
+              The script collects sign-ins for your proof and nothing else.
+
+              Counting AI agents on your site and identifying visitors are a
+
+              separate product, Visitors (lettervisit.com), with its own
+
+              script and key.
+
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -537,7 +520,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 Absent never means zero.
               </li>
               <li>
-                Documents signed before 2026-10-14 may carry{" "}
+                Documents signed before the 2026-10-14 change may carry{" "}
                 <code>paying_since</code>, <code>payment_scope</code>,{" "}
                 <code>paying</code>, and logo <code>paying</code> counts:
                 payment fields from when Stripe payments were still read. They
@@ -698,7 +681,7 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               <strong>tier 3 confirms identity, not usage or revenue.</strong> A
               real, Stripe-verified business can still script sign-ins (see tier
               1). Read tier 3 as a third party vouching for who you are.
-              Documents signed before 2026-10-14 without{" "}
+              Documents signed before the 2026-10-14 change without{" "}
               <code>stripe_business</code> used tier 3 for payment from an
               observed company; read them as describing that snapshot.
             </p>
@@ -919,31 +902,6 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
               your <code>/llms.txt</code>, and a small JSON-LD block for your
               homepage. Each points at your proof.
             </p>
-            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              AI agents on your site
-            </h3>
-            <p>
-              Covered under
-              <a href="#install" className="text-mint hover:underline">
-                Install
-              </a>
-              : the script plus the optional server snippet, shown in the
-              <strong>AI agents on your site</strong> panel. Private to you.
-            </p>
-            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              Who visits your site
-            </h3>
-            <p>
-              Turn on <strong>Identify visitors</strong> and the same script
-              also loads a visitor identification pixel on your site, so the
-              <strong>Who visits your site</strong> panel can show the people
-              and companies visiting. It is off by default and needs a verified
-              domain. Visitors are fetched from our identification provider when
-              you open the panel; Letterprove stores none of it, and it never
-              appears on your proof. Identifying visitors is processing of your
-              visitors&apos; data, so mention it in your own privacy policy
-              first.
-            </p>
           </Section>
 
           <Section n={9} id="alerts" title="When something breaks">
@@ -1040,11 +998,6 @@ POST ${origin}/api/v1/observe`}</Snippet>
                 PostHog: <code>connect_posthog</code>,{" "}
                 <code>get_posthog_connection</code>, <code>sync_posthog</code>,{" "}
                 <code>disconnect_posthog</code>.
-              </li>
-              <li>
-                AI agents and visitors: <code>get_agent_visits</code>,{" "}
-                <code>set_visitor_identification</code>,{" "}
-                <code>get_visitors</code>.
               </li>
               <li>
                 Publishing and your own domain: <code>publish_proofs</code>,{" "}

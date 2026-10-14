@@ -22,30 +22,11 @@
  * `email` is never sent anywhere — only its domain part is, and only after
  * being split off locally. See README § "The one hard rule: domain only".
  *
- * Agent views (no API call needed): when the page is rendered by an automated
- * browser — navigator.webdriver set, or a user-agent naming an agent — one
- * beacon per page load goes to POST /api/v1/agent-visit carrying only the
- * key, the path and that flag. The server reads who it was from the request's
- * own headers. Ordinary visitors send nothing. See src/lib/agents/visits.ts.
- * It goes once the config confirms the agent_visitors module is on.
- *
- * Two scripts now: attest.js is attestation-first, and the Visitors script
- * (public/visit.js, served as lettervisit.com/v.js) owns agent visits and the
- * visitor pixel. When the Visitors script is on the page it sets
- * `window.__lettervisit`, and this script then sends no agent beacon and loads
- * no pixel, so nothing is counted twice. The agent beacon and pixel below are
- * the LEGACY path, kept so a site with only this tag (letter.dev,
- * app.letterstory.com, every install before the split) behaves as it always did.
- *
- * Modules: the config's `modules` says which parts run. proofs off means
- * identify/signup/login send nothing; agent_visitors off means no agent
- * beacon; the visitor pixel loads only when human visitors is on.
- *
- * One opt-in exception to "this script only reports domains": a vendor who
- * turns on visitor identification gets the identification pixel loaded on their
- * site too (loadVisitorPixel below). That is a separate, vendor-private
- * product — README § Visitor identification — and nothing it sees passes
- * through this script.
+ * Attestation only. This script collects sign-ins for the vendor's proof and
+ * nothing else: no agent visits, no visitor identification. Those are the
+ * Visitors product, a separate script on a separate key (lettervisit.com/v.js,
+ * served by the Letterstory app). Since 2026-10-14 this file carries none of
+ * that code; the config's `modules.proofs` is the only switch it reads.
  *
  * Calls made before this script loads are kept, not lost. Put this one-line
  * stub above any code that might call identify early (an auth callback that
@@ -86,20 +67,15 @@
 
 	var CONFIG_URL = origin + "/api/v1/config?k=" + encodeURIComponent(key) + "&s=attest";
 	var OBSERVE_URL = origin + "/api/v1/observe";
-	var AGENT_VISIT_URL = origin + "/api/v1/agent-visit";
-	// A self-identified agent or headless browser. Deliberately small: the
-	// server classifies from the real user-agent, this only decides whether a
-	// page is worth one beacon at all.
-	var AGENT_UA = /chatgpt|gptbot|oai-searchbot|claude|anthropic|perplexity|headlesschrome|bot\b|crawler|spider/i;
 
 	// Boot state. `cfg` and `ready`/`failed` come from the one config fetch
 	// below — per README § Configuration, fails closed and is never retried
 	// mid-page: a cold cache plus a failed fetch means no collection, not a
 	// guess.
 	var cfg = null;
-	// Which parts of the script run, from the config. Until it answers, and
-	// for an older cached answer without `modules`, everything stays on.
-	var modules = { proofs: true, agent_visitors: true };
+	// Whether sign-ins are collected, from the config. Until it answers, and
+	// for an older cached answer without `modules`, it stays on.
+	var modules = { proofs: true };
 	var ready = false;
 	var failed = false;
 	var queue = [];
@@ -192,20 +168,10 @@
 				cfg = body.cfg;
 				if (body.modules && typeof body.modules === "object") {
 					modules.proofs = body.modules.proofs !== false;
-					modules.agent_visitors = body.modules.agent_visitors !== false;
 				}
 				ready = true;
 				log("key accepted; ready" + (queue.length ? ", sending " + queue.length + " queued event(s)" : ""));
 				flush();
-				// Legacy path: only when the Visitors script is not on the page.
-				// Read here, after the config round trip, so a Visitors tag placed
-				// after this one has long since set the flag.
-				if (window.__lettervisit) {
-					log("the Visitors script is on this page; agent visits and the pixel are left to it");
-					return;
-				}
-				if (modules.agent_visitors) agentView();
-				if (body.visitors && body.visitors.pixel) loadVisitorPixel(body.visitors.pixel);
 			})
 			.catch(function (e) {
 				failed = true;
@@ -222,69 +188,6 @@
 		}
 		try {
 			fetch(url, { method: "POST", body: body, keepalive: true, credentials: "omit" }).catch(function () {});
-		} catch {
-			// never throw into the host page
-		}
-	}
-
-	function agentView() {
-		try {
-			var webdriver = navigator.webdriver === true;
-			if (!webdriver && !AGENT_UA.test(navigator.userAgent || "")) return;
-			// Shared with visit.js: whichever script beacons first wins.
-			if (window.__letterAgentSent) return;
-			window.__letterAgentSent = true;
-			beacon(
-				AGENT_VISIT_URL,
-				JSON.stringify({ k: key, path: location.pathname, client: true, webdriver: webdriver })
-			);
-		} catch {
-			// never throw into the host page
-		}
-	}
-
-	/**
-	 * Visitor identification (LEGACY path; visit.js owns it when present), only
-	 * when the vendor turned it on (the config carries `visitors.pixel` then and
-	 * never otherwise). Loads the identification pixel exactly as Letter's own
-	 * sites do, once. Skipped on
-	 * localhost and preview hosts, and when the page already runs the pixel.
-	 * Nothing it identifies passes through this script or reaches the proof:
-	 * see src/lib/vendors/visitors.ts.
-	 */
-	var PIXEL_ID = /^[A-Za-z0-9_-]{1,64}$/;
-	function loadVisitorPixel(pixel) {
-		try {
-			var customerId = String(pixel.customer_id || "");
-			var profileId = String(pixel.profile_id || "");
-			if (!PIXEL_ID.test(customerId) || !PIXEL_ID.test(profileId)) return;
-			var h = window.location.hostname;
-			if (h === "localhost" || h === "127.0.0.1" || /\.vercel\.app$/.test(h)) return;
-			if (window.maverick || document.getElementById("__maverick__")) return;
-			var c = {
-				customerId: customerId,
-				profileId: profileId,
-				cdn: "cdn.maverickintelligence.co",
-				api: "api.maverickintelligence.co",
-				app: "app.maverickintelligence.co",
-				vector: "true",
-			};
-			window.maverick = { config: c, initialized: false, q: [] };
-			window.maverick.identify = function () {
-				window.maverick.q.push(["identify", arguments]);
-			};
-			var s = document.createElement("script");
-			s.async = true;
-			s.id = "__maverick__";
-			s.src = "https://" + c.app + "/maverick-pro.min.js";
-			s.setAttribute("data-customer-id", c.customerId);
-			s.setAttribute("data-profile-id", c.profileId);
-			s.setAttribute("data-cdn", c.cdn);
-			s.setAttribute("data-api", c.api);
-			s.setAttribute("data-vector", c.vector);
-			var f = document.getElementsByTagName("script")[0];
-			if (f && f.parentNode) f.parentNode.insertBefore(s, f);
-			else (document.head || document.documentElement).appendChild(s);
 		} catch {
 			// never throw into the host page
 		}

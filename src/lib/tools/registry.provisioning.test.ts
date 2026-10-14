@@ -117,8 +117,12 @@ describe("get_proof_summary", () => {
 		expect(vendorProof).toHaveBeenCalledWith("acme");
 		expect(o).toMatchObject({
 			kind: "result",
-			result: { ok: true, body: { slug: "acme", tier: 3, tier_name: "third-party confirmed", attested_customers: 3, paying_companies: 3, companies_observed: 52, sessions_30d: 106 } },
+			result: { ok: true, body: { slug: "acme", tier: 3, tier_name: "third-party confirmed", companies_observed: 52, sessions_30d: 106 } },
 		});
+		// Payments are no longer read (2026-10-14): no paying count, under either name.
+		const body = o.kind === "result" && o.result.ok ? o.result.body : {};
+		expect(body).not.toHaveProperty("paying_companies");
+		expect(body).not.toHaveProperty("attested_customers");
 	});
 
 	it("404s a vendor with no proof", async () => {

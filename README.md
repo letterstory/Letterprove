@@ -587,8 +587,7 @@ GET /api/v1/config?k=lp_live_…
 {
   "cfg":     7,
   "signals": [],  // reserved for phase-2 named/feature events; empty in phase 1
-  "visitors": { "pixel": { "customer_id": "…", "profile_id": "…" } }
-                  // only when the vendor turned on visitor identification
+  "modules": { "proofs": true }  // whether attest.js collects sign-ins
 }
 ```
 
@@ -635,69 +634,18 @@ nothing here can throw into the host page, and transport prefers
 `navigator.sendBeacon`, falling back to a `keepalive` `fetch` where it's
 unavailable.
 
-### Agent visits — **Decided (10-13)**
+### Agent visits and visitor identification — **Moved out (10-14)**
 
-A second, separate question the same install answers: **which AI agents and
-crawlers read the vendor's own site.** It is private analytics for the vendor
-and never evidence — nothing in `vendor_agent_visits` is read by the
-attestation, the tiers, or any public route. Code: `src/lib/agents/visits.ts`,
-`POST /api/v1/agent-visit`, tool `get_agent_visits`.
-
-Two ways in, because most agents never run JavaScript:
-
-| Mode | Who sends it | What it sees |
-|---|---|---|
-| **client** | The Visitors script (`visit.js`; on the legacy path, `attest.js`), automatically, on any page where `navigator.webdriver` is set or the user-agent names an agent. Sends only `{k, path, client: true, webdriver}`; the server reads the user-agent, address and `Signature-Agent` from the request's own headers and the host from `Origin`. | Agents that render pages in a real browser (ChatGPT's agent, Comet, headless browsers). |
-| **server** | An optional few lines in the vendor's server (`get_install_snippet` → `server_snippet`: a Next.js middleware and a generic Node version), forwarding to `https://lettervisit.com/api/v1/agent-visit` `{k, ua, ip, path, host, signature_agent}` fire-and-forget with `keepalive`. | Everything that fetches HTML and leaves: ChatGPT/Claude/Perplexity fetchers, GPTBot, ClaudeBot, Googlebot, Bingbot. |
-
-Rules: browsers and unrecognisable clients are dropped before any database
-read; the host must be the vendor's verified domain or an accepted host
-(`vendor_hosts`); an unverified vendor collects nothing — the same door as
-`/v1/observe`. Each visit is folded into one row per vendor, day, agent, kind,
-verified flag and path by `record_agent_visit()`. Paths lose their query
-string and fragment and id-like segments become `:id`. **No address and no raw
-user-agent are stored.**
-
-`verified` means the request came from an address the claimed operator
-publishes for its agents (`src/lib/access/verify-agent.ts`, the same check
-agentic-read billing uses, with Google's and Bing's crawler lists added). In
-server mode that address is the one the vendor's server reported, so it is
-only as honest as that server; and the publishable key is not a secret, so
-anyone can post here. Both are acceptable for analytics a vendor reads about
-itself, and both are why none of it is ever evidence. ChatGPT's agent browses
-under an ordinary Chrome user-agent and is recognised by `Signature-Agent:
-"https://chatgpt.com"` (stored as claimed; the signature itself is not
-checked).
-
-### Two scripts: Visitors and Letterprove — **Decided (10-14)**
-
-Two tags, one per product, sharing one key and one config:
-
-| Tag | File | Does |
-|---|---|---|
-| `<script src="https://lettervisit.com/v.js" data-key="KEY">` | `public/visit.js` | Agent visits (client mode above) and the visitor pixel. No identify, no sign-ins. |
-| `<script src="{this app}/attest.js" data-key="KEY">` | `public/attest.js` | Sign-ins for the proof (`identify`/`signup`/`login`). |
-
-lettervisit.com is this app under the Visitors name: its `/v.js`,
-`/api/v1/config` and `/api/v1/agent-visit` are rewrites to `/visit.js` and the
-same routes here (landing repo, `lettervisit` branch). The address is the one
-exception to "the snippet names the origin serving the page" and is written
-down once, `VISITORS_ORIGIN` in `src/lib/vendors/install.ts` (env-overridable).
-Proxied requests keep `Origin` and `User-Agent`; the visitor's address is the
-first `x-forwarded-for` hop (`clientIp`).
-
-**Dedupe flag.** `visit.js` sets `window.__lettervisit = true` before anything
-else. `attest.js` checks it after its config round trip and, when set, sends no
-agent beacon and loads no pixel. Whichever script beacons first also sets
-`window.__letterAgentSent`, so load order cannot double a visit. Without the
-Visitors tag, `attest.js` keeps doing both (the **legacy** path: letter.dev,
-app.letterstory.com and every install before the split).
-
-The config takes `s=visit|attest` (no `s` = an older `attest.js`) and stamps
-`vendors.visitors_script_seen_at` / `proofs_script_seen_at` the first time
-each is seen; `config_pings` still means "either script". `get_script` returns
-`visitors_snippet` and `proofs_snippet` (`snippet` stays as a legacy alias of
-the latter) and both timestamps under `status`.
+Letterprove is attestation only. `attest.js` collects sign-ins for the proof
+and nothing else: no agent-visit beacon, no visitor-identification pixel.
+Counting AI agents on a vendor's site and identifying its visitors are the
+Visitors product (lettervisit.com/v.js and its server snippet), run by the
+Letterstory app on its own key. `POST /api/v1/agent-visit` here answers 204 and
+records nothing, for old cached copies that still post; `/v1/config` answers
+`modules: { proofs }` only. The tables and columns these used
+(`vendor_agent_visits`, `module_agent_visitors`, `server_seen_at`,
+`visitors_script_seen_at`, `visitor_identification_*`) are no longer read or
+written and are dropped in a later migration. See [decision 43](#decision-log).
 
 ### Reliability
 
@@ -708,43 +656,6 @@ collector, **the script's response carries a diagnostic header**
 be answerable with one `curl`, not an afternoon. Configuration bugs across a
 distributed install look exactly like broken code; this is what makes them
 visible.
-
-### Visitor identification — **Decided (10-13)**
-
-A vendor can have the people visiting its own site identified, through the
-same `attest.js` tag. It is vendor-private analytics, a different data class
-from everything above, and it is kept apart from the evidence on purpose:
-
-- **Opt-in, per vendor.** `set_visitor_identification { enabled }`. It needs a
-  DNS-verified domain. Turning it on registers the verified domain and each
-  accepted host as a tracked domain with our third-party identification provider, under our partner
-  account (`clientRef = letterprove:{vendor id}`) and records the account's
-  pixel ids. From then on `/v1/config` carries
-  `visitors: { pixel: { customer_id, profile_id } }`, and `attest.js` loads the
-  provider's pixel exactly as Letter's own sites do. Off, the config has no
-  `visitors` field and the script is unchanged.
-- **Nothing stored.** `get_visitors { limit, days }` pulls people from
-  the provider live (cached five minutes, since the account's 1,000 requests an
-  hour are shared with Letterstory) and returns them with a per-company
-  rollup. Letterprove writes none of it to its database.
-- **Never evidence, never public.** A company visiting a site is not a
-  customer. Nothing here is signed, counted in an attestation, or shown on a
-  proof page.
-- **Tenant isolation.** The partner account sees every tracked site's people.
-  A record reaches a vendor only when it was seen on that vendor's verified
-  domain or an accepted host, or carries that vendor's `clientRef`, and only
-  while the domain is still verified (`attributeVisitors` in
-  `src/lib/vendors/visitors.ts`).
-- **Turning it off** deactivates only the domains this feature registered. A
-  domain the partner account already tracked (one of our own sites) is never
-  deactivated by a vendor.
-
-Env: `MAVERICK_API_KEY` (data reads), `MAVERICK_PARTNER_API_KEY` (tracked
-domain registration), optional `MAVERICK_PIXEL_PROFILE_ID` when the provider's
-registration answer carries no profile id. Without the partner key the toggle
-is stored and reported `pending_registration`.
-
----
 
 ## Publication
 
@@ -1228,6 +1139,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 40 | **Two scripts: Visitors (`lettervisit.com/v.js`) for AI agents and people, Letterprove (`attest.js`) for attestation.** One key and one config; `window.__lettervisit` stops `attest.js` counting what the Visitors tag already counts; `attest.js` alone keeps its old behaviour. Server snippets forward to lettervisit.com | ✅ **Decided (10-14)** — see [Two scripts](#two-scripts-visitors-and-letterprove--decided-10-14) |
 | 41 | **DNS is optional; a proof states one of three domain proofs.** `domain_proof` is `dns`, `site` (attest.js with the vendor's key found on a page of the domain, `verify_site`, auto-tried from `/v1/config`) or `none`; tier caps at 3, 1 and 0 respectively; `domain_verified` is true only for `dns`. Without DNS the collector accepts exact hosts only, the Stripe binding and logo wall don't count, and a DNS proof by another vendor takes unproven claimants private (`domain_claimed`). Every public surface labels the state | ✅ **Decided (10-14)**, Matthew + Casey — see [Domain proof](#domain-proof-three-states--decided-10-14) |
 | 42 | **Stripe confirms identity, never payments.** Stripe is read only to confirm the vendor is a real, verified business at its domain. A restricted key needs only Accounts read; the sync re-reads the account hourly (`charges_enabled`, business name, country, website, published domains) and reads no invoices, subscriptions or products. The attestation carries `stripe_business` (`verified`, `name`, `country`, `website`, `website_matches_domain`, `binding`). Tier 3 = tier 1 on a DNS-proven domain + `stripe_business.verified` + website on the domain or staff approval. Retired: `paying`, `paying_since`, `payment_scope`, the `paying_count` and `payment_details` display settings, logo `status: paying`, `list_stripe_products`, `set_stripe_scope` (`sync_stripe_payments` remains as an alias of `refresh_stripe_business`). Payment tables stop being written or read and are dropped in a later migration. Reason: paying figures were floors read as totals and mixed products; Casey chose identity over any payment line, including a yes/no one. Also: growth marks `partial` months, absent sections carry an `omitted` reason, retention is described as 90–60 days ago | ✅ **Decided (10-14)**, Casey |
+| 43 | **Letterprove is attestation only; Visitors is a separate product.** `attest.js` loses the agent-visit beacon, the visitor-identification pixel and the `window.__lettervisit` coordination; `public/visit.js`, `src/lib/vendors/visitors.ts`, the identification client and `src/lib/agents/visits.ts` are deleted; tools `get_agent_visits`, `set_visitor_identification` and `get_visitors` are removed; `get_script` and `set_script_modules` carry only `proofs`; `/v1/config` stops returning visitor fields; `/api/v1/agent-visit` is a no-op 204. Supersedes 32, 33, 37 (modules) and 40. Columns stay until a later drop migration | ✅ **Decided (10-14)**, Casey |
 
 ### Open
 

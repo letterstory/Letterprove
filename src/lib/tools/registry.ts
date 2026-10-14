@@ -27,8 +27,7 @@ import { vendorRoster } from "@/lib/staff/vendors";
 import { tierReport } from "@/lib/tiers/report";
 import { vendorSlugs, vendorSnapshots, vendorProof } from "@/lib/attest/proofs";
 import { TIER_LADDER } from "@/lib/attest/tiers";
-import { installRecipes, installSnippet, serverSnippets, VISITORS_ORIGIN, visitorsSnippet } from "@/lib/vendors/install";
-import { agentVisitsReport } from "@/lib/agents/visits";
+import { installRecipes, installSnippet } from "@/lib/vendors/install";
 import { badgeHtml, proofPageUrl } from "@/lib/vendors/badge";
 import { acceptedHosts, MAX_HOSTS, checkHostVerification, classifyHost, forgetAcceptedHosts, hostStatus, isOriginAccepted, type HostRow } from "@/lib/vendors/hosts";
 import {
@@ -70,7 +69,6 @@ import { agentKit } from "@/lib/vendors/agent-kit";
 import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
-import { fetchVendorVisitors, setVisitorIdentification, visitorIdentificationStatus } from "@/lib/vendors/visitors";
 import { scriptModules, scriptStatus, setPlainModules } from "@/lib/vendors/script";
 import { verifySite } from "@/lib/vendors/site-proof";
 import { rivalHoldsDomain, unpublishRivals } from "@/lib/vendors/domain-claim";
@@ -289,12 +287,7 @@ async function scriptBody(vendorId: string, origin: string) {
 	if (!db) return null;
 	const { data: vendor } = await db.from("vendors").select("key, slug, name, domain").eq("id", vendorId).maybeSingle();
 	if (!vendor) return null;
-	const [modules, status, visitors, customDomain] = await Promise.all([
-		scriptModules(vendorId),
-		scriptStatus(vendorId),
-		visitorIdentificationStatus(vendorId),
-		liveCustomDomain(vendor.slug),
-	]);
+	const [modules, status, customDomain] = await Promise.all([scriptModules(vendorId), scriptStatus(vendorId), liveCustomDomain(vendor.slug)]);
 	if (!status) return null;
 	const proofUrl = customDomain ? `https://${customDomain}/` : `${VERIFY_ORIGIN}/proofs/${encodeURIComponent(vendor.slug)}`;
 	return {
@@ -302,8 +295,6 @@ async function scriptBody(vendorId: string, origin: string) {
 		// snippet is the legacy alias of proofs_snippet (installs before the split).
 		snippet: installSnippet(origin, vendor.key),
 		proofs_snippet: installSnippet(origin, vendor.key),
-		visitors_snippet: visitorsSnippet(vendor.key),
-		server_snippet: serverSnippets(VISITORS_ORIGIN, vendor.key),
 		recipes: installRecipes(origin, vendor.key),
 		agent_kit: agentKit({
 			vendorName: vendor.name,
@@ -314,7 +305,6 @@ async function scriptBody(vendorId: string, origin: string) {
 		}),
 		modules,
 		status,
-		human_visitors_tracking: visitors?.tracking ?? ("off" as const),
 	};
 }
 
@@ -404,7 +394,7 @@ export const TOOLS: BoundTool[] = [
 		// the slug so the caller builds the public /proofs, /attest URLs against
 		// Letterprove's own origin (they must not point at the caller's host).
 		name: "get_proof_summary",
-		description: "The caller's vendor attestation, read back: tier, companies observed, paying companies, sessions, and the slug for public URLs. Works while private.",
+		description: "The caller's vendor attestation, read back: tier, companies observed, sessions, and the slug for public URLs. Works while private.",
 		capability: "vendor:read",
 		inputSchema: S.getProofSummaryInput,
 		outputSchema: S.getProofSummaryOutput,
@@ -421,17 +411,12 @@ export const TOOLS: BoundTool[] = [
 			if (!proof) return { ok: false, status: 404, body: { error: "not_found" } };
 
 			const { summary } = proof;
-			// The paying count is private since decision 35: computed live for the
-			// vendor, never read from (or written to) the public attestation.
-			const paying = (await tierReport(vendor.slug))?.paying ?? 0;
 			return {
 				ok: true,
 				body: {
 					slug: vendor.slug,
 					tier: summary.tier,
 					tier_name: TIER_LADDER[summary.tier].name,
-					attested_customers: paying,
-					paying_companies: paying,
 					companies_observed: summary.companies_observed,
 					sessions_30d: summary.sessions_30d,
 					last_attested: summary.last_attested || null,
@@ -614,7 +599,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "list_observed",
 		description:
-			"The company domains behind your attestation's counts, for your eyes only: each observed domain and how it counts (observed, paying, excluded). Args: none. Read-only. Nothing here is published by name.",
+			"The company domains behind your attestation's counts, for your eyes only: each observed domain and how it counts (observed or excluded). Args: none. Read-only. Nothing here is published by name.",
 		capability: "vendor:read",
 		inputSchema: S.listObservedInput,
 		outputSchema: S.listObservedOutput,
@@ -845,9 +830,6 @@ export const TOOLS: BoundTool[] = [
 					snippet: installSnippet(context.origin, vendor.key),
 					origin: context.origin,
 					publishable_key: vendor.key,
-					// Optional second line for the vendor's server. The script tag
-					// only sees agents that render pages; most never do.
-					server_snippet: serverSnippets(VISITORS_ORIGIN, vendor.key),
 					recipes: installRecipes(context.origin, vendor.key),
 					// So an AI assistant reading the vendor's own site finds the proof.
 					agent_kit: agentKit({
@@ -872,15 +854,14 @@ export const TOOLS: BoundTool[] = [
 	/*
 	 * ---------------------------------------------------------------- scripts
 	 *
-	 * One script per vendor with three modules (src/lib/vendors/script.ts).
-	 * get_script is everything the app's Scripts page needs in one read: the
-	 * tag, the server snippet, recipes, the agent kit, which modules are on,
-	 * and what has been seen so far.
+	 * The Letterprove script, attestation only (src/lib/vendors/script.ts):
+	 * the tag, recipes, the agent kit, whether sign-ins are collected, and what
+	 * has been seen so far.
 	 */
 	defineTool({
 		name: "get_script",
 		description:
-			"Your one Letterprove script: the tag, the optional server snippet, install recipes, the agent kit, which modules are on (proofs, agent_visitors, human_visitors), and what has been seen so far (script loaded, server snippet forwarding, first agent visit, first sign-in). Args: none.",
+			"Your Letterprove script (attest.js, attestation only): the tag, install recipes, the agent kit, whether sign-ins are collected (modules.proofs), and what has been seen so far (script loaded, first sign-in). Agent visits and visitor identification are the separate Visitors product. Args: none.",
 		capability: "vendor:read",
 		inputSchema: S.getScriptInput,
 		outputSchema: S.getScriptOutput,
@@ -896,7 +877,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_script_modules",
 		description:
-			"Turn parts of your script on or off. Args: any of proofs, agent_visitors, human_visitors (booleans). human_visitors needs a DNS-verified domain. The script picks up a change within a few minutes; collection stops at once.",
+			"Turn sign-in collection on or off. Args: proofs (boolean). The script picks up a change within a few minutes; collection stops at once.",
 		capability: "vendor:write",
 		inputSchema: S.setScriptModulesInput,
 		outputSchema: S.setScriptModulesOutput,
@@ -905,19 +886,8 @@ export const TOOLS: BoundTool[] = [
 			if (typeof vendorId !== "string") return vendorId;
 			if (!context.origin) return { ok: false, status: 400, body: { error: "origin_unavailable" } };
 			const parsed = S.setScriptModulesInput.safeParse(args ?? {});
-			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_modules", detail: "proofs, agent_visitors and human_visitors must be true or false." } };
-			const { proofs, agent_visitors, human_visitors } = parsed.data;
-			if (typeof human_visitors === "boolean") {
-				const current = await visitorIdentificationStatus(vendorId);
-				if (!current || current.enabled !== human_visitors) {
-					const result = await setVisitorIdentification(vendorId, human_visitors);
-					if (!result.ok) {
-						const status = result.error === "not_found" ? 404 : result.error === "domain_not_verified" ? 409 : 503;
-						return { ok: false, status, body: { error: result.error, detail: result.detail } };
-					}
-				}
-			}
-			if (!(await setPlainModules(vendorId, { proofs, agent_visitors }))) {
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_modules", detail: "proofs must be true or false." } };
+			if (!(await setPlainModules(vendorId, { proofs: parsed.data.proofs }))) {
 				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
 			}
 			const body = await scriptBody(vendorId, context.origin);
@@ -934,7 +904,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_proof_display",
 		description:
-			"Which optional sections show on your public proof (sessions, reported_history, logos, payment_details, observed_since, hosts, growth, retention), whether it states a paying count (paying_count: hidden / signed_in / all), whether logo names are shown (logo_names), and which items are always shown. Args: none.",
+			"Which optional sections show on your public proof (sessions, reported_history, logos, stripe_business, observed_since, hosts, growth, retention), whether logo names are shown (logo_names), and which items are always shown. Args: none.",
 		capability: "vendor:read",
 		inputSchema: S.getProofDisplayInput,
 		outputSchema: S.getProofDisplayOutput,
@@ -947,7 +917,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_proof_display",
 		description:
-			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, payment_details, observed_since, hosts, growth, retention (true shows, false hides), paying_count (hidden, signed_in or all) and logo_names (true names verified logo companies, false shows counts only). The domain, tier, companies observed and verify link are always shown. Hidden sections are named on the proof as hidden by you. Takes effect at the next hourly snapshot.",
+			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, stripe_business, observed_since, hosts, growth, retention (true shows, false hides) and logo_names (true names verified logo companies, false shows counts only). The domain, tier, companies observed and verify link are always shown. Hidden sections are named on the proof as hidden by you. Takes effect at the next hourly snapshot.",
 		capability: "vendor:write",
 		inputSchema: S.setProofDisplayInput,
 		outputSchema: S.setProofDisplayOutput,
@@ -964,7 +934,7 @@ export const TOOLS: BoundTool[] = [
 				return {
 					ok: false,
 					status: 400,
-					body: { error: "invalid_sections", detail: "sections must map section names to true or false; paying_count is hidden, signed_in or all." },
+					body: { error: "invalid_sections", detail: "sections must map section names to true or false." },
 				};
 			}
 			const saved = await setDisplay(vendorId, parsed.data.sections);
@@ -1863,30 +1833,6 @@ export const TOOLS: BoundTool[] = [
 			};
 		},
 	}),
-	defineTool({
-		// Private analytics, never evidence: see src/lib/agents/visits.ts. Nothing
-		// here reaches the attestation or any public route.
-		name: "get_agent_visits",
-		description:
-			"AI agents and crawlers that visited the caller's own site: totals per agent (verified from the operator's published addresses vs. claimed by user-agent only), the most-read paths, and a daily series. Args: days (1–90, default 30). Agents that never run JavaScript (ChatGPT, Claude, Perplexity fetches, search crawlers) are counted only once the server snippet from get_install_snippet is installed; the script tag alone sees only automated browsers. Private to the vendor; never published.",
-		capability: "vendor:read",
-		inputSchema: S.getAgentVisitsInput,
-		outputSchema: S.getAgentVisitsOutput,
-		handler: async (args, principal) => {
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-			const parsed = S.getAgentVisitsInput.safeParse(args ?? {});
-			if (!parsed.success) {
-				return { ok: false, status: 400, body: { error: "invalid_days", detail: "days must be a whole number from 1 to 90." } };
-			}
-			try {
-				return { ok: true, body: await agentVisitsReport(vendorId, parsed.data.days ?? 30) };
-			} catch (e) {
-				console.error("[letterprove:agent-visits] report failed", e instanceof Error ? e.message : String(e));
-				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			}
-		},
-	}),
 	/*
 	 * ---------------------------------------------------------------- visitors
 	 *
@@ -1894,47 +1840,6 @@ export const TOOLS: BoundTool[] = [
 	 * identified by Maverick through the pixel attest.js loads. Pulled live and
 	 * never stored or signed — see src/lib/vendors/visitors.ts.
 	 */
-	defineTool({
-		name: "set_visitor_identification",
-		description:
-			"Turn visitor identification on or off for the caller's vendor. On, attest.js also loads a visitor identification pixel on your site, and get_visitors shows the people and companies it identified. Args: enabled (boolean). Needs a DNS-verified domain. Private: none of it is published or counted in your proof, and Letterprove stores no identified person.",
-		capability: "vendor:write",
-		inputSchema: S.setVisitorIdentificationInput,
-		outputSchema: S.setVisitorIdentificationOutput,
-		handler: async (args, principal) => {
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-			const enabled = asRecord(args).enabled;
-			if (typeof enabled !== "boolean") {
-				return { ok: false, status: 400, body: { error: "invalid_enabled", detail: "enabled must be true or false." } };
-			}
-			const result = await setVisitorIdentification(vendorId, enabled);
-			if (!result.ok) {
-				const status = result.error === "not_found" ? 404 : result.error === "domain_not_verified" ? 409 : 503;
-				return { ok: false, status, body: { error: result.error, detail: result.detail } };
-			}
-			return { ok: true, body: result.status };
-		},
-	}),
-	defineTool({
-		name: "get_visitors",
-		description:
-			"People and companies identified visiting the caller's vendor's own site (verified domain and accepted hosts), newest first, with a per-company rollup. Args: limit (default 50, max 200), days (default 30, max 90). Pulled live from the identification provider each time (cached five minutes); Letterprove stores none of it and never publishes it. Also reports whether identification is on.",
-		capability: "vendor:read",
-		inputSchema: S.getVisitorsInput,
-		outputSchema: S.getVisitorsOutput,
-		handler: async (args, principal) => {
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-			const parsed = S.getVisitorsInput.safeParse(args ?? {});
-			if (!parsed.success) {
-				return { ok: false, status: 400, body: { error: "invalid_args", detail: "limit is 1–200 and days is 1–90, both whole numbers." } };
-			}
-			const result = await fetchVendorVisitors(vendorId, parsed.data);
-			if (!result) return { ok: false, status: 404, body: { error: "not_found" } };
-			return { ok: true, body: result };
-		},
-	}),
 	/*
 	 * --------------------------------------------------------------- logo wall
 	 *
@@ -1945,7 +1850,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_logo_wall",
 		description:
-			"Verify the logos you already show publicly. Args: page_url (the https page on your own verified domain that shows them) and companies ([{name, domain}], up to 200). Letterprove fetches the page, keeps only companies actually on it, and names on your proof only those it has observed signing in (or paying). Everyone else is a count. Re-checked daily. Published only once your domain is verified by DNS (site proof is not enough).",
+			"Verify the logos you already show publicly. Args: page_url (the https page on your own verified domain that shows them) and companies ([{name, domain}], up to 200). Letterprove fetches the page, keeps only companies actually on it, and names on your proof only those it has observed signing in. Everyone else is a count. Re-checked daily. Published only once your domain is verified by DNS (site proof is not enough).",
 		capability: "vendor:write",
 		inputSchema: S.setLogoWallInput,
 		outputSchema: S.setLogoWallOutput,
@@ -1986,7 +1891,7 @@ export const TOOLS: BoundTool[] = [
 	}),
 	defineTool({
 		name: "get_logo_wall",
-		description: "Your logo wall: every company you listed, whether it was found on your page, its status (paying / active / not observed), and whether the block is on your proof. No args.",
+		description: "Your logo wall: every company you listed, whether it was found on your page, its status (active / not observed), and whether the block is on your proof. No args.",
 		capability: "vendor:read",
 		inputSchema: S.getLogoWallInput,
 		outputSchema: S.getLogoWallOutput,
