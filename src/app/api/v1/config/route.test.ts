@@ -13,7 +13,6 @@ import { GET } from "./route";
 
 vi.mock("@/lib/fixtures/vendors", () => ({ findVendorByKey: vi.fn() }));
 vi.mock("@/lib/telemetry/ping", () => ({ recordConfigPing: vi.fn() }));
-vi.mock("@/lib/vendors/visitors", () => ({ visitorPixel: vi.fn() }));
 vi.mock("@/lib/vendors/script", () => ({
 	collectorModules: vi.fn(),
 	recordScriptSeen: vi.fn(),
@@ -24,7 +23,6 @@ vi.mock("@/lib/oauth/ratelimit", () => ({ oauthRateLimit: vi.fn(), oauthClientIp
 import { findVendorByKey } from "@/lib/fixtures/vendors";
 import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { recordConfigPing } from "@/lib/telemetry/ping";
-import { visitorPixel } from "@/lib/vendors/visitors";
 import { collectorModules, recordScriptSeen } from "@/lib/vendors/script";
 
 const VENDOR = {
@@ -47,8 +45,7 @@ beforeEach(() => {
 	vi.mocked(findVendorByKey).mockResolvedValue(VENDOR as never);
 	vi.mocked(recordConfigPing).mockResolvedValue(undefined);
 	vi.mocked(oauthRateLimit).mockResolvedValue(true);
-	vi.mocked(visitorPixel).mockResolvedValue(null);
-	vi.mocked(collectorModules).mockResolvedValue({ proofs: true, agent_visitors: true });
+	vi.mocked(collectorModules).mockResolvedValue({ proofs: true });
 });
 
 describe("GET /v1/config", () => {
@@ -64,25 +61,17 @@ describe("GET /v1/config", () => {
 		expect(recordConfigPing).toHaveBeenCalledTimes(3);
 	});
 
-	it("gives both scripts the same answer", async () => {
-		vi.mocked(visitorPixel).mockResolvedValue({ customer_id: "1091", profile_id: "abcDEF123" });
+	it("answers an old visit.js copy the same as attest.js", async () => {
 		const visit = await (await get("?k=lp_live_vantage_9f2c&s=visit")).json();
 		const attest = await (await get("?k=lp_live_vantage_9f2c&s=attest")).json();
 		expect(visit).toEqual(attest);
 	});
 
-	it("tells attest.js which modules run", async () => {
-		vi.mocked(collectorModules).mockResolvedValue({ proofs: false, agent_visitors: true });
-		vi.mocked(visitorPixel).mockResolvedValue({ customer_id: "1091", profile_id: "abcDEF123" });
+	it("tells attest.js whether to collect sign-ins, and nothing about visitors", async () => {
+		vi.mocked(collectorModules).mockResolvedValue({ proofs: false });
 		const body = await (await get("?k=lp_live_vantage_9f2c")).json();
-		expect(body.modules).toEqual({ proofs: false, agent_visitors: true, human_visitors: true });
-	});
-
-	it("hands the scripts the visitor pixel only when visitor identification is on", async () => {
-		vi.mocked(visitorPixel).mockResolvedValue({ customer_id: "1091", profile_id: "abcDEF123" });
-		const body = await (await get("?k=lp_live_vantage_9f2c")).json();
-		expect(body.visitors).toEqual({ pixel: { customer_id: "1091", profile_id: "abcDEF123" } });
-		expect(visitorPixel).toHaveBeenCalledWith(VENDOR.id);
+		expect(body.modules).toEqual({ proofs: false });
+		expect(body).not.toHaveProperty("visitors");
 	});
 
 	it("answers a known key with the current config version", async () => {
@@ -92,7 +81,7 @@ describe("GET /v1/config", () => {
 		expect(await res.json()).toEqual({
 			cfg: CURRENT_CONFIG_VERSION,
 			signals: [],
-			modules: { proofs: true, agent_visitors: true, human_visitors: false },
+			modules: { proofs: true },
 		});
 		expect(findVendorByKey).toHaveBeenCalledWith("lp_live_vantage_9f2c");
 	});

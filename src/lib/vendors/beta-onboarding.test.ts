@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { isOriginAccepted } from "./hosts";
-import { installRecipes, serverSnippets } from "./install";
+import { installRecipes } from "./install";
 import { classifyRejected } from "@/lib/telemetry/rejected-origins";
 import { noticeFor, renderNotice, type NoticeKind } from "@/lib/notify/vendor-email";
 
@@ -47,11 +47,7 @@ describe("install recipes", () => {
 		expect(recipes.stub).toContain('src="https://app.letterprove.com/attest.js" data-key="lp_live_acme"');
 		expect(recipes.stub).toContain("q:[]");
 	});
-	it("ships a Next 16 proxy that never drops the forward", () => {
-		const { nextjs_middleware } = serverSnippets("https://app.letterprove.com", "lp_live_acme");
-		expect(nextjs_middleware).toContain("export function proxy(request: NextRequest, event: NextFetchEvent)");
-		expect(nextjs_middleware).toContain("event.waitUntil(");
-	});
+
 });
 
 describe("incident emails", () => {

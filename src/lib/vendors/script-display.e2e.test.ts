@@ -55,45 +55,32 @@ beforeEach(async () => {
 });
 
 describe("scripts", () => {
-	it("returns the script with proofs and agent visitors on by default, human visitors off", async () => {
+	it("returns the attestation script with sign-ins on by default", async () => {
 		const res = await tool("get_script", {}, VERIFIED);
 		expect(res.ok).toBe(true);
 		const body = res.body as Record<string, unknown>;
 		expect(body.key).toBe("lp_live_ver");
 		expect(String(body.snippet)).toContain("data-key=\"lp_live_ver\"");
-		expect(body.modules).toEqual({ proofs: true, agent_visitors: true, human_visitors: false });
-		expect(body.human_visitors_tracking).toBe("off");
-		expect(body.status).toMatchObject({ script_seen_at: null, server_seen_at: null, first_signin_at: null, domain_verified: true });
-	});
-
-	it("returns two tags, Visitors and Letterprove, with snippet kept as the Letterprove one", async () => {
-		const body = (await tool("get_script", {}, VERIFIED)).body as Record<string, unknown>;
-		expect(body.visitors_snippet).toBe('<script src="https://lettervisit.com/v.js" data-key="lp_live_ver"></script>');
-		expect(String(body.proofs_snippet)).toMatch(/\/attest\.js" data-key="lp_live_ver"><\/script>$/);
 		expect(body.snippet).toBe(body.proofs_snippet);
-		expect((body.server_snippet as { endpoint: string }).endpoint).toBe("https://lettervisit.com/api/v1/agent-visit");
+		expect(body.modules).toEqual({ proofs: true });
+		expect(body.status).toMatchObject({ script_seen_at: null, proofs_script_seen_at: null, first_signin_at: null, domain_verified: true });
+		for (const k of ["visitors_snippet", "server_snippet", "human_visitors_tracking"]) expect(body).not.toHaveProperty(k);
 	});
 
-	it("records the first load of each script separately", async () => {
+	it("records attest.js's first load, and ignores an old visit.js", async () => {
 		const { recordScriptSeen } = await import("@/lib/vendors/script");
 		const status = async () => ((await tool("get_script", {}, VERIFIED)).body as { status: Record<string, unknown> }).status;
-		expect(await status()).toMatchObject({ visitors_script_seen_at: null, proofs_script_seen_at: null });
 		await recordScriptSeen(VERIFIED, "visit");
-		const afterVisit = await status();
-		expect(afterVisit.visitors_script_seen_at).toEqual(expect.any(String));
-		expect(afterVisit.proofs_script_seen_at).toBeNull();
+		expect((await status()).proofs_script_seen_at).toBeNull();
 		await recordScriptSeen(VERIFIED, "attest");
 		expect((await status()).proofs_script_seen_at).toEqual(expect.any(String));
 	});
 
-	it("turns modules on and off, and refuses human visitors before DNS proof", async () => {
-		const off = await tool("set_script_modules", { proofs: false, agent_visitors: false }, VERIFIED);
-		expect((off.body as { modules: unknown }).modules).toEqual({ proofs: false, agent_visitors: false, human_visitors: false });
-		const back = await tool("set_script_modules", { proofs: true, agent_visitors: true }, VERIFIED);
-		expect((back.body as { modules: unknown }).modules).toMatchObject({ proofs: true, agent_visitors: true });
-
-		const refused = await tool("set_script_modules", { human_visitors: true }, UNVERIFIED);
-		expect(refused).toMatchObject({ ok: false, status: 409, body: { error: "domain_not_verified" } });
+	it("turns sign-in collection off and on", async () => {
+		const off = await tool("set_script_modules", { proofs: false }, VERIFIED);
+		expect((off.body as { modules: unknown }).modules).toEqual({ proofs: false });
+		const back = await tool("set_script_modules", { proofs: true }, VERIFIED);
+		expect((back.body as { modules: unknown }).modules).toEqual({ proofs: true });
 	});
 
 	it("stops counting sign-ins at once when the proofs module is off", async () => {

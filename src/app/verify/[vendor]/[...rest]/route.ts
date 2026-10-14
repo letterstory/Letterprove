@@ -212,7 +212,7 @@ function summary(
     tier === 3
       ? business
         ? "Companies were observed signing in on the vendor's DNS-proven domain, and Stripe has verified the business behind the vendor's own Stripe account at that domain."
-        : "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them were corroborated by settled invoices in its own Stripe account (signed before 2026-10-14, when payments were still read)."
+        : "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them were corroborated by settled invoices in its own Stripe account (a snapshot from before payments stopped being read on 2026-10-14)."
       : tier === 1
         ? domainProof === "site"
           ? "Companies were observed signing in on the vendor's domain, which is site verified (its script and key are on a page there), not proven by DNS."
@@ -224,7 +224,7 @@ function summary(
           : "";
   const tile = (k: string, v: string, sub = "") =>
     `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
-  // Legacy payment fields: only on documents signed before 2026-10-14.
+  // Legacy payment fields: only on documents signed before the 2026-10-14 change.
   const legacyPayments =
     "payment_scope" in f || "paying_since" in f || "paying" in f;
   const payingSince = fmtDay(f.paying_since);
@@ -285,7 +285,7 @@ function summary(
     const items = (logos.companies ?? [])
       .map(
         (c) =>
-          `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe (signed before 2026-10-14)" : "Signed in, last 30 days"}</span></li>`,
+          `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe (signed before the 2026-10-14 change)" : "Signed in, last 30 days"}</span></li>`,
       )
       .join("");
     html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>. Verified means Letterprove observed someone from that company signing in over the last 30 days.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
@@ -304,7 +304,7 @@ function summary(
           tier === 3 ? "Corroborated" : "Not corroborated",
           payingSince
             ? `first verified payment ${payingSince}`
-            : "signed before 2026-10-14",
+            : "signed before the 2026-10-14 change",
         )
       : "") +
     (typeof f.sessions === "number" ? tile("Sessions", num(f.sessions)) : "") +

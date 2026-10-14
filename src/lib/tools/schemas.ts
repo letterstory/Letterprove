@@ -82,11 +82,6 @@ export const getProofSummaryOutput = z.object({
 	slug: z.string().describe("Used to build the public proof URL."),
 	tier: z.number().int(),
 	tier_name: z.string().describe("What the tier means, so a caller need not carry its own ladder."),
-	attested_customers: z
-		.number()
-		.int()
-		.describe("Same as paying_companies; kept for older callers. Companies whose observed use is corroborated by a settled invoice in your own Stripe account."),
-	paying_companies: z.number().int().describe("Observed companies paying through your own Stripe account. Private to you: not on your public proof. A count; never published by name."),
 	companies_observed: z.number().int(),
 	sessions_30d: z.number().int(),
 	last_attested: z.string().nullable(),
@@ -175,13 +170,6 @@ export const getInstallSnippetOutput = z.object({
 			live: z.boolean().describe("True once the vendor is published. Before that the proof page is a 404, so do not show the badge."),
 		})
 		.describe("The footer badge a vendor adds to their site once published."),
-	server_snippet: z
-		.object({
-			endpoint: z.string(),
-			nextjs_middleware: z.string().describe("A Next.js proxy.ts (middleware.ts before Next 16) that forwards agent and crawler requests without slowing the page."),
-			generic: z.string().describe("The same forward for any Node server."),
-		})
-		.describe("Optional. Counts AI agents and crawlers that never run JavaScript, which the script tag can't see."),
 	recipes: z
 		.object({
 			stub: z.string().describe("Script tag plus the one-line stub that keeps identify calls made before the script loads."),
@@ -323,7 +311,7 @@ const observedDomain = z.object({
 	customer: z.string().nullable(),
 	status: z
 		.string()
-		.describe("How it counts in your attestation: observed (in companies_observed), paying (also in paying_companies), not-attributable (excluded), no-observation (on your list, nothing observed)."),
+		.describe("How it counts in your attestation: observed (in companies_observed), not-attributable (excluded), no-observation (on your list, nothing observed)."),
 	detail: z.string().describe("Written to be read by a person deciding what to do next."),
 });
 
@@ -333,7 +321,7 @@ export const listObservedOutput = z.object({
 	attributable: z.number().int().describe("Of those, how many could ever name a company."),
 	awaiting: z.number().int().describe("Observed companies counted in your attestation without Stripe corroboration."),
 	published: z.number().int().describe("Observed companies counted in your attestation (companies_observed). Counts only; no domain is published."),
-	paying: z.number().int().describe("Of those, how many pay through your own Stripe account (paying_companies)."),
+	paying: z.number().int().describe("Retired 2026-10-14: always 0. Payments are no longer read; Stripe only confirms your business."),
 	domains: z.array(observedDomain),
 });
 
@@ -531,7 +519,7 @@ export const tierReportOutput = z.object({
 			attributable: z.number().int(),
 			unpublishedEvidence: z.number().int().describe("Observed companies without payment evidence."),
 			published: z.number().int().describe("Observed companies counted in the vendor attestation."),
-			paying: z.number().int().describe("Of those, how many pay through the vendor's own Stripe account."),
+			paying: z.number().int().describe("Retired 2026-10-14: always 0. Payments are no longer read."),
 			rows: z.array(tierRow),
 		}),
 	),
@@ -708,94 +696,6 @@ export const disconnectPosthogOutput = z.object({
 	disconnected: z.literal(true).describe("The key and all history read with it are gone."),
 });
 
-// ---------------------------------------------------------------- agent visits
-
-export const getAgentVisitsInput = z.object({
-	days: z.number().int().min(1).max(90).optional().describe("How many days back, today included. Default 30."),
-});
-const agentVisitKind = z.enum(["ai_agent", "search_crawler", "automated_browser"]);
-export const getAgentVisitsOutput = z.object({
-	days: z.number().int(),
-	since: z.string().describe("First day counted, YYYY-MM-DD (UTC)."),
-	total: z.number().int(),
-	verified: z.number().int().describe("Visits from an address the claimed operator publishes for its agents."),
-	agents: z.array(
-		z.object({
-			agent: z.string().describe("chatgpt, claude, perplexity, google, bing, … or automated_browser."),
-			kind: agentVisitKind,
-			total: z.number().int(),
-			verified: z.number().int(),
-			claimed: z
-				.number()
-				.int()
-				.describe("Visits whose user-agent claimed this agent but whose address could not be checked or did not match."),
-			last_at: z.string(),
-		}),
-	),
-	top_paths: z.array(z.object({ path: z.string(), total: z.number().int() })).describe("Up to 20, query strings removed."),
-	daily: z
-		.array(z.object({ day: z.string(), total: z.number().int(), verified: z.number().int() }))
-		.describe("Days with visits only, oldest first."),
-});
-
-// ------------------------------------------------------------- visitors
-
-const tracking = z
-	.enum(["off", "active", "pending_registration"])
-	.describe(
-		"off: not turned on. active: attest.js loads the visitor identification pixel and visitors are being identified. pending_registration: turned on, but the domain isn't registered for visitor identification yet, so nobody is identified.",
-	);
-export const visitorIdentificationStatus = z.object({
-	enabled: z.boolean().describe("Whether the vendor turned visitor identification on."),
-	tracking,
-	registered_domains: z.array(z.string()).describe("Hosts registered for visitor identification."),
-	message: z.string(),
-});
-export const setVisitorIdentificationInput = z.object({
-	enabled: z.boolean().describe("true to identify visitors to your own site through the attest.js tag; false to stop."),
-});
-export const setVisitorIdentificationOutput = visitorIdentificationStatus;
-export const getVisitorsInput = z.object({
-	limit: z.number().int().min(1).max(200).optional().describe("How many people to return, newest first. Default 50."),
-	days: z.number().int().min(1).max(90).optional().describe("How far back to look. Default 30."),
-});
-const visitorPerson = z.object({
-	person_id: z.string(),
-	name: z.string().nullable(),
-	title: z.string().nullable(),
-	company: z.string().nullable(),
-	company_domain: z.string().nullable(),
-	email: z.string().nullable().describe("Work address only."),
-	linkedin_url: z.string().nullable(),
-	location: z.string().nullable(),
-	seniority: z.string().nullable(),
-	job_function: z.string().nullable(),
-	visit_count: z.number(),
-	first_seen: z.string(),
-	last_seen: z.string(),
-	seen_on: z.string().nullable().describe("The host the person was seen on."),
-});
-const visitorCompany = z.object({
-	company: z.string().nullable(),
-	domain: z.string().nullable(),
-	people: z.number(),
-	visits: z.number(),
-	last_seen: z.string(),
-});
-export const getVisitorsOutput = z.object({
-	enabled: z.boolean(),
-	tracking,
-	configured: z.boolean().describe("Whether this deployment can read identified visitors at all."),
-	window_days: z.number(),
-	error: z
-		.object({ reason: z.enum(["forbidden", "failed"]), message: z.string() })
-		.nullable()
-		.describe("Why the live pull failed, when it did. Null on success."),
-	companies: z.array(visitorCompany).describe("One row per visiting company, most people first. Private: never published."),
-	visitors: z.array(visitorPerson).describe("Identified people, newest first. Pulled live from the identification provider; Letterprove stores none of it."),
-	total: z.number().describe("Identified people in the window before `limit` applied."),
-});
-
 /*
  * --------------------------------------------------------------- logo wall
  *
@@ -803,7 +703,7 @@ export const getVisitorsOutput = z.object({
  * company with its status. Only the attestation's `logos` block is public, and
  * it names only companies on the vendor's page AND observed.
  */
-const logoStatus = z.enum(["paying", "active", "not_observed"]);
+const logoStatus = z.enum(["active", "not_observed"]);
 const logoWall = z.object({
 	configured: z.literal(true),
 	page_url: z.string().describe("Your public logo wall, on your verified domain or an accepted host."),
@@ -811,14 +711,14 @@ const logoWall = z.object({
 	check_error: z.string().nullable().describe("Why the last check failed, when it did."),
 	total: z.number().int().describe("Companies you listed."),
 	on_page: z.number().int().describe("Of those, how many were found on the page."),
-	verified: z.number().int().describe("On the page and observed signing in (or paying). Only these are named on your proof."),
+	verified: z.number().int().describe("On the page and observed signing in over the last 30 days. Only these are named on your proof."),
 	published: z.boolean().describe("Whether the logos block is on your proof now: needs a check in the last two days and a verified domain."),
 	companies: z.array(
 		z.object({
 			name: z.string(),
 			domain: z.string(),
 			on_page: z.boolean(),
-			status: logoStatus.describe("paying: observed and a settled invoice in your bound Stripe account. active: observed signing in, last 30 days. not_observed: no sign-ins seen."),
+			status: logoStatus.describe("active: observed signing in, last 30 days. not_observed: no sign-ins seen."),
 		}),
 	),
 });
@@ -840,42 +740,28 @@ export const clearLogoWallOutput = z.object({ cleared: z.literal(true).describe(
 // ---------------------------------------------------------------- scripts
 
 const scriptModules = z.object({
-	proofs: z.boolean().describe("Sign-ins observed by the script: the evidence behind your proof."),
-	agent_visitors: z.boolean().describe("AI agents and crawlers reading your site, counted privately."),
-	human_visitors: z.boolean().describe("People and companies visiting your site, identified by visitor identification. Needs a verified domain."),
+	proofs: z.boolean().describe("Sign-ins observed by attest.js: the evidence behind your proof."),
 });
 
 export const getScriptInput = empty;
 export const getScriptOutput = z.object({
 	key: z.string().describe("The publishable key in the script tag. Not a secret."),
-	snippet: getInstallSnippetOutput.shape.snippet.describe("Legacy alias of proofs_snippet, kept for callers from before the two scripts."),
-	proofs_snippet: z.string().describe("The Letterprove (attestation) tag, attest.js: sign-ins for the proof. Pair it with identify calls (recipes)."),
-	visitors_snippet: z
-		.string()
-		.describe(
-			"The Visitors tag, lettervisit.com/v.js: AI agents and people visiting your site (agent_visitors and human_visitors). Install both tags for both products; with both on the page each visit is counted once.",
-		),
-	server_snippet: getInstallSnippetOutput.shape.server_snippet,
+	snippet: getInstallSnippetOutput.shape.snippet.describe("Legacy alias of proofs_snippet."),
+	proofs_snippet: z.string().describe("The Letterprove tag, attest.js: sign-ins for the proof. Pair it with identify calls (recipes). Attestation only: agent visits and visitor identification are the separate Visitors product."),
 	recipes: getInstallSnippetOutput.shape.recipes,
 	agent_kit: getInstallSnippetOutput.shape.agent_kit,
 	modules: scriptModules,
 	status: z.object({
-		script_seen_at: z.string().nullable().describe("First time either script tag loaded on a page."),
-		visitors_script_seen_at: z.string().nullable().describe("First time the Visitors tag (lettervisit.com/v.js) loaded on a page."),
-		proofs_script_seen_at: z.string().nullable().describe("First time the Letterprove tag (attest.js) loaded on a page."),
+		script_seen_at: z.string().nullable().describe("First time the script tag loaded on a page."),
+		proofs_script_seen_at: z.string().nullable().describe("First time attest.js loaded on a page, recorded once."),
 		last_script_seen_at: z.string().nullable().describe("Most recent load we saw. Coarse: the config is cached for minutes."),
-		server_seen_at: z.string().nullable().describe("First request your server snippet forwarded, of any kind."),
-		first_agent_visit_at: z.string().nullable().describe("First AI agent or crawler visit counted."),
 		first_signin_at: z.string().nullable().describe("First sign-in counted for your proof."),
 		domain_verified: z.boolean(),
 	}),
-	human_visitors_tracking: z.enum(["off", "active", "pending_registration"]),
 });
 
 export const setScriptModulesInput = z.object({
-	proofs: z.boolean().optional(),
-	agent_visitors: z.boolean().optional(),
-	human_visitors: z.boolean().optional().describe("Turning this on needs a DNS-verified domain."),
+	proofs: z.boolean().optional().describe("Whether attest.js collects sign-ins."),
 });
 export const setScriptModulesOutput = getScriptOutput;
 

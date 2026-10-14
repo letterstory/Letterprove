@@ -566,7 +566,7 @@ describe("dispatchTool", () => {
 		vendorRow = { key: "lp_live_acme_9f2c", slug: "acme", name: "Acme", domain: "acme.com", proofs_published_at: null };
 		const { dispatchTool } = await import("./registry");
 		const { agentKit } = await import("@/lib/vendors/agent-kit");
-		const { installRecipes, installSnippet, serverSnippets } = await import("@/lib/vendors/install");
+		const { installRecipes, installSnippet } = await import("@/lib/vendors/install");
 		const { badgeHtml } = await import("@/lib/vendors/badge");
 		const origin = "https://acme.example.com";
 
@@ -580,7 +580,6 @@ describe("dispatchTool", () => {
 					snippet: installSnippet(origin, "lp_live_acme_9f2c"),
 					origin,
 					publishable_key: "lp_live_acme_9f2c",
-					server_snippet: serverSnippets("https://lettervisit.com", "lp_live_acme_9f2c"),
 					recipes: installRecipes(origin, "lp_live_acme_9f2c"),
 					agent_kit: agentKit({
 						vendorName: "Acme",
@@ -593,14 +592,8 @@ describe("dispatchTool", () => {
 				},
 			},
 		});
-		// The server snippet is a Visitors install: it forwards to lettervisit.com,
-		// whose /api/v1/agent-visit is a rewrite to this app (install.ts
-		// VISITORS_ORIGIN). A snippet forwarding to the wrong host is a silent outage.
-		const body = (outcome as { result: { body: { server_snippet: { endpoint: string; nextjs_middleware: string } } } }).result.body;
-		expect(body.server_snippet.endpoint).toBe("https://lettervisit.com/api/v1/agent-visit");
-		expect(body.server_snippet.nextjs_middleware).toContain(`"https://lettervisit.com/api/v1/agent-visit"`);
-		expect(body.server_snippet.nextjs_middleware).toContain("event.waitUntil(");
-		expect(body.server_snippet.nextjs_middleware).toContain("export function proxy(");
+		// Attestation only: no server snippet or anything else for agent visits.
+		expect(JSON.stringify(outcome)).not.toContain("agent-visit");
 	});
 
 	// Until a vendor publishes, the page the badge links to is a 404, so the

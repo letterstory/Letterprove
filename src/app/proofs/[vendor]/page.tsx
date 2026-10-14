@@ -314,7 +314,7 @@ export default async function ProofPage({
                   {a.tier === 3
                     ? business
                       ? "Sign-ins observed on the DNS-verified domain, and Stripe verified the business behind the vendor's own Stripe account at that domain."
-                      : "Sign-ins observed on the verified domain. Payments verified in the bound Stripe account (signed before 2026-10-14, when payments were still read)."
+                      : "Sign-ins observed on the verified domain. Payments verified in the bound Stripe account (a snapshot from before payments stopped being read on 2026-10-14)."
                     : a.tier === 1
                       ? "Sign-ins observed on a verified domain."
                       : "No sign-ins observed on a verified domain."}
