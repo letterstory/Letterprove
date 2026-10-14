@@ -310,10 +310,9 @@ export default async function DocsPage() {
             </p>
             <p>
               Preview your proof page from the Proofs dashboard first, then
-              publish and unpublish from the same place. Publishing needs your
-              domain verified, because nothing is collected for an unverified
-              domain and the only document we could sign for you would be a
-              zero. Unpublishing takes every URL back to 404 — but it cannot
+              publish and unpublish from the same place. A new proof joins the
+              directory once its first snapshot has sign-ins; until then its
+              link works but it isn&apos;t listed. Unpublishing takes every URL back to 404 — but it cannot
               un-fetch: an attestation someone already retrieved while you were
               public stays signed and stays verifiable, which is the whole point
               of signing it.

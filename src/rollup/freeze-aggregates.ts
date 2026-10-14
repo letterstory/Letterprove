@@ -30,6 +30,7 @@ import { isDemonstration } from "@/lib/attest/keys";
 import { GENESIS_HASH, snapshotHash } from "@/lib/attest/verify";
 import { allVendors } from "@/lib/fixtures/vendors";
 import type { SignedAggregate } from "@/lib/attest/aggregate";
+import { autoListOnFirstData } from "@/lib/vendors/listing";
 
 const HOUR_SECONDS = 3600;
 
@@ -109,6 +110,10 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 		);
 		if (upsertError) return { ok: false, frozen, detail: `${vendor.slug}: ${upsertError.message}` };
 		frozen++;
+		// A new proof waiting for data joins the directory with its first
+		// snapshot that has sign-ins (src/lib/vendors/listing.ts). Best effort:
+		// a failed listing update never fails the freeze; the next hour retries.
+		await autoListOnFirstData(db, vendor.slug, signed.companies_observed);
 	}
 
 	return { ok: true, frozen, ...(alreadyFrozen && { alreadyFrozen }), ...(skipped.length && { skipped }) };
