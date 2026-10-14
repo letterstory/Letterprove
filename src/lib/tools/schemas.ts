@@ -99,6 +99,11 @@ export const getStatusOutput = z.object({
 	count: z.number().int(),
 	published: z.boolean().describe("Whether this vendor's proofs are public. Collection runs either way."),
 	published_at: z.string().nullable().describe("When they went public. Null while private."),
+	listed: z
+		.boolean()
+		.describe(
+			"Whether the proof appears in Letterprove's listings (discovery, sitemap, llms.txt). False = unlisted: still served at its URL, never enumerated, marked noindex. Presentation only; the signed document is the same.",
+		),
 	ever_received_at: z
 		.string()
 		.nullable()
@@ -138,6 +143,14 @@ export const publishProofsOutput = z.object({
 	published: z.literal(true),
 	published_at: z.string(),
 	slug: z.string().describe("For building the now-live /proofs and /attest URLs."),
+});
+
+export const setProofListingInput = z.object({
+	listed: z.boolean().describe("true lists the proof in Letterprove's directory; false unlists it (still served at its URL)."),
+});
+export const setProofListingOutput = z.object({
+	listed: z.boolean().describe("The listing state now in effect."),
+	note: z.string().describe("What listing or unlisting changes, and that the signed attestation does not."),
 });
 
 export const unpublishProofsInput = empty;

@@ -60,7 +60,7 @@ describe("getVendorStatus", () => {
 		const { dbClient } = await import("@/lib/db/client");
 		vi.mocked(dbClient).mockReturnValue(mockDb({ vendor: { slug: "acme" }, count: 0, ping: null }) as never);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0, publishedAt: null, everReceivedAt: null, lastReceivedAt: null, rejectedOrigins: [], domainProof: "none", siteVerifiedAt: null, siteVerifiedUrl: null });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: false, count: 0, publishedAt: null, listed: true, everReceivedAt: null, lastReceivedAt: null, rejectedOrigins: [], domainProof: "none", siteVerifiedAt: null, siteVerifiedUrl: null });
 	});
 
 	it("reports receiving=false, installed=true when config has been fetched but no event has landed", async () => {
@@ -69,7 +69,7 @@ describe("getVendorStatus", () => {
 			mockDb({ vendor: { slug: "acme" }, count: 0, ping: { vendor_slug: "acme" } }) as never
 		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0, publishedAt: null, everReceivedAt: null, lastReceivedAt: null, rejectedOrigins: [], domainProof: "none", siteVerifiedAt: null, siteVerifiedUrl: null });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: false, installed: true, count: 0, publishedAt: null, listed: true, everReceivedAt: null, lastReceivedAt: null, rejectedOrigins: [], domainProof: "none", siteVerifiedAt: null, siteVerifiedUrl: null });
 	});
 
 	it("reports receiving=true once at least one event landed", async () => {
@@ -78,7 +78,7 @@ describe("getVendorStatus", () => {
 			mockDb({ vendor: { slug: "acme" }, count: 5, ping: { vendor_slug: "acme" } }) as never
 		);
 
-		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5, publishedAt: null, everReceivedAt: "2026-10-13T10:00:00.000Z", lastReceivedAt: "2026-10-13T10:00:00.000Z", rejectedOrigins: [], domainProof: "none", siteVerifiedAt: null, siteVerifiedUrl: null });
+		expect(await getVendorStatus("v1")).toEqual({ ok: true, receiving: true, installed: true, count: 5, publishedAt: null, listed: true, everReceivedAt: "2026-10-13T10:00:00.000Z", lastReceivedAt: "2026-10-13T10:00:00.000Z", rejectedOrigins: [], domainProof: "none", siteVerifiedAt: null, siteVerifiedUrl: null });
 	});
 
 	/*
@@ -104,6 +104,7 @@ describe("getVendorStatus", () => {
 			installed: true,
 			count: 5,
 			publishedAt: "2026-09-14T10:00:00.000Z",
+			listed: true,
 			everReceivedAt: "2026-10-13T10:00:00.000Z",
 			lastReceivedAt: "2026-10-13T10:00:00.000Z",
 			rejectedOrigins: [],

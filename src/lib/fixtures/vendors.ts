@@ -85,6 +85,14 @@ export interface VendorFixture {
 	 */
 	proofsPublishedAt: string | null;
 	/**
+	 * Whether a published vendor appears in Letterprove's listings: discovery,
+	 * the sitemap and llms.txt. False = unlisted: its proof and attestation stay
+	 * at their URLs (a link keeps working) but nothing points a stranger to them
+	 * and they ask search engines not to index them. Presentation only; it never
+	 * changes the signed document. Absent (fixtures, older rows) reads as listed.
+	 */
+	proofsListed?: boolean;
+	/**
 	 * The owner this vendor shares with Letterprove's operator, or null when
 	 * independent. Non-null signs a disclosure into every attestation — see
 	 * lib/attest/issuer.ts.
@@ -104,7 +112,7 @@ export const FEATURES = ["sso", "audit_log", "api", "analytics", "sla"] as const
  * vendor's proofs dark instead.
  */
 const VENDOR_COLUMNS =
-	"id, slug, name, domain, category, key, domain_verified_at, site_verified_at, site_verified_url, proofs_published_at, issuer_affiliation";
+	"id, slug, name, domain, category, key, domain_verified_at, site_verified_at, site_verified_url, proofs_published_at, proofs_listed, issuer_affiliation";
 
 /**
  * The columns every vendor_customers read here selects, for the same reason.
@@ -123,6 +131,7 @@ interface VendorRow {
 	site_verified_at?: string | null;
 	site_verified_url?: string | null;
 	proofs_published_at?: string | null;
+	proofs_listed?: boolean | null;
 	issuer_affiliation?: string | null;
 	category: string;
 	key: string;
@@ -152,6 +161,7 @@ function toFixture(row: VendorRow, customers: CustomerRow[]): VendorFixture {
 		siteVerifiedAt: row.site_verified_at ?? null,
 		siteVerifiedUrl: row.site_verified_url ?? null,
 		proofsPublishedAt: row.proofs_published_at ?? null,
+		proofsListed: row.proofs_listed !== false,
 		issuerAffiliation: row.issuer_affiliation ?? null,
 		customers: customers.map((c) => ({
 			slug: c.slug,
@@ -257,9 +267,23 @@ export async function findPublishedVendor(slug: string): Promise<VendorFixture |
 	return vendor && isPublished(vendor) ? vendor : undefined;
 }
 
-/** `allVendors`, gated. For listings a stranger reads — the home page, discovery. */
+/** `allVendors`, gated. Every public vendor, listed or not. */
 export async function publishedVendors(): Promise<VendorFixture[]> {
 	return (await allVendors()).filter(isPublished);
+}
+
+/** Whether a published vendor appears in listings. Absent reads as listed. */
+export function isListed(vendor: VendorFixture): boolean {
+	return vendor.proofsListed !== false;
+}
+
+/**
+ * Published AND listed: for listings a stranger reads (discovery, the
+ * sitemap, llms.txt). An unlisted vendor's proof still resolves by URL through
+ * `findPublishedVendor`; it is just never pointed to.
+ */
+export async function listedVendors(): Promise<VendorFixture[]> {
+	return (await publishedVendors()).filter(isListed);
 }
 
 /**

@@ -805,6 +805,17 @@ collector records nothing for one and the only document it could publish is a
 signed zero. Unpublishing stops serving; it cannot un-fetch, and the tool's
 response says so.
 
+**Listed or unlisted.** A published proof is listed by default: discovery
+(`/.well-known/letterprove.json`), the sitemap and `/llms.txt` point to it.
+`set_proof_listing { listed: false }` unlists it: the proof page and the signed
+attestation stay at their URLs, so a link someone already has keeps working,
+but nothing enumerates it, the page carries `noindex, nofollow`, and the
+attestation is served with `X-Robots-Tag: noindex, nofollow`. Listing is
+presentation, not evidence, so the signed document is byte-identical either
+way. Letter unlisted its own proofs (Letter, Lettertrace) on 2026-10-14: agents
+correctly discount a proof from a company that shares an owner with the issuer,
+and Letterprove should be represented by outside vendors' proofs.
+
 ### Endpoints
 
 | Path | Serves |

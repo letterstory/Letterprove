@@ -599,6 +599,7 @@ export const TOOLS: BoundTool[] = [
 					// own proof URL and interpreting a 404.
 					published: result.publishedAt !== null,
 					published_at: result.publishedAt,
+					listed: result.listed,
 					ever_received_at: result.everReceivedAt,
 					last_received_at: result.lastReceivedAt,
 					rejected_origins: result.rejectedOrigins,
@@ -1174,6 +1175,41 @@ export const TOOLS: BoundTool[] = [
 				body: {
 					published: false,
 					note: "Public routes now 404. Documents fetched while this vendor was public remain signed and verifiable — unpublishing stops serving, it cannot un-fetch.",
+				},
+			};
+		},
+	}),
+	defineTool({
+		/*
+		 * Listing, not publication. An unlisted proof is still public at its URL
+		 * (a link someone already has keeps working); it is only left out of the
+		 * places that point strangers to proofs. Presentation, never evidence:
+		 * the signed document does not change.
+		 */
+		name: "set_proof_listing",
+		description:
+			"List or unlist the caller's published proof in Letterprove's directory (discovery, sitemap, llms.txt). Unlisted proofs stay at their URLs, are marked noindex, and are never enumerated. Does not change the signed attestation. Args: listed (boolean).",
+		capability: "vendor:write",
+		inputSchema: S.setProofListingInput,
+		outputSchema: S.setProofListingOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const listed = asRecord(args).listed === true;
+			const { error } = await db
+				.from("vendors")
+				.update({ proofs_listed: listed, listed_changed_at: new Date().toISOString(), listed_changed_by: principal.userId ?? principal.tokenId ?? null })
+				.eq("id", vendorId);
+			if (error) return { ok: false, status: 400, body: { error: error.message } };
+			return {
+				ok: true,
+				body: {
+					listed,
+					note: listed
+						? "Listed: the proof appears in discovery, the sitemap and llms.txt."
+						: "Unlisted: the proof stays at its URL but is no longer listed anywhere and asks search engines not to index it. The signed attestation is unchanged.",
 				},
 			};
 		},

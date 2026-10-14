@@ -3,6 +3,7 @@ import { publishedVendorAggregate } from "@/lib/attest/aggregate";
 import { readingOrder } from "@/lib/attest/reading-order";
 import { notFound, proofJson } from "@/lib/http";
 import { SNAPSHOT_CADENCE_SECONDS } from "@/lib/attest/cadence";
+import { findPublishedVendor, isListed } from "@/lib/fixtures/vendors";
 
 /**
  * A vendor's attestation — `/attest/{vendor}.json`: who the vendor is and the
@@ -35,5 +36,11 @@ export async function GET(
 
 	// Cached for the publishing cadence, not for a field in the body: the body
 	// no longer carries a cache hint (see src/lib/attest/cadence.ts).
-	return proofJson(readingOrder(aggregate), SNAPSHOT_CADENCE_SECONDS);
+	const res = proofJson(readingOrder(aggregate), SNAPSHOT_CADENCE_SECONDS);
+	// Unlisted (set_proof_listing): still served at this URL, never indexed.
+	// A header, not a body field: listing is presentation, and the signed
+	// document must be byte-identical either way.
+	const v = await findPublishedVendor(slug);
+	if (v && !isListed(v)) res.headers.set("x-robots-tag", "noindex, nofollow");
+	return res;
 }

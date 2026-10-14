@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./proofs", () => ({ publishedVendorSlugs: vi.fn() }));
-vi.mock("../fixtures/vendors", () => ({ publishedVendors: vi.fn() }));
+vi.mock("../fixtures/vendors", () => ({ listedVendors: vi.fn() }));
 
 import { publishedVendorSlugs } from "./proofs";
-import { publishedVendors } from "../fixtures/vendors";
+import { listedVendors } from "../fixtures/vendors";
 import { discoveryDocument } from "./discovery";
 
 /**
@@ -20,7 +20,7 @@ import { discoveryDocument } from "./discovery";
 beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(publishedVendorSlugs).mockResolvedValue(["acme", "globex"]);
-	vi.mocked(publishedVendors).mockResolvedValue([
+	vi.mocked(listedVendors).mockResolvedValue([
 		{ slug: "acme", issuerAffiliation: null },
 		{ slug: "lettertrace", issuerAffiliation: "Letter Company" },
 	] as never);
@@ -36,7 +36,7 @@ describe("discoveryDocument — issuer", () => {
 
 	it("reads the publication gate, so a private affiliated vendor is never named", async () => {
 		await discoveryDocument("https://app.letterprove.com");
-		expect(publishedVendors).toHaveBeenCalled();
+		expect(listedVendors).toHaveBeenCalled();
 	});
 });
 

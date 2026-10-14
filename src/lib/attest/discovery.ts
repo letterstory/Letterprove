@@ -5,7 +5,7 @@ import { tierLadderDocument } from "./tiers";
 import { SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { VERIFY_ORIGIN } from "./verify-link";
 import { ISSUER_OPERATOR, VENDOR_CANNOT, VENDOR_CONTROLS } from "./issuer";
-import { publishedVendors } from "../fixtures/vendors";
+import { listedVendors } from "../fixtures/vendors";
 import { domainProofOf, type DomainProof } from "./domain-proof";
 
 /**
@@ -100,7 +100,7 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 			operator: ISSUER_OPERATOR,
 			vendor_controls: VENDOR_CONTROLS,
 			vendor_cannot: VENDOR_CANNOT,
-			affiliated_vendors: (await publishedVendors())
+			affiliated_vendors: (await listedVendors())
 				.filter((v) => v.issuerAffiliation)
 				.map((v) => ({ vendor: v.slug, shared_owner: v.issuerAffiliation! })),
 			note:
@@ -110,12 +110,13 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 		// Letterprove makes about a vendor. `chain` is what makes it auditable
 		// rather than merely signed: walk it and you can prove no earlier figure
 		// was restated.
-		// Published vendors only. This is the first document an agent reads, so
+		// Published, listed vendors only (an unlisted proof resolves by URL but is
+		// never enumerated). This is the first document an agent reads, so
 		// a private vendor listed here would be named and linked by the very
 		// thing that tells agents where to look, and the 404s behind it would be
 		// a formality.
 		proofs: await (async () => {
-			const proofOf = new Map((await publishedVendors()).map((v) => [v.slug, domainProofOf(v)]));
+			const proofOf = new Map((await listedVendors()).map((v) => [v.slug, domainProofOf(v)]));
 			return (await publishedVendorSlugs()).map((slug) => ({
 				vendor: slug,
 				url: `${origin}/proofs/${slug}`,
