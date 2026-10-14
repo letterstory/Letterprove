@@ -228,9 +228,10 @@ POST /api/v1/tools/{name}     authenticated by the LETTERSTORY_API_SECRET seam
 { "org_id": "…", "user_id": "…", …args }
 ```
 
-`src/lib/tools/registry.ts` holds **21 tools**, each a `defineTool` with a zod
-input and output contract the dispatcher checks (see [Tool
-contracts](#tool-contracts--decided-09-08)). The seam resolves `org_id` to a
+`src/lib/tools/registry.ts` holds **every tool** the dispatcher serves, each a
+`defineTool` with a zod input and output contract. The dispatcher checks the
+output (outside production); validating input is each handler's own job (see
+[Tool contracts](#tool-contracts--decided-09-08)). The seam resolves `org_id` to a
 vendor and scopes every handler to it, so a caller cannot name another
 vendor's data. It grants `vendor:read`/`vendor:write` for any org; it grants
 `staff:read`/`staff:write` only when the acting `user_id` is on Letterprove's
