@@ -302,7 +302,7 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 			insufficient_history: "not enough history yet",
 			not_connected: "not connected",
 			not_configured: "not set up",
-			domain_not_verified: "needs a verified domain",
+			domain_not_verified: "needs DNS verification",
 		};
 		html += `<p class="muted">Not shown: ${esc(omitted.map(([k, r]) => `${HIDDEN_LABELS[k] ?? k} (${reasons[r] ?? r})`).join(", "))}.</p>`;
 	}
