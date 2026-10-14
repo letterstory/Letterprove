@@ -24,6 +24,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export interface GrowthPoint {
 	month: string;
 	companies_observed: number;
+	/**
+	 * True when no snapshot that month had a full 30-day window of observation
+	 * behind it (observation began less than 30 days before the month's last
+	 * snapshot). A partial month's count is lower partly because observation had
+	 * only just started, not because fewer companies used the product.
+	 */
+	partial?: boolean;
 }
 
 export interface Retention {
@@ -48,6 +55,21 @@ export async function growthFor(vendorSlug: string): Promise<GrowthPoint[] | nul
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Mark each month whose 30-day window started before observation did. Pure.
+ * `observedSince` is Letterprove's first observation; the current month is
+ * judged at `now`, earlier months at their last instant.
+ */
+export function markPartialMonths(points: GrowthPoint[], observedSince: string | null, now = Date.now()): GrowthPoint[] {
+	const first = observedSince ? Date.parse(observedSince) : NaN;
+	if (!Number.isFinite(first)) return points;
+	return points.map((p) => {
+		const [y, m] = p.month.split("-").map(Number);
+		const monthEnd = Math.min(Date.UTC(y, m, 1) - 1, now);
+		return monthEnd - 30 * DAY_MS < first ? { ...p, partial: true } : { ...p };
+	});
 }
 
 async function windowDomains(vendorSlug: string, from: Date, to: Date): Promise<string[] | null> {

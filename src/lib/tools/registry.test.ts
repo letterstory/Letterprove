@@ -29,16 +29,13 @@ vi.mock("@/lib/stripe/credentials", async () => ({
 	saveCredential: vi.fn(),
 	connectionFor: vi.fn(),
 	credentialFor: vi.fn(),
-	setProductScope: vi.fn(),
 	disconnect: vi.fn(),
 }));
 vi.mock("@/lib/stripe/account", async () => ({
 	checkStripeAccount: vi.fn(),
 	overrideOf: (await vi.importActual<typeof import("@/lib/stripe/account")>("@/lib/stripe/account")).overrideOf,
 }));
-vi.mock("@/lib/stripe/fetch", () => ({ fetchProducts: vi.fn() }));
-vi.mock("@/lib/stripe/sync", () => ({ syncVendorPayments: vi.fn() }));
-vi.mock("@/lib/attest/payment-evidence", () => ({ paymentEvidenceCount: vi.fn() }));
+vi.mock("@/lib/stripe/sync", () => ({ syncVendorStripe: vi.fn() }));
 vi.mock("@/lib/staff/billing", () => ({
 	agenticReadBillingReport: vi.fn(),
 	previousBillingMonth: vi.fn(() => "2026-08-01"),
@@ -1242,6 +1239,10 @@ describe("the Stripe tools", () => {
 		stripeAccountId: "acct_1",
 		stripeAccountDomains: ["acme.com"],
 		accountCheckedAt: "2026-09-01T00:00:00.000Z",
+		chargesEnabled: true,
+		businessName: "Acme Inc.",
+		country: "US",
+		businessUrlHost: "acme.com",
 	};
 	const ACCOUNT = { id: "acct_1", domains: ["acme.com"] };
 
@@ -1249,19 +1250,11 @@ describe("the Stripe tools", () => {
 		const { checkStripeAccount } = await import("@/lib/stripe/account");
 		vi.mocked(checkStripeAccount).mockResolvedValue({ ok: true, account: ACCOUNT, overridden: false });
 		const { saveCredential, connectionFor, disconnect } = await import("@/lib/stripe/credentials");
-		const { paymentEvidenceCount } = await import("@/lib/attest/payment-evidence");
-		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		const { syncVendorStripe } = await import("@/lib/stripe/sync");
 		vi.mocked(saveCredential).mockResolvedValue({ ok: true, livemode: true, last4: "WXYZ" });
 		vi.mocked(connectionFor).mockResolvedValue(CONNECTION);
 		vi.mocked(disconnect).mockResolvedValue(true);
-		vi.mocked(paymentEvidenceCount).mockResolvedValue(0);
-		vi.mocked(syncVendorPayments).mockResolvedValue({
-			ok: true,
-			matched: 2,
-			unmatched: 1,
-			testMode: false,
-			truncated: false,
-		});
+		vi.mocked(syncVendorStripe).mockResolvedValue({ ok: true, bound: true, chargesEnabled: true, testMode: false, truncated: false });
 	});
 
 	it("connect_stripe never returns the submitted key, in any form", async () => {
@@ -1355,64 +1348,17 @@ describe("the Stripe tools", () => {
 		expect(outcome.result.body.detail).toMatch(/connected_account_read/);
 	});
 
-	it("connect_stripe stores a product scope given with the key, and refuses one that isn't product ids", async () => {
+	it("connect_stripe stores only the key and the account, never a product scope", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { saveCredential } = await import("@/lib/stripe/credentials");
-
-		await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY, product_ids: ["prod_b", "prod_a", "prod_a"] }, principal(["vendor:write"]));
-		expect(saveCredential).toHaveBeenCalledWith("v1", LIVE_KEY, { productIds: ["prod_a", "prod_b"], account: ACCOUNT });
-
-		const bad = await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY, product_ids: ["price_1"] }, principal(["vendor:write"]));
-		expect(bad.kind === "result" && !bad.result.ok && bad.result.body.error).toBe("invalid_product_ids");
+		await dispatchTool("connect_stripe", { restricted_key: LIVE_KEY, product_ids: ["prod_a"] }, principal(["vendor:write"]));
+		expect(saveCredential).toHaveBeenCalledWith("v1", LIVE_KEY, { account: ACCOUNT });
 	});
 
-	it("set_stripe_scope narrows which products count and reports the scope back", async () => {
+	it("retires the product-scope tools", async () => {
 		const { dispatchTool } = await import("./registry");
-		const { setProductScope, connectionFor } = await import("@/lib/stripe/credentials");
-		vi.mocked(setProductScope).mockResolvedValue(true);
-		vi.mocked(connectionFor).mockResolvedValue({ ...CONNECTION, productIds: ["prod_core"] });
-
-		const outcome = await dispatchTool("set_stripe_scope", { product_ids: ["prod_core"] }, principal(["vendor:write"]));
-
-		expect(setProductScope).toHaveBeenCalledWith("v1", ["prod_core"]);
-		expect(outcome.kind === "result" && outcome.result.ok && (outcome.result.body as { product_scope: unknown }).product_scope).toEqual({
-			mode: "selected",
-			product_ids: ["prod_core"],
-		});
-	});
-
-	it("set_stripe_scope refuses before a key is connected", async () => {
-		const { dispatchTool } = await import("./registry");
-		const { connectionFor, setProductScope } = await import("@/lib/stripe/credentials");
-		vi.mocked(connectionFor).mockResolvedValue(null);
-
-		const outcome = await dispatchTool("set_stripe_scope", { product_ids: [] }, principal(["vendor:write"]));
-
-		expect(outcome.kind === "result" && !outcome.result.ok && outcome.result.status).toBe(409);
-		expect(setProductScope).not.toHaveBeenCalled();
-	});
-
-	it("list_stripe_products lists the account's products with the current scope", async () => {
-		const { dispatchTool } = await import("./registry");
-		const { credentialFor } = await import("@/lib/stripe/credentials");
-		const { fetchProducts } = await import("@/lib/stripe/fetch");
-		vi.mocked(credentialFor).mockResolvedValue({ key: LIVE_KEY, livemode: true, productIds: [] });
-		vi.mocked(fetchProducts).mockResolvedValue({ ok: true, namesAvailable: true, products: [{ id: "prod_a", name: "Alpha", recurring: true }] });
-
-		const outcome = await dispatchTool("list_stripe_products", {}, principal(["vendor:read"]));
-
-		expect(outcome).toEqual({
-			kind: "result",
-			result: {
-				ok: true,
-				body: {
-					products: [{ id: "prod_a", name: "Alpha", recurring: true }],
-					names_available: true,
-					product_scope: { mode: "all_products", product_ids: [] },
-				},
-			},
-		});
-		expect(JSON.stringify(outcome)).not.toContain("secretmaterial");
+		expect((await dispatchTool("list_stripe_products", {}, principal(["vendor:read"]))).kind).toBe("unknown_tool");
+		expect((await dispatchTool("set_stripe_scope", { product_ids: [] }, principal(["vendor:write"]))).kind).toBe("unknown_tool");
 	});
 
 	it("set_stripe_account_override is staff-only", async () => {
@@ -1504,111 +1450,62 @@ describe("the Stripe tools", () => {
 		expect(outcome).toEqual({ kind: "result", result: { ok: true, body: { connected: false } } });
 	});
 
-	it("get_stripe_connection distinguishes an unreadable evidence count from zero", async () => {
+	it("get_stripe_connection states what the account says about the business, and nothing about payments", async () => {
 		const { dispatchTool } = await import("./registry");
-		const { paymentEvidenceCount } = await import("@/lib/attest/payment-evidence");
-		vi.mocked(paymentEvidenceCount).mockResolvedValue(null);
+		const { dbClient } = await import("@/lib/db/client");
+		vi.mocked(dbClient).mockReturnValue({
+			from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { domain: "acme.com" }, error: null }) }) }) }),
+		} as never);
 
 		const outcome = await dispatchTool("get_stripe_connection", {}, principal(["vendor:read"]));
-
-		// Null, not 0. Rendering a failed read as "0 domains corroborated"
-		// tells a vendor their connection is broken while it is fine.
-		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toMatchObject({
+		const body = outcome.kind === "result" && outcome.result.ok ? (outcome.result.body as Record<string, unknown>) : {};
+		expect(body).toMatchObject({
 			connected: true,
-			evidence_domains: null,
+			business: { verified: true, name: "Acme Inc.", country: "US", website: "acme.com", website_matches_domain: true },
 		});
+		expect(body).not.toHaveProperty("evidence_domains");
+		expect(body).not.toHaveProperty("product_scope");
 	});
 
-	it("sync_stripe_payments reports a test-mode key as counts with nothing stored", async () => {
+	for (const name of ["refresh_stripe_business", "sync_stripe_payments"]) {
+		it(`${name} re-reads the account and reports whether the business is verified`, async () => {
+			const { dispatchTool } = await import("./registry");
+			const outcome = await dispatchTool(name, {}, principal(["vendor:write"]));
+			expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toEqual({ bound: true, verified: true, test_mode: false });
+		});
+	}
+
+	it("refresh_stripe_business never calls a test key verified, and carries the mismatch warning", async () => {
 		const { dispatchTool } = await import("./registry");
-		const { syncVendorPayments } = await import("@/lib/stripe/sync");
-		vi.mocked(syncVendorPayments).mockResolvedValue({
-			ok: true,
-			matched: 3,
-			unmatched: 0,
-			testMode: true,
-			truncated: false,
-		});
+		const { syncVendorStripe } = await import("@/lib/stripe/sync");
+		vi.mocked(syncVendorStripe).mockResolvedValueOnce({ ok: true, bound: true, chargesEnabled: true, testMode: true, truncated: false });
+		const test = await dispatchTool("refresh_stripe_business", {}, principal(["vendor:write"]));
+		expect(test.kind === "result" && test.result.ok && test.result.body).toEqual({ bound: true, verified: false, test_mode: true });
 
-		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
-
-		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toEqual({
-			matched: 3,
-			unmatched: 0,
-			test_mode: true,
-			truncated: false,
-		});
+		vi.mocked(syncVendorStripe).mockResolvedValueOnce({ ok: true, bound: false, chargesEnabled: false, testMode: false, truncated: false, warning: "not yours" });
+		const foreign = await dispatchTool("refresh_stripe_business", {}, principal(["vendor:write"]));
+		expect(foreign.kind === "result" && foreign.result.ok && foreign.result.body).toEqual({ bound: false, verified: false, test_mode: false, warning: "not yours" });
 	});
 
-	it("sync_stripe_payments carries the Invoices-scope warning through to the caller", async () => {
-		// The warning exists because the sync deliberately does NOT fail here: a
-		// test key stores no evidence, so a missing scope puts nothing at risk
-		// and must not page anyone (#142). That makes this string the only way
-		// the vendor ever learns there is something to fix before a live key
-		// would work, so dropping it at the tool layer would make the problem
-		// silent rather than solved.
-		const { dispatchTool } = await import("./registry");
-		const { syncVendorPayments } = await import("@/lib/stripe/sync");
-		vi.mocked(syncVendorPayments).mockResolvedValue({
-			ok: true,
-			matched: 0,
-			unmatched: 0,
-			testMode: true,
-			truncated: false,
-			scopeWarning: "Your Stripe restricted key cannot read Invoices...",
-		});
-
-		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
-
-		expect(outcome.kind === "result" && outcome.result.ok && outcome.result.body).toMatchObject({
-			test_mode: true,
-			scope_warning: "Your Stripe restricted key cannot read Invoices...",
-		});
-	});
-
-	it("omits scope_warning entirely when there is nothing to warn about", async () => {
-		const { dispatchTool } = await import("./registry");
-		const { syncVendorPayments } = await import("@/lib/stripe/sync");
-		vi.mocked(syncVendorPayments).mockResolvedValue({
-			ok: true,
-			matched: 2,
-			unmatched: 0,
-			testMode: false,
-			truncated: false,
-		});
-
-		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
-		const body = outcome.kind === "result" && outcome.result.ok ? outcome.result.body : {};
-
-		expect(body).not.toHaveProperty("scope_warning");
-	});
-
-	it("sync_stripe_payments tells a caller it has no key rather than failing at Stripe", async () => {
+	it("refresh_stripe_business tells a caller it has no key rather than failing at Stripe", async () => {
 		const { dispatchTool } = await import("./registry");
 		const { connectionFor } = await import("@/lib/stripe/credentials");
-		const { syncVendorPayments } = await import("@/lib/stripe/sync");
+		const { syncVendorStripe } = await import("@/lib/stripe/sync");
 		vi.mocked(connectionFor).mockResolvedValue(null);
-
-		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
-
-		expect(outcome.kind).toBe("result");
+		const outcome = await dispatchTool("refresh_stripe_business", {}, principal(["vendor:write"]));
 		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected refusal");
 		expect(outcome.result.status).toBe(409);
 		expect(outcome.result.body.error).toBe("stripe_not_connected");
-		expect(syncVendorPayments).not.toHaveBeenCalled();
+		expect(syncVendorStripe).not.toHaveBeenCalled();
 	});
 
-	it("sync_stripe_payments relays Stripe's own message when the sync fails", async () => {
+	it("refresh_stripe_business relays Stripe's own message when the read fails", async () => {
 		const { dispatchTool } = await import("./registry");
-		const { syncVendorPayments } = await import("@/lib/stripe/sync");
-		vi.mocked(syncVendorPayments).mockResolvedValue({ ok: false, error: "Expired API Key provided." });
-
-		const outcome = await dispatchTool("sync_stripe_payments", {}, principal(["vendor:write"]));
-
-		expect(outcome.kind).toBe("result");
+		const { syncVendorStripe } = await import("@/lib/stripe/sync");
+		vi.mocked(syncVendorStripe).mockResolvedValue({ ok: false, error: "Expired API Key provided." });
+		const outcome = await dispatchTool("refresh_stripe_business", {}, principal(["vendor:write"]));
 		if (outcome.kind !== "result" || outcome.result.ok) throw new Error("expected failure");
 		expect(outcome.result.status).toBe(502);
-		// "Expired API Key" is actionable. "Sync failed" is not.
 		expect(outcome.result.body.detail).toBe("Expired API Key provided.");
 	});
 

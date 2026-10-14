@@ -12,10 +12,10 @@
  *   2. Letterprove fetches that page and keeps, per company, whether its name
  *      or domain actually appears there. A company that is not on the page is
  *      never named, whatever the vendor typed.
- *   3. A company on the page is named only when Letterprove has evidence for
- *      it: observed signing in over the window ("active"), or that plus a
- *      settled invoice in the bound Stripe account ("paying"). Everyone else
- *      is a count.
+ *   3. A company on the page is named only when Letterprove observed it
+ *      signing in over the last 30 days ("active"). Everyone else is a count.
+ *      Payments are never read (since 2026-10-14), so "paying" is retired: it
+ *      survives in the type only so older signed documents still parse.
  *
  * So the worst a vendor can do is list fewer logos than its page shows, which
  * only makes "X of Y verified" look better by shrinking Y. The page is linked
@@ -328,14 +328,8 @@ export async function recheckAllLogoWalls(fetcher: Fetcher = fetch): Promise<{ c
 
 // ---------------------------------------------------------------- status
 
-/** Status per listed company from the observed and paying domain sets. Pure. */
-/**
- * "paying" on a settled invoice in the vendor's bound Stripe, whether or not
- * the company signed in (managed accounts pay without logging in); else
- * "active" when Letterprove observed it signing in; else "not_observed".
- */
-export function statusOf(domain: string, observed: ReadonlySet<string>, paying: ReadonlySet<string>): LogoStatus {
-	if (paying.has(domain)) return "paying";
+/** "active" when Letterprove observed the company signing in over the window, else "not_observed". Pure. */
+export function statusOf(domain: string, observed: ReadonlySet<string>): LogoStatus {
 	return observed.has(domain) ? "active" : "not_observed";
 }
 
@@ -343,40 +337,34 @@ export interface PublicLogos {
 	page: string;
 	listed: number;
 	on_page: number;
+	/** Listed companies on the page that Letterprove observed signing in over the last 30 days. */
 	verified: number;
-	/** Of `verified`, how many pay through the bound Stripe / were only observed signing in. */
-	paying: number;
-	active: number;
+	/** RETIRED 2026-10-14 (payments are no longer read). Older documents carry it. */
+	paying?: number;
+	/** RETIRED 2026-10-14: equal to `verified` on the documents that carry it. */
+	active?: number;
 	/** Absent when the vendor chose to show counts only (display `logo_names: false`). */
-	companies?: { name: string; domain: string; status: "paying" | "active" }[];
+	companies?: { name: string; domain: string; status: "active" | "paying" }[];
 }
 
 /**
  * The attestation's `logos` block. Pure. Names ONLY companies that are on the
- * vendor's page and either observed signing in or paying through its bound
- * Stripe; everything else is a count. Null when there
- * is nothing checked recently enough to sign.
+ * vendor's page and observed signing in over the window; everything else is a
+ * count. Null when there is nothing checked recently enough to sign.
  */
-export function publicLogos(
-	wall: LogoWallRow | null,
-	observed: ReadonlySet<string>,
-	paying: ReadonlySet<string>,
-	now = Date.now(),
-): PublicLogos | null {
+export function publicLogos(wall: LogoWallRow | null, observed: ReadonlySet<string>, now = Date.now()): PublicLogos | null {
 	if (!wall || !wall.checked_at) return null;
 	if (now - Date.parse(wall.checked_at) > MAX_CHECK_AGE_MS) return null;
 	const onPage = wall.companies.filter((c) => c.on_page);
 	const verified = onPage
-		.map((c) => ({ name: c.name, domain: c.domain, status: statusOf(c.domain, observed, paying) }))
-		.filter((c): c is { name: string; domain: string; status: "paying" | "active" } => c.status !== "not_observed")
-		.sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === "paying" ? -1 : 1));
+		.filter((c) => statusOf(c.domain, observed) === "active")
+		.map((c) => ({ name: c.name, domain: c.domain, status: "active" as const }))
+		.sort((a, b) => a.name.localeCompare(b.name));
 	return {
 		page: wall.page_url,
 		listed: wall.companies.length,
 		on_page: onPage.length,
 		verified: verified.length,
-		paying: verified.filter((c) => c.status === "paying").length,
-		active: verified.filter((c) => c.status === "active").length,
 		companies: verified,
 	};
 }

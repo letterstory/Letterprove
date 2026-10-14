@@ -69,40 +69,36 @@ describe("publicLogos", () => {
 		],
 	};
 	const observed = new Set(["globex.com", "initech.io", "secret.co"]);
-	const paying = new Set(["globex.com", "secret.co"]);
 
-	it("names only companies that are on the page AND observed; counts the rest", () => {
-		const block = publicLogos(wall, observed, paying)!;
+	it("names only companies that are on the page AND observed signing in; counts the rest", () => {
+		const block = publicLogos(wall, observed)!;
 		expect(block).toEqual({
 			page: "https://acme.com/customers",
 			listed: 4,
 			on_page: 3,
 			verified: 2,
-			paying: 1,
-			active: 1,
 			companies: [
-				{ name: "Globex", domain: "globex.com", status: "paying" },
+				{ name: "Globex", domain: "globex.com", status: "active" },
 				{ name: "Initech", domain: "initech.io", status: "active" },
 			],
 		});
-		// Observed and paying, but not on the vendor's public page: never named.
+		// Observed, but not on the vendor's public page: never named.
 		expect(JSON.stringify(block)).not.toContain("secret");
 		// On the page but never observed: never named.
 		expect(JSON.stringify(block)).not.toContain("hooli");
+		// No payment figure of any kind.
+		expect(block).not.toHaveProperty("paying");
 	});
 
 	it("publishes nothing when the page was never checked or the check is stale", () => {
-		expect(publicLogos({ ...wall, checked_at: null }, observed, paying)).toBeNull();
-		expect(publicLogos({ ...wall, checked_at: new Date(Date.now() - 3 * 86_400_000).toISOString() }, observed, paying)).toBeNull();
-		expect(publicLogos(null, observed, paying)).toBeNull();
+		expect(publicLogos({ ...wall, checked_at: null }, observed)).toBeNull();
+		expect(publicLogos({ ...wall, checked_at: new Date(Date.now() - 3 * 86_400_000).toISOString() }, observed)).toBeNull();
+		expect(publicLogos(null, observed)).toBeNull();
 	});
 
-	it("grades status from evidence alone", () => {
-		expect(statusOf("a.com", new Set(["a.com"]), new Set(["a.com"]))).toBe("paying");
-		expect(statusOf("a.com", new Set(["a.com"]), new Set())).toBe("active");
-		// Stripe alone is enough for a logo: managed accounts pay without signing in.
-		expect(statusOf("a.com", new Set(), new Set(["a.com"]))).toBe("paying");
-		expect(statusOf("a.com", new Set(), new Set())).toBe("not_observed");
+	it("grades status from sign-ins alone", () => {
+		expect(statusOf("a.com", new Set(["a.com"]))).toBe("active");
+		expect(statusOf("a.com", new Set())).toBe("not_observed");
 	});
 });
 

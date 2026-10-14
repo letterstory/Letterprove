@@ -33,7 +33,7 @@ import { TXT_PREFIX, verificationHosts } from "@/lib/vendors/verification";
  *      from their own modules for the same reason.
  *
  * What is deliberately NOT dressed up: companies observed are not
- * customers, tier 3 never means every company pays, tier 2 is not issued, and the tier-3 section says out loud what a determined vendor
+ * customers, tier 3 says who the vendor is and nothing about payments, tier 2 is not issued, and the tier-3 section says out loud what a determined vendor
  * can still do. A page that reads better than the system behaves is the one
  * failure this product cannot afford.
  */
@@ -81,9 +81,11 @@ export default async function DocsPage() {
         <p className="mt-6 leading-relaxed text-fog">
           Letterprove publishes signed, machine-readable evidence that a
           software vendor is who it says it is, backed by data: its domain,
-          proven by DNS; its Stripe account, bound to that domain; how many
-          companies were observed using it and how many of them pay. Counts,
-          never names. This page is the whole of it: how to install the
+          proven by DNS (or, more weakly, by its script on a page there); the
+          business behind its own Stripe account, as Stripe has verified it;
+          and how many companies were observed signing in to it. Counts, never
+          names, and no payments: Stripe is read only to confirm the business.
+          This page is the whole of it: how to install the
           script, what it sends, what the attestation says, what the tiers
           mean, and how to verify any of it without trusting us.
         </p>
@@ -436,8 +438,8 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 DNS) allows every tier. <code>site</code> (Site verified):
                 Letterprove found the vendor&apos;s script and key on a page of
                 the domain, which proves control of a page rather than the
-                domain&apos;s DNS, so the tier stops at 1 and the Stripe binding
-                and logo wall don&apos;t count. <code>none</code> (Domain not
+                domain&apos;s DNS, so the tier stops at 1 and the logo wall
+                doesn&apos;t count. <code>none</code> (Domain not
                 verified): the counts are the vendor&apos;s claim, tier 0.{" "}
                 <code>domain_verified</code> is true only for <code>dns</code>.
                 DNS is optional; a vendor site-verifies with{" "}
@@ -455,8 +457,21 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 means a domain the account publishes (business website, support
                 email, account email) shares the vendor&apos;s verified domain;{" "}
                 <code>staff_override</code> means Letterprove staff approved a
-                related company&apos;s account, such as a parent that bills for
-                a subsidiary.
+                related company&apos;s account, such as a parent company&apos;s
+                account for a subsidiary.
+              </li>
+              <li>
+                <code>stripe_business</code>: what the vendor&apos;s own Stripe
+                account says about the business, read directly from Stripe.{" "}
+                <code>verified</code> is true when Stripe lets the account
+                accept payments, which Stripe allows only after verifying the
+                business (its legal entity, the people behind it and a bank
+                account). <code>name</code>, <code>country</code> and{" "}
+                <code>website</code> are as the account shows them, and{" "}
+                <code>website_matches_domain</code> says whether that website is
+                on the vendor&apos;s domain. This is identity only: Letterprove
+                reads no payments, invoices or subscriptions, and publishes no
+                revenue figure.
               </li>
             </ul>
             <p>What backs it, over the last <code>window_days</code> (30):</p>
@@ -470,20 +485,14 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 <code>domains_excluded</code> rather than silently dropped.
               </li>
               <li>
-                <code>paying_since</code>: at tier 3, at least one observed
-                company paid an invoice that actually settled in the
-                vendor&apos;s own Stripe account; this is the first such
-                invoice. How many pay is kept private to the vendor. <code>payment_scope</code> says whether every
-                product the account bills counts or only the products the vendor
-                chose. Its <code>products</code> number counts Stripe products,
-                not customers.
-              </li>
-              <li>
                 <code>growth</code>: companies observed per month for up to six
-                months, from Letterprove&apos;s own signed history.{" "}
-                <code>retention</code>: of the companies active 60 days ago, how
-                many are still signing in. Both are counts and never change the
-                tier.
+                months, from Letterprove&apos;s own signed history. A month
+                marked <code>partial</code> had less than a full 30-day window
+                of observation behind it, so its count is lower partly because
+                observation had just begun.{" "}
+                <code>retention</code>: of the companies observed from 90 to 60
+                days ago, how many were also observed in the last 30 days. Both
+                are counts and never change the tier.
               </li>
               <li>
                 <code>sessions</code>, <code>signups</code>,{" "}
@@ -494,11 +503,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 logo wall, checked. <code>page</code> is the page,{" "}
                 <code>listed</code> the companies the vendor declared,{" "}
                 <code>on_page</code> how many were found on that page, and{" "}
-                <code>verified</code> how many of those Letterprove observed.
-                Only verified companies are named, each with a{" "}
-                <code>status</code>: <code>active</code> (signed in, last 30
-                days) or <code>paying</code> (also a settled invoice in the
-                bound Stripe account). It never moves the tier.
+                <code>verified</code> how many of those Letterprove observed
+                signing in over the last 30 days. Only verified companies are
+                named. It never moves the tier.
               </li>
               <li>
                 <code>reported_history</code>, when present: company history
@@ -519,6 +526,21 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 vendor&apos;s statement rather than evidence. It is empty
                 unless <code>reported_history</code> is present, and then it
                 names that field.
+              </li>
+              <li>
+                <code>hidden_by_vendor</code> lists the optional sections the
+                vendor chose not to show, and <code>omitted</code> gives the
+                reason every optional field is absent: <code>hidden</code>,{" "}
+                <code>insufficient_history</code>, <code>not_connected</code>,{" "}
+                <code>not_configured</code> or{" "}
+                <code>domain_not_verified</code>. Absent never means zero.
+              </li>
+              <li>
+                Documents signed before 2026-10-14 may carry{" "}
+                <code>paying_since</code>, <code>payment_scope</code>,{" "}
+                <code>paying</code>, and logo <code>paying</code> counts: payment
+                fields from when Stripe payments were still read. They describe
+                that snapshot only.
               </li>
               <li>
                 <code>observed_through</code> is the end of the window
@@ -599,27 +621,28 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
             </p>
             <ul>
               <li>
-                If your domain is not DNS-verified, the published tier is 0,
-                whatever was observed. Without domain control, an observation is
-                only the vendor asserting. Domain proof is re-checked daily: if
-                the TXT record is gone for three days running, the domain is no
-                longer verified and every tier falls to 0 until you verify
-                again.
+                If you have not proven your domain at all, the published tier is
+                0, whatever was observed: an observation on a domain nobody has
+                proven is only the vendor asserting. Proof is by DNS, or more
+                weakly by your script and key on a page of the domain (site
+                proof, which stops at tier 1). Both are re-checked daily; a proof
+                that stays gone is cleared.
               </li>
               <li>
                 If no company was observed in the window, the published tier is
                 0. A tier is a statement about evidence, and there is none.
               </li>
               <li>
-                If companies were observed signing in on your verified domain,
-                the tier is 1: evidence, but evidence you could fabricate with
+                If companies were observed signing in on your proven domain, the
+                tier is 1: evidence, but evidence you could fabricate with
                 effort.
               </li>
               <li>
-                If at least one of those companies also paid an invoice that
-                settled in your own, bound Stripe account, the tier is 3. How
-                many pay is shown to you privately, not on your proof. Tier 3
-                never means every company pays.
+                If your domain is proven by DNS and Stripe has verified the
+                business behind your own Stripe account, with its website on
+                your domain (or an account Letterprove staff approved), the tier
+                is 3. Tier 3 says who you are. It says nothing about payments,
+                which Letterprove does not read.
               </li>
             </ul>
             <p>
@@ -637,143 +660,66 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
             </p>
 
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              Tier 3 comes from a third party&apos;s ledger
+              Tier 3: Stripe confirms who you are
             </h3>
             <p>
-              <strong>Tier 3 is read from your Stripe account</strong> rather
-              than from anything you typed. It still sits below the observation
-              and domain gates, because money proves a commercial relationship
-              and not that the product was used.
+              <strong>Stripe is used for one thing:</strong> confirming that you
+              are a real, verified business at your domain. You connect a
+              restricted key with a single permission,{" "}
+              <strong>Accounts read</strong> (Stripe lists it under{" "}
+              <strong>Connect</strong> in the key editor). Letterprove reads the
+              account itself and nothing else: no payments, invoices,
+              subscriptions or products, and no revenue figure is ever
+              published.
             </p>
             <p>
-              <strong>Tier 3 is the top of the ladder.</strong> Letterprove
-              attests from two things a vendor cannot fake cheaply: control of
-              their domain, proven by a DNS TXT record, and their own live
-              Stripe ledger. Letterprove does not contact a vendor&apos;s
-              customers. Older documents may carry tier 4, which was retired on
-              2026-10-12; read them as tier 3.
-            </p>
-
-            <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
-              What tier 3 actually requires
-            </h3>
-            <p>
-              It used to require an <code>active</code> subscription, which was
-              not enough and was not honest. A subscription is what you
-              configured, not what anyone paid: a $0 recurring price reaches{" "}
-              <code>active</code> the moment it is created, with no payment
-              method attached and no money involved, and so does a 100%-off
-              coupon. A signed tier-3 attestation naming any company you like
-              cost nothing to manufacture in your own account. Every condition
-              below is now checked instead:
-            </p>
-            <ul>
-              <li>
-                The key is <strong>live mode</strong>. A test-mode key reports
-                real counts and stores nothing, because test payments are
-                invented by definition.
-              </li>
-              <li>
-                The subscription carries a{" "}
-                <strong>real recurring price above zero</strong> on a real
-                billing interval. The floor is simply &ldquo;above zero&rdquo;:
-                any larger figure would be denominated in one currency&apos;s
-                minor unit and would mean something different in yen, and it
-                would exclude small customers who are real customers. The cost
-                of forgery is the next bullet, not the size of the number.
-              </li>
-              <li>
-                An <strong>invoice actually settled</strong> against it — paid,
-                for a non-zero amount, with a charge or payment intent behind
-                it. An invoice marked paid by hand (Stripe&apos;s{" "}
-                <code>paid_out_of_band</code>) is you asserting payment, so it
-                does not count, and it is reported back to you as such rather
-                than dropped.
-              </li>
-              <li>
-                That payment is <strong>recent</strong> relative to the billing
-                interval: about a billing period plus a grace window for
-                retries. A subscription that stays active for years while
-                nothing is collected stops publishing as paid.
-              </li>
-              <li>
-                <code>paying_since</code> is dated from the{" "}
-                <strong>first settled invoice</strong>, never from the
-                subscription&apos;s start date. A start date is a field you set,
-                and Stripe accepts a backdated one, so tenure read from it was
-                settable to any year you liked.
-              </li>
-            </ul>
-            <p>
-              Because of the invoice read, a restricted key now needs read
-              access to <strong>Invoices</strong> and{" "}
-              <strong>Subscriptions</strong>, plus <strong>Accounts</strong>{" "}
-              (Stripe lists it under <strong>Connect</strong> in the key
-              editor), so we can confirm the Stripe account publishes a domain
-              that matches the one you verified. If it does not, for example
-              because a parent company bills for you, use{" "}
+              From the account we read whether Stripe lets it accept payments,
+              which Stripe turns on only after verifying the business (its legal
+              entity, the people behind it and a bank account), plus the
+              business name, country and website it shows. The account has to
+              be yours: one of the domains it publishes (business website,
+              support email) must share your domain, or the key is refused. If
+              a related company holds the account, for example a parent, use{" "}
               <strong>Request review</strong> in the Stripe panel and we will
-              look at it. Products and Prices read are optional and only show
-              product names when you choose which products count. A key without
-              a required permission fails the sync with that instruction rather
-              than falling back to the weaker evidence: a corroboration check
-              you can switch off by removing a permission is not a corroboration
-              check.
+              look at it; an approval is stated in{" "}
+              <code>stripe_binding</code>.
             </p>
             <p>
-              <strong>Scope is stated.</strong> If your Stripe account bills
-              more than this product, choose which products count in the
-              Stripe panel. Your attestation carries{" "}
-              <code>payment_scope</code>: whether every product counts or only
-              the ones you chose. Your proof page says &quot;Payments verified by
-              Stripe, for the products you chose&quot; and never shows how many
-              products or their names.
-            </p>
-            <p>
-              <strong>Evidence expires.</strong> The sync runs hourly, and
-              payment evidence older than a day stops being published — not as a
-              claim that the customer stopped paying, but as an honest refusal
-              to keep asserting something nothing has confirmed since yesterday.
-              Repeated sync failures clear the evidence outright. Both exist
-              because disconnecting Stripe is something you control: without
-              them, revoking your own key would freeze the last favourable
-              answer in place for ever, with nothing left in the system that
-              could ever contradict it.
+              Tier 3 needs all of it at once: companies observed on a domain
+              proven by DNS, a live-mode key, Stripe&apos;s verification, and
+              the account&apos;s website on your domain (or a staff approval).
+              A test-mode key reads the account but never counts as verified.
+              The account is re-read hourly; if reads keep failing, the
+              recorded business is cleared, so revoking your key cannot freeze a
+              favourable answer in place.
             </p>
             <p>
               The honest limit:{" "}
               <strong>
-                this raises the price of a forged tier 3 from nothing to a real
-                charge through a real processor, in a live Stripe account Stripe
-                has verified, leaving a record in your own books.
+                tier 3 confirms identity, not usage or revenue.
               </strong>{" "}
-              It does not make it impossible. A vendor willing to pay themselves
-              can still reach tier 3. The Stripe account is bound to the
-              vendor by the domain it publishes about itself (or a staff
-              approval, stated in <code>stripe_binding</code>), not granted
-              through Connect. Read tier 3 as corroboration by a third
-              party&apos;s ledger, not as immunity.
-            </p>
-            <p>
-              Tier 3 first ran against a live-mode Stripe key in production on
-              2026-10-12, for Letterstory. A test-mode key deliberately stores
-              nothing.
+              A real, Stripe-verified business can still script sign-ins (see
+              tier 1). Read tier 3 as a third party vouching for who you are.
+              Documents signed before 2026-10-14 without{" "}
+              <code>stripe_business</code> used tier 3 for payment from an
+              observed company; read them as describing that snapshot.
             </p>
           </Section>
 
           <Section n={5} id="customers" title="Your customers stay private">
             <p>
-              Letterprove never names, publishes or contacts your customers.
-              The attestation carries counts only. Company domains are used
-              inside Letterprove for one thing: joining the sign-ins the script
-              observed to the invoices in your Stripe account, so that tier 3
-              counts only companies that both use and pay.
+              Letterprove never contacts your customers, and never names them
+              unless you opt in to logo verification, which names only
+              companies already on your own public logo wall that we observed
+              signing in. Otherwise the attestation carries counts only.
+              Company domains are used inside Letterprove only to count
+              distinct companies and to check your logo wall.
             </p>
             <p>
               You can see the domains behind your own counts on the{" "}
               <strong>Observed</strong> tab. Only you see them. Nothing there
               is published, and nothing there changes a figure: the
-              attestation counts what was observed and paid.
+              attestation counts what was observed.
             </p>
             <p>
               Per-customer documents, which named a company when the vendor said
@@ -962,9 +908,8 @@ npm run verify -- ./chain.json --jwks ./jwks.json`}</Snippet>
               If your site shows customer logos, list them in the{" "}
               <strong>Logos</strong> panel with the page they appear on. We
               fetch that page daily and keep only the companies actually on
-              it. Your proof then names the ones we observed signing in, marked
-              paying when your Stripe account confirms it, and shows how many of
-              your logos are verified. This is the only place a proof names a
+              it. Your proof then names the ones we observed signing in over the
+              last 30 days, and shows how many of your logos are verified. This is the only place a proof names a
               company, and only one you already show in public.
             </p>
             <h3 className="pt-2 text-lg font-medium text-[#e9efed]">
@@ -1092,9 +1037,7 @@ POST ${origin}/api/v1/observe`}</Snippet>
               <li>
                 Stripe: <code>connect_stripe</code>,{" "}
                 <code>get_stripe_connection</code>,{" "}
-                <code>list_stripe_products</code>,{" "}
-                <code>set_stripe_scope</code>,{" "}
-                <code>sync_stripe_payments</code>,{" "}
+                <code>refresh_stripe_business</code>,{" "}
                 <code>disconnect_stripe</code>.
               </li>
               <li>

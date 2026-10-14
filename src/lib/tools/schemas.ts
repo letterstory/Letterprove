@@ -359,26 +359,23 @@ const stripeConnection = z.object({
 	last4: z.string().describe("The key's last four characters, the same suffix Stripe shows. Never more than that."),
 	livemode: z
 		.boolean()
-		.describe("False for an rk_test key. Test payments corroborate nothing, so a test key syncs but stores no evidence."),
+		.describe("False for an rk_test key. A test key can read the account but never verifies the business."),
 	connected_at: z.string(),
-	last_synced_at: z.string().nullable().describe("Null until sync_stripe_payments has run once against this key."),
+	last_synced_at: z.string().nullable().describe("When the account was last read successfully (hourly, or refresh_stripe_business)."),
 	last_sync_error: z
 		.string()
 		.nullable()
 		.describe("Stripe's own message, so a vendor is told 'your key expired' rather than 'sync failed'."),
-	evidence_domains: z
-		.number()
-		.int()
-		.nullable()
-		.describe("Customer domains carrying payment evidence fresh enough to publish. Null when the count could not be read, because a failed read is not a zero. Evidence older than a day stops counting here as well as in the attestation, since nothing has confirmed it since."),
-	product_scope: z
+	business: z
 		.object({
-			mode: z
-				.enum(["all_products", "selected"])
-				.describe("all_products: every subscription in the Stripe account counts. selected: only money spent on the listed products counts."),
-			product_ids: z.array(z.string()).describe("The Stripe product ids that count as this product. Empty when mode is all_products."),
+			verified: z.boolean().describe("Stripe has verified the business: the account can accept payments, which Stripe allows only after checking the legal entity, the people behind it and a bank account. False for a test key."),
+			name: z.string().nullable().describe("The business name the account shows."),
+			country: z.string().nullable().describe("Two-letter country of the account."),
+			website: z.string().nullable().describe("Host of the business website on the account."),
+			website_matches_domain: z.boolean().describe("Whether that website is on your domain."),
 		})
-		.describe("Which Stripe products are this product. Set with set_stripe_scope; list candidates with list_stripe_products."),
+		.nullable()
+		.describe("What your Stripe account says about your business, as last read. Null until it has been read. Letterprove reads nothing about payments."),
 	account: z
 		.object({
 			id: z.string().describe("The Stripe account the key belongs to."),
@@ -386,21 +383,14 @@ const stripeConnection = z.object({
 			checked_at: z.string().nullable(),
 		})
 		.nullable()
-		.describe("The account behind the key, as last read. Null until it has been read. Payments only count when one of these domains is yours, or staff approved the account."),
+		.describe("The account behind the key, as last read. Null until it has been read. It only counts as yours when one of these domains is yours, or staff approved the account."),
 });
-
-const productIds = z
-	.array(z.string().regex(/^prod_[A-Za-z0-9]+$/, "Stripe product ids look like prod_…"))
-	.max(200);
 
 export const connectStripeInput = z.object({
 	restricted_key: z
 		.string()
 		.min(1)
-		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…) with read access to Subscriptions, Invoices and Accounts. Invoices is required because evidence is built from invoices that actually settled; Accounts (connected_account_read) because the account has to be yours — one of the domains it publishes must share your verified domain. Products and Prices read are optional and let list_stripe_products show product names. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
-	product_ids: productIds
-		.optional()
-		.describe("Optional. The Stripe products that are this product, when the account bills more than one. Omitted keeps the current scope (every product, for a first connect)."),
+		.describe("A Stripe RESTRICTED key (rk_live_… or rk_test_…) with one permission: Accounts read (connected_account_read). Letterprove reads only which business the account is (whether Stripe verified it, its name, country and website), never payments. One of the domains the account publishes must share your domain. An unrestricted sk_ or a publishable pk_ is refused, not stored."),
 });
 /**
  * The connection, never an echo of the argument.
@@ -424,26 +414,8 @@ export const disconnectStripeInput = empty;
 export const disconnectStripeOutput = z.object({
 	disconnected: z
 		.literal(true)
-		.describe("The key and every payment evidence row it produced are gone. Customers corroborated only by Stripe drop back to what observed usage alone earns."),
+		.describe("The key and what the account said about your business are gone. The proof no longer shows a Stripe-verified business, so it drops to tier 1 if it was at tier 3."),
 });
-
-export const listStripeProductsInput = empty;
-export const listStripeProductsOutput = z.object({
-	products: z.array(
-		z.object({
-			id: z.string(),
-			name: z.string().nullable().describe("Null when the key cannot read Products; the id is still valid to choose."),
-			recurring: z.boolean().nullable().describe("Whether the product has an active recurring price. Null when the key cannot read Prices."),
-		}),
-	),
-	names_available: z.boolean().describe("False when the key lacks Products read, so the list came from the products seen on subscriptions."),
-	product_scope: stripeConnection.shape.product_scope,
-});
-
-export const setStripeScopeInput = z.object({
-	product_ids: productIds.describe("The Stripe products that are this product. An empty list means every product in the account counts."),
-});
-export const setStripeScopeOutput = stripeConnection;
 
 export const setStripeAccountOverrideInput = z.object({
 	vendor: z.string().min(1).describe("Vendor slug."),
@@ -453,7 +425,7 @@ export const setStripeAccountOverrideInput = z.object({
 		.regex(/^acct_[A-Za-z0-9]+$/)
 		.optional()
 		.describe("The Stripe account to approve. Defaults to the account behind the vendor's connected key, as last read."),
-	reason: z.string().min(10).max(500).optional().describe("Required when setting: why this account may corroborate a vendor on a different domain."),
+	reason: z.string().min(10).max(500).optional().describe("Required when setting: why this account may verify a vendor on a different domain."),
 });
 export const setStripeAccountOverrideOutput = z.object({
 	vendor: z.string(),
@@ -465,24 +437,13 @@ export const setStripeAccountOverrideOutput = z.object({
 
 export const syncStripePaymentsInput = empty;
 export const syncStripePaymentsOutput = z.object({
-	matched: z.number().int().describe("Customer domains that got payment evidence, the tier-3 population after this sync."),
-	unmatched: z
-		.number()
-		.int()
-		.describe("Subscriptions that could not be joined to an observed domain. Not a failure: a vendor's Stripe holds customers this product has never seen."),
-	test_mode: z
-		.boolean()
-		.describe("True when a test key meant the counts above are real and NOTHING was stored. Wiring works; evidence is refused."),
-	truncated: z
-		.boolean()
-		.describe("Stripe held more subscriptions than one sync reads, so the counts understate. Reported rather than silent."),
-	scope_warning: z
-		.string()
-		.optional()
-		.describe(
-			"Present only on a test key whose restricted key cannot read Invoices. The sync succeeded in the only sense a test key can, and there is something to fix before a live key would work. Show it to the vendor: nothing alerts on it, because a test key stores no evidence and so nothing is at risk yet."
-		),
+	bound: z.boolean().describe("Whether the account is yours: one of the domains it publishes shares your domain, or staff approved it."),
+	verified: z.boolean().describe("Whether Stripe has verified the business (the account can accept payments). False for a test key."),
+	test_mode: z.boolean().describe("True for a test key: the account is read, but the business never counts as verified."),
+	warning: z.string().optional().describe("Why the account doesn't count as yours, when it was read but didn't match."),
 });
+export const refreshStripeBusinessInput = syncStripePaymentsInput;
+export const refreshStripeBusinessOutput = syncStripePaymentsOutput;
 
 /* ------------------------------------------------------------------ staff */
 
@@ -911,14 +872,11 @@ const displaySections = z.object({
 	sessions: z.boolean(),
 	reported_history: z.boolean(),
 	logos: z.boolean(),
-	payment_details: z.boolean().describe("The Stripe product scope and the first verified payment date."),
+	stripe_business: z.boolean().describe("The business Stripe verified behind your Stripe account: name, country, website."),
 	observed_since: z.boolean(),
 	hosts: z.boolean(),
 	growth: z.boolean().describe("Companies observed per month, last six months."),
-	retention: z.boolean().describe("Of the companies active 60 days ago, how many are still signing in."),
-	paying_count: z
-		.enum(["hidden", "signed_in", "all"])
-		.describe("Whether the proof states how many companies pay. hidden (default); signed_in: companies seen signing in that paid through your Stripe; all: every company that paid through your Stripe."),
+	retention: z.boolean().describe("Of the companies observed 90 to 60 days ago, how many were also observed in the last 30 days."),
 	logo_names: z.boolean().describe("Name the verified companies from your logo wall, or show only the counts."),
 });
 

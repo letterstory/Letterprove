@@ -118,12 +118,14 @@ export default function PrivacyPage() {
           person identifier reaches us. We never send anything to PostHog.
         </p>
         <p>
-          <strong>If a vendor connects Stripe</strong>, we read invoices and
-          customer records from the vendor&apos;s own Stripe account, with a
-          read-only key the vendor supplies. Those records include the billing
-          email address of each of the vendor&apos;s paying customers. We read
-          that address only to take its domain, in memory, during the sync; we
-          store the domain and the amount paid, never the address.
+          <strong>If a vendor connects Stripe</strong>, we read only the
+          vendor&apos;s own Stripe account record, with a read-only key the
+          vendor supplies: whether Stripe has verified the business, its name,
+          country, website and the domains it publishes. We do not read
+          payments, invoices, subscriptions or any of the vendor&apos;s
+          customers. (Until October 14, 2026 we read invoices to count paying
+          companies by email domain; that stopped, and those records are
+          deleted.)
         </p>
         <p>
           <strong>If this changes, this page changes first.</strong> This is
@@ -169,10 +171,12 @@ export default function PrivacyPage() {
             claiming to be from a site it did not come from is dropped.
           </li>
           <li>
-            The vendor must have proven control of that domain by publishing a
-            DNS record we specify. Until they do,{" "}
-            <strong>nothing they send is stored at all</strong> — so nobody can
-            accumulate a history on a domain they do not own.
+            The request must come from a host the vendor is allowed to collect
+            on: its own domain, or a host it proved or added. Whether the vendor
+            proved the domain (by DNS, or by its script on a page there) is
+            stated on its proof, and an unproven domain is labelled{" "}
+            <strong>Domain not verified</strong> with the lowest tier. Once a
+            domain is proven by DNS, nobody else can collect on it.
           </li>
         </ul>
       </Section>
@@ -184,16 +188,18 @@ export default function PrivacyPage() {
         </p>
         <p>
           <strong>Counts about the vendor are public.</strong> A vendor&apos;s
-          proof shows that it controls its domain, whether its Stripe account
-          is its own, and totals — how many companies were observed, how many
-          of them pay, how many sessions. These name nobody.
+          proof shows how it proved its domain, the business Stripe has
+          verified behind its own Stripe account, and totals — how many
+          companies were observed and how many sessions. These name nobody.
         </p>
         <p>
-          <strong>No customer is ever named.</strong> Letterprove does not
-          publish, or contact, any of a vendor&apos;s customers. Company domains
-          are used inside Letterprove only to join observed usage to the
-          vendor&apos;s Stripe payments. Attestations that named individual
-          customers were retired on October 13, 2026.
+          <strong>Customers are not named</strong>, except on a vendor&apos;s
+          opt-in logo verification, which names only companies already on the
+          vendor&apos;s own public logo wall that Letterprove observed signing
+          in. Letterprove never contacts a vendor&apos;s customers. Company
+          domains are used inside Letterprove only to count distinct companies
+          and check the logo wall. Attestations that named individual customers
+          were retired on October 13, 2026.
         </p>
         <p>
           We never publish individual events, individual visitors, or the raw
@@ -255,9 +261,9 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Stripe</strong> — reads a vendor&apos;s own connected
-            account, at their instruction, to corroborate a customer&apos;s
-            settled invoices for a higher provenance tier. We do not process
-            payments and do not receive card data.
+            account record, at their instruction, to confirm the business is
+            verified by Stripe. We read no payments, do not process payments and
+            do not receive card data.
           </li>
           <li>
             <strong>Slack</strong> — internal alerting for our own team; no

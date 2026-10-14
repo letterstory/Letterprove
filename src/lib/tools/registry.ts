@@ -46,17 +46,14 @@ import { sendSupportMessage } from "@/lib/support/slack";
 import {
 	saveCredential,
 	connectionFor,
-	credentialFor,
 	classifyKey,
-	setProductScope,
 	disconnect as disconnectStripeCredential,
 	type KeyRejection,
 	type StripeConnection,
 } from "@/lib/stripe/credentials";
-import { syncVendorPayments } from "@/lib/stripe/sync";
+import { syncVendorStripe } from "@/lib/stripe/sync";
 import { checkStripeAccount, overrideOf } from "@/lib/stripe/account";
-import { fetchProducts } from "@/lib/stripe/fetch";
-import { paymentEvidenceCount } from "@/lib/attest/payment-evidence";
+import { registrableDomain } from "@/lib/vendors/custom-domain";
 import {
 	classifyKey as classifyPosthogKey,
 	disconnect as disconnectPosthogCredential,
@@ -255,7 +252,8 @@ const POSTHOG_KEY_REFUSAL: Record<PosthogKeyRejection | "not_configured" | "stor
  * `StripeConnection`, which is itself the safe subset credentials.ts is
  * willing to hand out.
  */
-function stripeConnectionBody(connection: StripeConnection, evidenceDomains: number | null) {
+function stripeConnectionBody(connection: StripeConnection, vendorDomain: string | null) {
+	const website = connection.businessUrlHost ?? null;
 	return {
 		connected: true as const,
 		last4: connection.last4,
@@ -263,11 +261,15 @@ function stripeConnectionBody(connection: StripeConnection, evidenceDomains: num
 		connected_at: connection.connectedAt,
 		last_synced_at: connection.lastSyncedAt,
 		last_sync_error: connection.lastSyncError,
-		evidence_domains: evidenceDomains,
-		product_scope: {
-			mode: connection.productIds.length > 0 ? ("selected" as const) : ("all_products" as const),
-			product_ids: connection.productIds,
-		},
+		business: connection.accountCheckedAt
+			? {
+					verified: connection.livemode && connection.chargesEnabled === true,
+					name: connection.businessName ?? null,
+					country: connection.country ?? null,
+					website,
+					website_matches_domain: Boolean(website && vendorDomain) && registrableDomain(website!) === registrableDomain(vendorDomain!.toLowerCase()),
+				}
+			: null,
 		account: connection.stripeAccountId
 			? { id: connection.stripeAccountId, domains: connection.stripeAccountDomains, checked_at: connection.accountCheckedAt }
 			: null,
@@ -316,10 +318,41 @@ async function scriptBody(vendorId: string, origin: string) {
 	};
 }
 
-function productIdsArg(value: unknown): string[] | null {
-	if (value === undefined) return null;
-	const parsed = S.setStripeScopeInput.shape.product_ids.safeParse(value);
-	return parsed.success ? [...new Set(parsed.data)].sort() : null;
+/** The vendor's domain, for matching the Stripe account's website. Null when unreadable. */
+async function vendorDomainOf(vendorId: string): Promise<string | null> {
+	const db = dbClient();
+	if (!db) return null;
+	const { data } = await db.from("vendors").select("domain").eq("id", vendorId).maybeSingle();
+	return (data?.domain as string | undefined) ?? null;
+}
+
+/** One handler, two names: refresh_stripe_business and its deprecated alias. */
+function refreshStripeBusinessTool(name: string, description: string): BoundTool {
+	return defineTool({
+		name,
+		description,
+		capability: "vendor:write",
+		inputSchema: S.refreshStripeBusinessInput,
+		outputSchema: S.refreshStripeBusinessOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			if (!(await connectionFor(vendorId))) {
+				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." } };
+			}
+			const result = await syncVendorStripe(vendorId);
+			if (!result.ok) return { ok: false, status: 502, body: { error: "stripe_read_failed", detail: result.error } };
+			return {
+				ok: true,
+				body: {
+					bound: result.bound,
+					verified: result.bound && result.chargesEnabled && !result.testMode,
+					test_mode: result.testMode,
+					...(result.warning ? { warning: result.warning } : {}),
+				},
+			};
+		},
+	});
 }
 
 export const TOOLS: BoundTool[] = [
@@ -1300,7 +1333,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "connect_stripe",
 		description:
-			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so payments can corroborate customers at tier 3. Args: restricted_key, which needs read access to Subscriptions, Invoices and Accounts; product_ids (optional) — the Stripe products that are this product, when the account bills several. The Stripe account must be the vendor's own: one of the domains it publishes (business website, support email) has to share the vendor's domain, or the key is refused. The binding counts on the proof only once the domain is verified by DNS (site proof is not enough). An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
+			"Store a Stripe RESTRICTED key (rk_) for the caller's vendor, so Stripe can confirm the vendor is a real, verified business at its domain. Letterprove reads only the account itself (whether Stripe verified the business, its name, country and website), never payments. Args: restricted_key, which needs one permission: Accounts read. The Stripe account must be the vendor's own: one of the domains it publishes (business website, support email) has to share the vendor's domain, or the key is refused. A Stripe-verified business whose website is on the vendor's domain reaches tier 3 once the domain is verified by DNS. An unrestricted sk_ or publishable pk_ key is refused. The key is never returned.",
 		capability: "vendor:write",
 		inputSchema: S.connectStripeInput,
 		outputSchema: S.connectStripeOutput,
@@ -1319,11 +1352,6 @@ export const TOOLS: BoundTool[] = [
 				return { ok: false, status: 400, body: { error: "restricted_key is required" } };
 			}
 
-			const productIds = record.product_ids === undefined ? undefined : productIdsArg(record.product_ids);
-			if (productIds === null) {
-				return { ok: false, status: 400, body: { error: "invalid_product_ids", detail: "product_ids must be Stripe product ids (prod_…)." } };
-			}
-
 			// Refuse the obvious key mistakes before any network call, so an sk_
 			// key is never sent anywhere, even to Stripe.
 			const classified = classifyKey(submitted);
@@ -1339,7 +1367,7 @@ export const TOOLS: BoundTool[] = [
 				return { ok: false, status: ACCOUNT_REFUSAL_STATUS[account.error], body: { error: account.error, detail: account.detail } };
 			}
 
-			const saved = await saveCredential(vendorId, submitted, { productIds, account: account.account });
+			const saved = await saveCredential(vendorId, submitted, { account: account.account });
 			if (!saved.ok) {
 				const refusal = KEY_REFUSAL[saved.reason];
 				return { ok: false, status: refusal.status, body: { error: saved.reason, detail: refusal.detail } };
@@ -1350,13 +1378,13 @@ export const TOOLS: BoundTool[] = [
 			// answer with the same object built from the same source.
 			const connection = await connectionFor(vendorId);
 			if (!connection) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			return { ok: true, body: stripeConnectionBody(connection, await paymentEvidenceCount(vendorId)) };
+			return { ok: true, body: stripeConnectionBody(connection, await vendorDomainOf(vendorId)) };
 		},
 	}),
 	defineTool({
 		name: "get_stripe_connection",
 		description:
-			"The state of the caller's vendor's Stripe connection: which key suffix, live or test, when it last synced, what Stripe last said, and how many customer domains currently carry payment evidence. No args. Never returns key material.",
+			"The state of the caller's vendor's Stripe connection: which key suffix, live or test, when the account was last read, and what it says about the business (whether Stripe verified it, its name, country, website, and whether that website is on the vendor's domain). No args. Never returns key material.",
 		capability: "vendor:read",
 		inputSchema: S.getStripeConnectionInput,
 		outputSchema: S.getStripeConnectionOutput,
@@ -1368,129 +1396,15 @@ export const TOOLS: BoundTool[] = [
 			// Not connected is an ordinary answer, the state of every vendor
 			// that has never done this, so it is a body rather than a 404.
 			if (!connection) return { ok: true, body: { connected: false } };
-			return { ok: true, body: stripeConnectionBody(connection, await paymentEvidenceCount(vendorId)) };
+			return { ok: true, body: stripeConnectionBody(connection, await vendorDomainOf(vendorId)) };
 		},
 	}),
-	defineTool({
-		name: "sync_stripe_payments",
-		description:
-			"Read the caller's vendor's Stripe subscriptions and settled invoices, join them to observed usage, and replace their payment evidence. No args. A subscription with no invoice that actually settled is not evidence and is reported as unmatched. A test-mode key reports real counts and stores nothing.",
-		capability: "vendor:write",
-		inputSchema: S.syncStripePaymentsInput,
-		outputSchema: S.syncStripePaymentsOutput,
-		/*
-		 * The one thing that puts evidence in front of the tier gate. `earned()`
-		 * in attest/body.ts already reads vendor_payment_evidence on every
-		 * publish; syncVendorPayments already fills it. Nothing called it.
-		 *
-		 * Writes, not reads, hence vendor:write: it replaces the vendor's
-		 * evidence wholesale, and a cancelled subscription DISAPPEARING is as
-		 * much of the point as a new one appearing.
-		 */
-		handler: async (_args, principal) => {
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-			const db = dbClient();
-			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-
-			// Checked here rather than pattern-matching the sync's error string
-			// afterwards: "you have not connected Stripe" is a precondition the
-			// caller handles differently from "Stripe would not answer".
-			const connection = await connectionFor(vendorId);
-			if (!connection) {
-				return {
-					ok: false,
-					status: 409,
-					body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." },
-				};
-			}
-
-			const { data: vendor } = await db.from("vendors").select("slug").eq("id", vendorId).maybeSingle();
-			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
-
-			const result = await syncVendorPayments(vendorId, vendor.slug);
-			if (!result.ok) {
-				// Stripe's own message, relayed. It names an expired key or a
-				// missing permission directly, where anything invented here would
-				// say "sync failed". Stripe redacts the middle of a key in its own
-				// error text, which is why relaying it is safe.
-				return { ok: false, status: 502, body: { error: "stripe_sync_failed", detail: result.error } };
-			}
-			return {
-				ok: true,
-				body: {
-					matched: result.matched,
-					unmatched: result.unmatched,
-					test_mode: result.testMode,
-					truncated: result.truncated,
-					// Only ever set on a test key that cannot read Invoices. It
-					// deliberately does not fail the sync (nothing is at risk when
-					// nothing is stored), which means this string is the only way
-					// the vendor ever learns about it.
-					...(result.scopeWarning ? { scope_warning: result.scopeWarning } : {}),
-				},
-			};
-		},
-	}),
-	defineTool({
-		name: "list_stripe_products",
-		description:
-			"The products in the caller's vendor's connected Stripe account, with whether each has a recurring price, and the current product scope. No args. Use it to choose product_ids for set_stripe_scope when the account bills more than one product.",
-		capability: "vendor:read",
-		inputSchema: S.listStripeProductsInput,
-		outputSchema: S.listStripeProductsOutput,
-		handler: async (_args, principal) => {
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-
-			const credential = await credentialFor(vendorId);
-			if (!credential) {
-				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." } };
-			}
-			const listed = await fetchProducts(credential.key);
-			if (!listed.ok) return { ok: false, status: 502, body: { error: "stripe_read_failed", detail: listed.error } };
-			return {
-				ok: true,
-				body: {
-					products: listed.products,
-					names_available: listed.namesAvailable,
-					product_scope: {
-						mode: credential.productIds.length > 0 ? ("selected" as const) : ("all_products" as const),
-						product_ids: credential.productIds,
-					},
-				},
-			};
-		},
-	}),
-	defineTool({
-		name: "set_stripe_scope",
-		description:
-			"Choose which Stripe products are this product, so payments for the account's other products stop corroborating customers. Args: product_ids (Stripe product ids; an empty list means every product counts). Takes effect at the next sync — run sync_stripe_payments to apply it now.",
-		capability: "vendor:write",
-		inputSchema: S.setStripeScopeInput,
-		outputSchema: S.setStripeScopeOutput,
-		handler: async (args, principal) => {
-			const vendorId = requireVendorId(principal);
-			if (typeof vendorId !== "string") return vendorId;
-
-			const productIds = productIdsArg(asRecord(args).product_ids ?? null);
-			if (productIds === null) {
-				return { ok: false, status: 400, body: { error: "invalid_product_ids", detail: "product_ids must be a list of Stripe product ids (prod_…)." } };
-			}
-			if (!(await connectionFor(vendorId))) {
-				return { ok: false, status: 409, body: { error: "stripe_not_connected", detail: "Connect a Stripe restricted key first." } };
-			}
-			if (!(await setProductScope(vendorId, productIds))) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-
-			const connection = await connectionFor(vendorId);
-			if (!connection) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
-			return { ok: true, body: stripeConnectionBody(connection, await paymentEvidenceCount(vendorId)) };
-		},
-	}),
+	refreshStripeBusinessTool("refresh_stripe_business", "Re-read the caller's vendor's Stripe account now: whether Stripe has verified the business, its name, country and website, and whether the account is the vendor's own. No args. Letterprove reads nothing about payments. A test-mode key reads the account but never counts as verified. Runs hourly on its own."),
+	refreshStripeBusinessTool("sync_stripe_payments", "Deprecated name for refresh_stripe_business (since 2026-10-14, Letterprove reads no payments). Re-reads which business the vendor's Stripe account is. No args."),
 	defineTool({
 		name: "set_stripe_account_override",
 		description:
-			"Staff only. Approve a vendor's Stripe account whose published domains don't match the vendor's verified domain (e.g. a parent company billing for a subsidiary), or clear that approval. Args: vendor (slug), reason (required when setting), stripe_account_id (optional — defaults to the account behind the vendor's connected key), clear (optional). The approval covers that one account only.",
+			"Staff only. Approve a vendor's Stripe account whose published domains don't match the vendor's verified domain (e.g. a parent company's account for a subsidiary), or clear that approval. Args: vendor (slug), reason (required when setting), stripe_account_id (optional — defaults to the account behind the vendor's connected key), clear (optional). The approval covers that one account only.",
 		capability: "staff:write",
 		inputSchema: S.setStripeAccountOverrideInput,
 		outputSchema: S.setStripeAccountOverrideOutput,
@@ -1521,7 +1435,7 @@ export const TOOLS: BoundTool[] = [
 
 			const reason = typeof record.reason === "string" ? record.reason.trim() : "";
 			if (reason.length < 10) {
-				return { ok: false, status: 400, body: { error: "reason_required", detail: "Say why this account may corroborate a vendor on a different domain (at least 10 characters)." } };
+				return { ok: false, status: 400, body: { error: "reason_required", detail: "Say why this account may verify a vendor on a different domain (at least 10 characters)." } };
 			}
 			let accountId = typeof record.stripe_account_id === "string" ? record.stripe_account_id.trim() : "";
 			if (!accountId) {
@@ -1563,7 +1477,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "disconnect_stripe",
 		description:
-			"Remove the caller's vendor's Stripe key and every payment evidence row it produced. No args. Customers corroborated only by Stripe fall back to what observed usage alone earns.",
+			"Remove the caller's vendor's Stripe key and what the account said about the business. No args. The proof stops showing a Stripe-verified business, so tier 3 drops to tier 1.",
 		capability: "vendor:write",
 		inputSchema: S.disconnectStripeInput,
 		outputSchema: S.disconnectStripeOutput,

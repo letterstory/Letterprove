@@ -29,7 +29,7 @@ const ATTESTATION = {
 	domain: "acme.com",
 	window_days: 30,
 	companies_observed: 12,
-	paying_companies: 4,
+	stripe_business: { verified: true, name: "Acme Inc.", country: "US", website: "acme.com", website_matches_domain: true, binding: "domain_match" as const },
 	sessions: 340,
 	signups: 2,
 	logins: 90,
@@ -60,7 +60,7 @@ describe("vendorProof", () => {
 		expect(proof.summary).toEqual({
 			tier: 3,
 			companies_observed: 12,
-			payment_corroborated: true,
+			business_verified: true,
 			sessions_30d: 340,
 			last_attested: "2026-10-13T03:05:00.000Z",
 		});
@@ -74,7 +74,7 @@ describe("vendorProof", () => {
 		vi.mocked(a.vendorAggregate).mockResolvedValue(null);
 		const proof = (await vendorProof("acme"))!;
 		expect(proof.attestation).toBeNull();
-		expect(proof.summary).toEqual({ tier: 0, companies_observed: 0, payment_corroborated: false, sessions_30d: 0, last_attested: "" });
+		expect(proof.summary).toEqual({ tier: 0, companies_observed: 0, business_verified: false, sessions_30d: 0, last_attested: "" });
 	});
 
 	it("is null for an unknown vendor", async () => {

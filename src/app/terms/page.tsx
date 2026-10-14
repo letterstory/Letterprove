@@ -49,13 +49,11 @@ export default function TermsPage() {
 
 			<Section n={3} title="Domain verification">
 				<p>
-					Before we record anything for a domain, you must prove you control it by publishing a
-					DNS record we specify. You may only verify domains you actually control, and attempting
-					to claim someone else&apos;s domain is a breach of these terms.
-				</p>
-				<p>
-					Until verification completes, events you send are discarded rather than stored. That is
-					intended behaviour, not a fault.
+					You prove you control your domain by publishing a DNS record we specify, or more weakly
+					by carrying our script with your key on a page of that domain. Proof is optional: a
+					proof without it is labelled &ldquo;Domain not verified&rdquo; and carries the lowest
+					tier. You may only claim domains you actually control, and attempting to claim someone
+					else&apos;s domain is a breach of these terms.
 				</p>
 			</Section>
 
@@ -75,19 +73,17 @@ export default function TermsPage() {
 				<p>
 					Every published claim therefore carries a <strong>provenance tier</strong> describing how
 					much independent corroboration stands behind it — from vendor-asserted at the bottom, to
-					observed by our script on a domain you proved by DNS, to corroborated by a third
-					party&apos;s ledger. The tier is derived from that evidence alone; you cannot set it.
+					observed by our script on a domain you proved, to a third party confirming who you are. The tier is derived from that evidence alone; you cannot set it.
 					Anyone reading a proof is expected to weigh the tier rather than treat every claim as
 					equivalent.
 				</p>
 				<p>
-					Third-party corroboration today means Stripe: if you connect your own live Stripe account,
-					we read invoices that actually settled there and join them to usage we observed from the
-					same company domain, and publish how many observed companies pay — a count, never a
-					name. The account must publish your verified domain, unless we approve a related
-					company&apos;s account. This evidence expires if it is not refreshed by a successful
-					sync, so a stale Stripe connection reads as absent corroboration, not as proof anyone
-					stopped paying.
+					Third-party confirmation today means Stripe, used only to confirm who you are: if you
+					connect your own live Stripe account, we read the account itself (whether Stripe has
+					verified the business, its name, country and website) and nothing else. We read no
+					payments and publish no revenue figure. The account must publish your domain, unless we
+					approve a related company&apos;s account. The confirmation expires if it is not refreshed
+					by a successful read.
 				</p>
 				<p>
 					You agree not to represent a Letterprove attestation as certifying more than its tier
@@ -120,11 +116,12 @@ export default function TermsPage() {
 
 			<Section n={6} title="Your customers are never named">
 				<p>
-					A Letterprove attestation is about you: that you control your domain, that your Stripe
-					account is yours, and how many companies use and pay for your product.{" "}
-					<strong>It never names, publishes or contacts your customers.</strong> Company domains
-					are used inside Letterprove only to join observed usage to your Stripe payments, and
-					only counts are published.
+					A Letterprove attestation is about you: that you control your domain, the business
+					Stripe has verified behind your Stripe account, and how many companies were observed
+					using your product.{" "}
+					<strong>It never contacts your customers, and names them only if you opt in to logo
+					verification</strong>, which names companies already on your own public logo wall that we
+					observed signing in. Otherwise only counts are published.
 				</p>
 				<p>
 					Attestations that named individual customers were retired on October 13, 2026. Copies

@@ -1,23 +1,23 @@
 /**
  * The reads behind the vendor attestation that are not telemetry: who the
- * vendor is (hosts, Stripe binding) and what corroborates it (payment
- * evidence, first observation).
+ * vendor is (hosts, the Stripe-verified business) and first observation.
  *
  * Every function here fails toward the weaker claim. A read that errors
- * returns the answer that says less — no binding, no paying companies, no
+ * returns the answer that says less — no binding, no verified business, no
  * date — never a guess, because whatever it returns is signed.
  *
- * Nothing here names a customer. Payment evidence is keyed by customer domain
- * internally; what leaves this module is a count and a date.
+ * Nothing here names a customer, and nothing reads payments: since 2026-10-14
+ * Stripe only confirms the vendor is a real, verified business at its domain.
  */
 
 import { dbClient } from "@/lib/db/client";
 import { readAllRows } from "@/lib/db/read-all";
 import { evaluateAccount, overrideOf } from "@/lib/stripe/account";
 import { acceptedHosts } from "@/lib/vendors/hosts";
+import { registrableDomain } from "@/lib/vendors/custom-domain";
 
-/** Matches MAX_EVIDENCE_AGE_MS in ./payment-evidence.ts: older evidence reads as absent. */
-const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
+/** An account read older than this reads as absent: the sync runs hourly, so a day is many missed runs. */
+const MAX_ACCOUNT_AGE_MS = 24 * 60 * 60 * 1000;
 
 export type StripeBinding = "domain_match" | "staff_override";
 
@@ -64,90 +64,66 @@ export async function hostCount(vendorId: string): Promise<number> {
 	return (await acceptedHosts(vendorId)).size;
 }
 
-export interface Paying {
-	/** Observed company domains with fresh, settled payment evidence. */
-	companies: number;
-	/** Earliest settled invoice among them, ISO. Null when none. */
-	since: string | null;
+/**
+ * The business behind the vendor's connected Stripe account, as Stripe states
+ * it. Signed into the attestation as `stripe_business`.
+ */
+export interface StripeBusiness {
+	/**
+	 * Stripe has verified the business: the account can accept payments
+	 * (`charges_enabled`), which Stripe allows only after checking the legal
+	 * entity, the people behind it and a bank account. False for a test-mode key,
+	 * which can read the account but proves nothing about it.
+	 */
+	verified: boolean;
+	/** The business name the account shows. */
+	name: string | null;
+	/** Two-letter country of the account. */
+	country: string | null;
+	/** Host of the business website on the account. */
+	website: string | null;
+	/** Whether that website shares the vendor's registrable domain. */
+	website_matches_domain: boolean;
+	/** How the account was tied to the vendor: its published domains match, or staff approved it. */
+	binding: StripeBinding;
 }
 
 /**
- * How many of the given observed company domains currently carry payment
- * evidence. Only domains in `observed` count: payment without observed use is
- * not evidence that anyone uses the product, and this system only claims what
- * it observed.
+ * What the vendor's own Stripe account says about the business. Null when
+ * Stripe isn't connected, the account was never read (or not in the last day),
+ * or the account isn't the vendor's. Reads nothing about payments.
  */
-export async function payingAmong(vendorId: string, observed: readonly string[]): Promise<Paying> {
-	const none: Paying = { companies: 0, since: null };
-	if (observed.length === 0) return none;
+export async function stripeBusiness(vendorId: string, vendorDomain: string): Promise<StripeBusiness | null> {
 	const db = dbClient();
-	if (!db) return none;
-
-	const floor = new Date(Date.now() - MAX_EVIDENCE_AGE_MS).toISOString();
+	if (!db) return null;
+	const binding = await stripeBinding(vendorId, vendorDomain);
+	if (!binding) return null;
 	const { data, error } = await db
-		.from("vendor_payment_evidence")
-		.select("domain, since, monthly_amount")
+		.from("vendor_stripe_credentials")
+		.select("livemode, account_checked_at, stripe_charges_enabled, stripe_business_name, stripe_country, stripe_business_url_host")
 		.eq("vendor_id", vendorId)
-		.gte("synced_at", floor);
-	if (error || !data) return none;
-
-	const wanted = new Set(observed);
-	const rows = (data as { domain: string; since: string | null; monthly_amount: number | string }[]).filter(
-		(r) => wanted.has(r.domain) && Number(r.monthly_amount) >= 1,
-	);
-	if (rows.length === 0) return none;
-	const since = rows
-		.map((r) => (typeof r.since === "string" ? Date.parse(r.since) : NaN))
-		.filter((t) => Number.isFinite(t))
-		.sort((a, b) => a - b)[0];
-	return { companies: rows.length, since: since ? new Date(since).toISOString() : null };
+		.maybeSingle();
+	if (error || !data?.account_checked_at) return null;
+	if (Date.now() - Date.parse(data.account_checked_at as string) > MAX_ACCOUNT_AGE_MS) return null;
+	const website = (data.stripe_business_url_host as string | null) ?? null;
+	return {
+		verified: data.livemode === true && data.stripe_charges_enabled === true,
+		name: (data.stripe_business_name as string | null) ?? null,
+		country: (data.stripe_country as string | null) ?? null,
+		website,
+		website_matches_domain: Boolean(website) && registrableDomain(website!) === registrableDomain(vendorDomain.toLowerCase()),
+		binding,
+	};
 }
 
 /**
- * Every company domain with fresh payment evidence in the vendor's Stripe,
- * observed or not. For the logo wall only: a company the vendor already shows
- * publicly may be marked "paying" on Stripe's word alone. Every count on the
- * proof still uses payingAmong, which joins to observed domains.
+ * Whether the Stripe evidence reaches tier 3: Stripe verified the business,
+ * and either its website is on the vendor's domain or staff approved the
+ * account (a parent company billing for a subsidiary). Pure.
  */
-export async function stripePayingDomains(vendorId: string): Promise<Set<string>> {
-	const db = dbClient();
-	if (!db) return new Set();
-	const floor = new Date(Date.now() - MAX_EVIDENCE_AGE_MS).toISOString();
-	const [evidence, payers] = await Promise.all([
-		db.from("vendor_payment_evidence").select("domain, monthly_amount").eq("vendor_id", vendorId).gte("synced_at", floor),
-		db.from("vendor_stripe_payers").select("domain").eq("vendor_id", vendorId).gte("synced_at", floor),
-	]);
-	const out = new Set<string>();
-	if (!evidence.error && evidence.data) {
-		for (const r of evidence.data as { domain: string; monthly_amount: number | string }[]) if (Number(r.monthly_amount) >= 1) out.add(r.domain);
-	}
-	if (!payers.error && payers.data) for (const r of payers.data as { domain: string }[]) out.add(r.domain);
-	return out;
-}
-
-/**
- * Which of the given observed company domains carry fresh payment evidence.
- * Same rule as payingAmong, returned as domains for the logo check, which
- * names a company only when it is also on the vendor's own public logo wall.
- * An empty set on any failure: that understates, it never invents a payer.
- */
-export async function payingDomainsAmong(vendorId: string, observed: readonly string[]): Promise<Set<string>> {
-	if (observed.length === 0) return new Set();
-	const db = dbClient();
-	if (!db) return new Set();
-	const floor = new Date(Date.now() - MAX_EVIDENCE_AGE_MS).toISOString();
-	const { data, error } = await db
-		.from("vendor_payment_evidence")
-		.select("domain, monthly_amount")
-		.eq("vendor_id", vendorId)
-		.gte("synced_at", floor);
-	if (error || !data) return new Set();
-	const wanted = new Set(observed);
-	return new Set(
-		(data as { domain: string; monthly_amount: number | string }[])
-			.filter((r) => wanted.has(r.domain) && Number(r.monthly_amount) >= 1)
-			.map((r) => r.domain),
-	);
+export function stripeBusinessConfirms(business: StripeBusiness | null): boolean {
+	if (!business?.verified) return false;
+	return business.website_matches_domain || business.binding === "staff_override";
 }
 
 /**

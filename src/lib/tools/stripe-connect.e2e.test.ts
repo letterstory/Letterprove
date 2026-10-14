@@ -114,24 +114,10 @@ describe("stripe connect/disconnect, against a real Postgres schema", () => {
 					connected: true,
 					livemode: false,
 					last4: "e123",
-					product_scope: { mode: "all_products", product_ids: [] },
 					account: { id: "acct_e2e", domains: ["stripe-connect-e2e.example"] },
 				},
 			},
 		});
-	});
-
-	it("keeps the product scope through a reconnect that doesn't restate it", async () => {
-		const { dispatchTool } = await import("./registry");
-
-		await dispatchTool("connect_stripe", { restricted_key: "rk_test_firstKeyABCD1111", product_ids: ["prod_core"] }, serviceCallerFor(VENDOR_ID));
-		await dispatchTool("connect_stripe", { restricted_key: "rk_test_secondKeyEFGH2222" }, serviceCallerFor(VENDOR_ID));
-
-		const { rows } = await pg.query("select product_ids from vendor_stripe_credentials where vendor_id = $1", [VENDOR_ID]);
-		expect(rows[0]).toEqual({ product_ids: ["prod_core"] });
-
-		const scoped = await dispatchTool("set_stripe_scope", { product_ids: [] }, serviceCallerFor(VENDOR_ID));
-		expect(scoped).toMatchObject({ kind: "result", result: { ok: true, body: { product_scope: { mode: "all_products" } } } });
 	});
 
 	it("reconnecting (upsert) replaces the old credential rather than duplicating it", async () => {

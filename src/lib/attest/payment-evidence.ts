@@ -1,4 +1,8 @@
 /**
+ * RETIRED 2026-10-14: payments are no longer read (README decision 42). Nothing
+ * in the live attestation calls this module; it stays until the payment tables
+ * are dropped.
+ *
  * Stripe-corroborated payment for one customer domain — the tier-3 input.
  *
  * Read from `vendor_payment_evidence`, which the Stripe sync fills. Never

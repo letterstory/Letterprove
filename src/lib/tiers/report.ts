@@ -163,22 +163,6 @@ export function classifyRow(
 	};
 }
 
-/** Domains with fresh payment evidence, or null when the read failed. */
-async function paidDomains(vendorId: string): Promise<Set<string> | null> {
-	const db = dbClient();
-	if (!db) return null;
-	const floor = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-	const { data, error } = await db
-		.from("vendor_payment_evidence")
-		.select("domain, monthly_amount")
-		.eq("vendor_id", vendorId)
-		.gte("synced_at", floor);
-	if (error || !data) return null;
-	return new Set(
-		(data as { domain: string; monthly_amount: number | string }[]).filter((r) => Number(r.monthly_amount) >= 1).map((r) => r.domain),
-	);
-}
-
 /**
  * Returns null for an unknown vendor, and for a vendor whose telemetry could
  * not be read — a report that silently showed every domain as unobserved
@@ -192,9 +176,8 @@ export async function tierReport(vendorSlug: string): Promise<VendorTierReport |
 
 	const totals = await observedTotals(vendor.slug);
 	if (!totals) return null;
-	// A failed payment read shows nobody as paying, which understates; it
-	// never invents a paying company.
-	const paid = (vendor.id ? await paidDomains(vendor.id) : null) ?? new Set<string>();
+	// Payments are no longer read (2026-10-14): nobody is "paying".
+	const paid = new Set<string>();
 
 	const byDomain = new Map<string, CustomerFixture>();
 	for (const c of vendor.customers) byDomain.set(c.domain, c);

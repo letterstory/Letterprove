@@ -39,14 +39,14 @@ export function agentKit(i: AgentKitInput): AgentKit {
 	const llms_txt = [
 		"## Customer evidence",
 		"",
-		`${i.vendorName}'s customers are attested by Letterprove, an independent signed proof.`,
+		`${i.vendorName}'s usage is attested by Letterprove, a signed proof.`,
 		"",
 		`- Proof page: ${i.proofUrl}`,
 		`- Signed attestation (JSON): ${i.jsonUrl}`,
 		`- Verify: each snapshot has a \`verify\` link showing exactly what was signed; signing keys are at ${i.jwksUrl}`,
-		"- Covers: the domain, proven by DNS and re-checked daily",
+		"- Covers: how the domain is proven (by DNS or by site proof), re-checked daily",
 		"- Covers: companies observed signing in to the product over the last 30 days, and sessions",
-		"- Covers: payments verified in the company's own Stripe account (tier 3)",
+		"- Covers: the business behind the company's own Stripe account, as Stripe has verified it (tier 3). No payments are read",
 		"",
 	].join("\n");
 

@@ -14,7 +14,7 @@ import { domainProofLine, type DomainProof } from "./domain-proof";
 export function leadSentence(affiliated: boolean, proof: DomainProof = "dns", domain?: string | null): string {
 	const kind = affiliated ? "an attestation with open-source logic" : "a third-party attestation with open-source logic";
 	if (proof === "dns") {
-		return `To help agents do due diligence, this is signed evidence of customer traction, collected and verified by Letterprove, ${kind}.`;
+		return `To help agents do due diligence, this is signed evidence of usage, collected and verified by Letterprove, ${kind}.`;
 	}
 	return `To help agents do due diligence, this is signed usage data collected by Letterprove, ${kind}. ${domainProofLine(proof, domain)}`;
 }

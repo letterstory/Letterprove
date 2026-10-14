@@ -8,7 +8,6 @@ import { AttestedAt, RelativeAge } from "./AttestedAt";
 import { findPublishedVendor } from "@/lib/fixtures/vendors";
 import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
-import { logoSplit, payingSentence } from "@/lib/attest/paying-copy";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
 import { displayForSlug } from "@/lib/attest/display";
 import { DOMAIN_PROOF_LABEL, docDomainProof, domainProofOf } from "@/lib/attest/domain-proof";
@@ -26,11 +25,19 @@ const HIDDEN_LABELS: Record<string, string> = {
 	sessions: "session counts",
 	reported_history: "PostHog history",
 	logos: "logo verification",
-	payment_details: "payment details",
+	stripe_business: "Stripe business details",
 	observed_since: "first observed date",
 	hosts: "extra hosts",
 	growth: "companies per month",
 	retention: "retention",
+};
+
+/** How each omitted section reads in the "Not shown" note (absent ≠ none). */
+const OMITTED_REASONS: Record<string, string> = {
+	insufficient_history: "not enough history yet",
+	not_connected: "not connected",
+	not_configured: "not set up",
+	domain_not_verified: "needs a verified domain",
 };
 
 
@@ -88,6 +95,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	const domainProof = a ? docDomainProof(a) : proof.vendor.domain_proof;
 	const shownDomain = a?.domain ?? proof.vendor.domain;
 	const binding = a?.stripe_binding ?? null;
+	const business = a?.stripe_business ?? null;
+	const omitted = Object.entries(a?.omitted ?? {}).filter(([, reason]) => reason !== "hidden");
 	const hidden = new Set<string>(a?.hidden_by_vendor ?? []);
 
 	return (
@@ -129,14 +138,13 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								</h2>
 								<p className="mt-4 text-sm text-fog">
 									<span className="font-semibold text-mint">
-										{a.logos.verified} of {a.logos.on_page} logos verified, {logoSplit(a.logos).paying} of them paying
-										(verified by Stripe).
+										{a.logos.verified} of {a.logos.on_page} logos verified.
 									</span>{" "}
 									Checked against{" "}
 									<a className="break-all text-mint hover:underline" href={a.logos.page}>
 										{a.logos.page.replace(/^https:\/\//, "")}
 									</a>
-									. Verified means Letterprove observed the company signing in, or Stripe verified it pays.
+									. Verified means Letterprove observed someone from that company signing in over the last 30 days.
 								</p>
 								{a.logos.companies && a.logos.companies.length > 0 && (
 									<ul className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-2">
@@ -144,7 +152,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 											<li key={c.domain} className="flex items-baseline justify-between gap-3 bg-panel px-4 py-3">
 												<span className="font-medium">{c.name}</span>
 												<span className="text-xs text-fog">
-													{c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}
+													Signed in, last 30 days
 												</span>
 											</li>
 										))}
@@ -173,10 +181,20 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								}
 							/>
 							<Tile
-								label="Stripe account"
-								value={binding ? "Bound to domain" : "Not connected"}
+								label="Business"
+								value={
+									business?.verified ? "Verified by Stripe" : business ? "Not verified by Stripe" : binding ? "Bound to domain" : "Not connected"
+								}
 								sub={
-									binding === "staff_override" ? (
+									business ? (
+										<span className="text-xs text-fog">
+											{[business.name, business.country].filter(Boolean).join(", ") || "name not shown"}
+											{business.website
+												? ` · website ${business.website}${business.website_matches_domain ? "" : ", not on this domain"}`
+												: ""}
+											{business.binding === "staff_override" ? " · related company, approved by Letterprove" : ""}
+										</span>
+									) : binding === "staff_override" ? (
 										<span className="text-xs text-fog">related company, approved by Letterprove</span>
 									) : undefined
 								}
@@ -193,20 +211,9 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							Last {a.window_days} days
 						</h2>
 						<dl
-							className={`mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${a.sessions === undefined ? "sm:grid-cols-3" : "sm:grid-cols-4"}`}
+							className={`mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${a.sessions === undefined ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}
 						>
 							<Tile label="Companies" value={a.companies_observed.toLocaleString("en-US")} />
-							<Tile
-								label="Payments"
-								value={a.tier === 3 ? "Verified by Stripe" : binding ? "Not verified" : "Not connected"}
-								sub={
-									a.paying_since ? (
-										<span className="text-xs text-fog">
-											first verified payment <AttestedAt iso={a.paying_since} />
-										</span>
-									) : undefined
-								}
-							/>
 							{a.sessions !== undefined && <Tile label="Sessions" value={a.sessions.toLocaleString("en-US")} />}
 							<Tile
 								label="Signed"
@@ -219,9 +226,11 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								<dt className="inline font-semibold text-mint">Tier {a.tier}. </dt>
 								<dd className="inline">
 									{a.tier === 3
-										? "Sign-ins observed on the verified domain. Payments verified in the bound Stripe account."
+										? business
+											? "Sign-ins observed on the DNS-verified domain, and Stripe verified the business behind the vendor's own Stripe account at that domain."
+											: "Sign-ins observed on the verified domain. Payments verified in the bound Stripe account (signed before 2026-10-14, when payments were still read)."
 										: a.tier === 1
-											? "Sign-ins observed on the verified domain."
+											? "Sign-ins observed on a verified domain."
 											: "No sign-ins observed on a verified domain."}
 								</dd>
 							</div>
@@ -232,22 +241,6 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									unattributable domains excluded.
 								</dd>
 							</div>
-							{a.paying && (
-								<div>
-									<dt className="inline">Paying: </dt>
-									<dd className="inline">{payingSentence(a.paying)}.</dd>
-								</div>
-							)}
-							{a.payment_scope && a.tier === 3 && (
-								<div>
-									<dt className="inline">Payments: </dt>
-									<dd className="inline">
-										{a.payment_scope.mode === "selected"
-											? "verified by Stripe, for the products the vendor chose."
-											: "verified by Stripe."}
-									</dd>
-								</div>
-							)}
 						</dl>
 
 						{a.growth && a.growth.length > 0 && (
@@ -260,11 +253,17 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									style={{ gridTemplateColumns: `repeat(${a.growth.length}, minmax(0, 1fr))` }}
 								>
 									{a.growth.map((g) => (
-										<Tile key={g.month} label={monthLabel(g.month)} value={g.companies_observed.toLocaleString("en-US")} />
+										<Tile
+											key={g.month}
+											label={g.partial ? `${monthLabel(g.month)} (partial)` : monthLabel(g.month)}
+											value={g.companies_observed.toLocaleString("en-US")}
+										/>
 									))}
 								</dl>
 								<p className="mt-4 text-sm text-fog">
 									The highest number of companies observed in any signed snapshot that month.
+									{a.growth.some((g) => g.partial) &&
+										" Partial means observation started less than 30 days before that month's count, so it is lower partly because observation had only just begun."}
 								</p>
 							</>
 						)}
@@ -274,11 +273,9 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Retention</h2>
 								<p className="mt-4 text-sm text-fog">
 									<span className="font-semibold text-mint">
-										Of {a.retention.cohort.toLocaleString("en-US")} companies active 60 days ago,{" "}
-										{a.retention.retained.toLocaleString("en-US")} are still signing in.
-									</span>{" "}
-									Active 60 days ago means observed in the 30 days ending 60 days ago. Still signing in means
-									observed in the last 30 days.
+										Of {a.retention.cohort.toLocaleString("en-US")} companies observed 90 to 60 days ago,{" "}
+										{a.retention.retained.toLocaleString("en-US")} were also observed in the last 30 days.
+									</span>
 								</p>
 							</>
 						)}
@@ -318,6 +315,12 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					</>
 				)}
 
+				{a && omitted.length > 0 && (
+					<p className="mt-10 text-sm text-fog">
+						Not shown: {omitted.map(([field, reason]) => `${HIDDEN_LABELS[field] ?? field} (${OMITTED_REASONS[reason] ?? reason})`).join(", ")}.
+					</p>
+				)}
+
 				{a && hidden.size > 0 && (
 					<p className="mt-10 text-sm text-fog">
 						Hidden by {proof.vendor.name}: {[...hidden].map((h) => HIDDEN_LABELS[h] ?? h).join(", ")}.
@@ -328,7 +331,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					<h2 className="text-sm font-semibold tracking-widest text-fog uppercase">Issuer</h2>
 					<p className="mt-4 text-sm text-fog">
 						Letterprove, operated by {ISSUER_OPERATOR}. {proof.vendor.name} cannot edit any figure, hold the
-						signing key, rewrite past snapshots, or name a customer.
+						signing key, rewrite past snapshots, or name a customer unless it opts in to verified logos from
+						its own public logo wall.
 					</p>
 					{affiliation && (
 						<p className="mt-3 text-sm text-fog">

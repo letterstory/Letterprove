@@ -107,7 +107,6 @@ describe("the readers that must never truncate", () => {
 		["src/rollup/aggregate-history.ts", "a vendor's aggregate chain"],
 		["src/lib/attest/aggregate.ts", "rollups summed into a signed document"],
 		["src/lib/tiers/report.ts", "rollups behind the observed view"],
-		["src/lib/stripe/sync.ts", "observed domains for the payment join"],
 	])("%s pages its read (%s)", async (file) => {
 		const { readFileSync } = await import("node:fs");
 		const source = readFileSync(`${process.cwd()}/${file}`, "utf8");

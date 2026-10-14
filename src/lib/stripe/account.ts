@@ -1,13 +1,15 @@
 /**
  * Whose Stripe account is this?
  *
- * Tier 3 says "a third party's ledger shows this company paying THIS vendor".
- * Until this check, nothing tied the ledger to the vendor: a restricted key
- * from any Stripe account the vendor could get one for — a sister company's,
- * a friend's — corroborated their customers just the same. So on every connect
- * and every sync we read the account (GET /v1/account) and require one of the
- * domains it publishes about itself (business URL, support URL or email,
- * account email) to share the vendor's verified registrable domain.
+ * Stripe is how Letterprove confirms the vendor is a real, verified business
+ * at its domain (since 2026-10-14 it is used for nothing else: no payments are
+ * read). A key from any Stripe account the vendor could get one for — a sister
+ * company's, a friend's — would otherwise vouch for them just the same. So on
+ * every connect and every sync we read the account (GET /v1/account) and
+ * require one of the domains it publishes about itself (business URL, support
+ * URL or email, account email) to share the vendor's verified registrable
+ * domain. What the account says about the business (whether Stripe verified it,
+ * its name, country and website) is recorded alongside.
  *
  * The honest exceptions — a parent company billing for a subsidiary on another
  * domain — go through a staff override bound to one account id. The vendor
@@ -54,7 +56,7 @@ export function evaluateAccount(
 	return {
 		ok: false,
 		error: "stripe_account_domain_mismatch",
-		detail: `This Stripe account (${account.id}) describes itself as ${shown}, not ${vendorBase}, the domain you verified. Payments only count when they come from your own Stripe account. In Stripe, set the account's business website or support email to your domain and connect again. If your billing runs through a related company, ask us to review it and we'll approve that account.`,
+		detail: `This Stripe account (${account.id}) describes itself as ${shown}, not ${vendorBase}, the domain you verified. Only your own Stripe account can verify your business. In Stripe, set the account's business website or support email to your domain and connect again. If your billing runs through a related company, ask us to review it and we'll approve that account.`,
 		account,
 	};
 }
@@ -77,7 +79,7 @@ export async function checkStripeAccount(apiKey: string, vendorId: string): Prom
 			? {
 					ok: false,
 					error: "stripe_account_permission_missing",
-					detail: `Your Stripe restricted key cannot read which account it belongs to. Add ${ACCOUNT_PERMISSION} to the key in Stripe, alongside read access to Subscriptions and Invoices. Without it, payments cannot be tied to your business.`,
+					detail: `Your Stripe restricted key cannot read which account it belongs to. Add ${ACCOUNT_PERMISSION} to the key in Stripe. That is the only permission Letterprove needs: it reads which business the account is, never payments.`,
 				}
 			: { ok: false, error: "stripe_account_unreadable", detail: fetched.error };
 	}
@@ -106,6 +108,14 @@ export async function recordAccount(vendorId: string, account: StripeAccountIden
 	if (!db) return;
 	await db
 		.from("vendor_stripe_credentials")
-		.update({ stripe_account_id: account.id, stripe_account_domains: account.domains, account_checked_at: new Date().toISOString() })
+		.update({
+			stripe_account_id: account.id,
+			stripe_account_domains: account.domains,
+			account_checked_at: new Date().toISOString(),
+			stripe_charges_enabled: account.charges_enabled ?? null,
+			stripe_business_name: account.business_name ?? null,
+			stripe_country: account.country ?? null,
+			stripe_business_url_host: account.business_url_host ?? null,
+		})
 		.eq("vendor_id", vendorId);
 }

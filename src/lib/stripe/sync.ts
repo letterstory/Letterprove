@@ -1,90 +1,57 @@
 /**
- * One vendor's Stripe sync: read subscriptions and the invoices that settled,
- * join them to observed usage, store what survived.
+ * One vendor's Stripe sync: re-read which business the connected account is.
  *
- * The three pieces this composes are each testable alone — credentials.ts
- * holds the secret, fetch.ts talks to Stripe, map.ts decides what counts. This
- * file is the wiring and the policy decisions that only make sense once they
- * are together:
+ * Since 2026-10-14 Stripe is used ONLY to confirm the vendor is a real,
+ * verified business at its domain (Casey's decision; README "Stripe"). No
+ * subscriptions, invoices or products are read, and nothing about payments is
+ * stored or published. What the sync keeps is the account's own statement
+ * about itself, refreshed hourly because the key can be swapped for one from
+ * another account at any time:
  *
- *   1. A TEST-MODE credential never produces evidence. Test payments are
- *      invented by definition, and a tier-3 claim built from them would be
- *      exactly the false corroboration this tier exists to rule out. The sync
- *      still runs and still reports, so a vendor wiring things up sees their
- *      data flow — it just refuses to store any of it as evidence.
- *      It also CLEARS any evidence already standing, because a vendor whose
- *      connected key is a test key has nothing corroborating them right now,
- *      whatever a previous key once proved.
+ *   - whether Stripe lets the account accept payments (`charges_enabled`), which
+ *     Stripe grants only after verifying the business;
+ *   - the business name, country and website the account shows;
+ *   - the domains it publishes, matched against the vendor's (account.ts).
  *
- *   2. Observed domains are read fresh and the map is NOT allowed to skip that
- *      check. mapPayments defaults to fail-closed, and nothing here passes
- *      allowUnobserved, so a vendor with no telemetry gets no payment evidence
- *      rather than all of it.
+ * A failed read is counted, and after three in a row the recorded account is
+ * cleared: a key the vendor can stop us from refreshing must not keep vouching
+ * for them. `last_synced_at` means the last time a read actually succeeded.
  *
- *   3. A FAILED SYNC EVENTUALLY CLEARS EVIDENCE. It used to do the opposite:
- *      it stamped `last_synced_at` on the way out and left the rows standing,
- *      so a vendor who revoked their own Stripe key froze a favourable claim in
- *      place permanently and the only consequence was an alert addressed to
- *      them. Evidence a vendor can stop us from refreshing is evidence they
- *      control. Consecutive failures are counted, the count clears the rows
- *      once it passes the threshold, and `last_synced_at` now means what it
- *      says: the last time a sync actually succeeded.
- *
- *   4. THE ACCOUNT HAS TO BE THE VENDOR'S. Read on every sync, because the key
- *      can be swapped for one from another account at any time (account.ts).
- *      A failure here clears evidence at once rather than after the failure
- *      threshold: it is not Stripe being briefly unreachable, it is a ledger
- *      that does not belong to this vendor, and nothing it says is evidence.
- *
- *   5. ONLY THE VENDOR'S CHOSEN PRODUCTS COUNT. One Stripe account often bills
- *      several products; the scope decides which money is this product's.
+ * The payment tables (vendor_payment_evidence, vendor_payment_unmatched,
+ * vendor_stripe_payers) are no longer written or read. Every sync deletes any
+ * rows left in them, so nothing stale lingers before they are dropped.
  */
 
-import { readAllRows } from "@/lib/db/read-all";
 import { notifyVendor } from "@/lib/notify/vendor-email";
 import { dbClient } from "@/lib/db/client";
 import { checkStripeAccount, recordAccount } from "./account";
 import { credentialFor } from "./credentials";
-import { fetchPaidInvoices, fetchSubscriptions } from "./fetch";
-import { mapPayments } from "./map";
-
-const OBSERVED_WINDOW_DAYS = 30;
 
 /**
- * Consecutive failed syncs before standing evidence is deleted.
- *
- * The cron runs hourly, so three is three hours of a claim we can no longer
- * corroborate — long enough that a Stripe blip or one expired token does not
- * wipe a vendor's proof, short enough that revoking a key is not a way to
- * freeze a favourable claim. It is a backstop rather than the main defence:
- * `paymentEvidenceFor` already refuses to read a row older than a day, so the
- * claim stops publishing well before this deletes anything.
+ * Consecutive failed syncs before the recorded account is cleared. The cron
+ * runs hourly, so this is three hours: long enough that a Stripe blip does not
+ * wipe a vendor's verification, short enough that revoking the key is not a
+ * way to keep it.
  */
 const FAILURES_BEFORE_CLEARING = 3;
-
-/** What the vendor is told when their restricted key predates the invoice read. */
-const SCOPE_HELP =
-	"Your Stripe restricted key cannot read Invoices, and payment evidence requires an invoice that actually settled. Add read access to Invoices on the key in Stripe, then sync again.";
 
 export type SyncResult =
 	| {
 			ok: true;
-			matched: number;
-			unmatched: number;
-			/** True when a test-mode key meant nothing was stored as evidence. */
+			/** Whether the account is the vendor's own (its domains match, or staff approved it). */
+			bound: boolean;
+			/** Whether Stripe has verified the business (the account can accept payments). */
+			chargesEnabled: boolean;
+			/** True for a test-mode key: it reads the account, but never verifies the business. */
 			testMode: boolean;
-			truncated: boolean;
-			/**
-			 * Set only on a test key whose restricted key cannot read Invoices.
-			 * The sync succeeded in the only sense available to a test key, and
-			 * the vendor has something to fix before a live key would work. It is
-			 * carried back rather than alerted because nothing is at risk yet.
-			 */
-			scopeWarning?: string;
+			/** Kept for the cron's report shape; an account read is never truncated. */
+			truncated: false;
+			/** Set when the account was read but isn't the vendor's, so the vendor sees why. */
+			warning?: string;
 	  }
 	| { ok: false; error: string };
 
-export async function syncVendorPayments(vendorId: string, vendorSlug: string): Promise<SyncResult> {
+export async function syncVendorStripe(vendorId: string, _vendorSlug?: string): Promise<SyncResult> {
 	const db = dbClient();
 	if (!db) return { ok: false, error: "No datastore configured." };
 
@@ -93,158 +60,53 @@ export async function syncVendorPayments(vendorId: string, vendorSlug: string): 
 
 	const account = await checkStripeAccount(credential.key, vendorId);
 	if (account.ok || account.account) await recordAccount(vendorId, account.ok ? account.account : account.account!);
+	await clearRetiredPaymentRows(vendorId);
+
 	if (!account.ok) {
-		// Unreachable is an ordinary failure, counted toward the threshold like
-		// any other. A permission gap or a foreign account is not transient:
-		// nothing this ledger says is evidence for this vendor, so it goes now.
+		// Unreachable is an ordinary failure, counted toward the threshold. A
+		// permission gap or a foreign account is a real answer: recorded (above)
+		// and reported, and the attestation reads it as not bound.
 		if (account.error === "stripe_account_unreadable") return recordFailure(vendorId, account.detail);
-		await clearEvidence(vendorId);
-		// A test key stores nothing whatever it reads, so its wiring problems
-		// travel back as a warning instead of paging anyone (see below).
-		if (!credential.livemode) {
-			await recordSuccess(vendorId, new Date().toISOString());
-			return { ok: true, matched: 0, unmatched: 0, testMode: true, truncated: false, scopeWarning: account.detail };
-		}
-		return recordFailure(vendorId, account.detail);
+		await recordSuccess(vendorId, new Date().toISOString());
+		return { ok: true, bound: false, chargesEnabled: false, testMode: !credential.livemode, truncated: false, warning: account.detail };
 	}
 
-	const fetched = await fetchSubscriptions(credential.key);
-	if (!fetched.ok) return recordFailure(vendorId, fetched.error);
-
-	// The corroboration read. A subscription says what a vendor means to bill;
-	// only an invoice says money moved, and tier 3's entire claim is the second
-	// thing. A failure here is a failed sync, not a sync that publishes the
-	// weaker evidence: falling back to subscriptions alone would mean a vendor
-	// could get the old, forgeable behaviour back by breaking one permission.
-	const invoices = await fetchPaidInvoices(credential.key);
-	if (!invoices.ok) {
-		// A missing Invoices scope on a TEST key is not a failed sync, and must
-		// not page anyone. Nothing is at risk: a test key writes no evidence
-		// whatever it can read, so there is no published claim to go stale and
-		// nothing a human on our side can or should do at 3am. It is a real
-		// thing the vendor has to fix before a live key will work, so it travels
-		// back as a warning they can see rather than an alert we swallow.
-		//
-		// This is the shape the tier-3 change got wrong: it put a required read
-		// in front of the branch below, whose whole purpose is to let a vendor
-		// confirm their wiring works before they have anything to prove. The
-		// first vendor to connect a test key paged the alert channel hourly for
-		// thirteen hours about a permission that would not have changed one
-		// stored row.
-		if (!credential.livemode && invoices.scope) {
-			await clearEvidence(vendorId);
-			await recordSuccess(vendorId, new Date().toISOString());
-			return {
-				ok: true,
-				matched: 0,
-				unmatched: 0,
-				testMode: true,
-				truncated: fetched.truncated,
-				scopeWarning: SCOPE_HELP,
-			};
-		}
-		return recordFailure(vendorId, invoices.scope ? SCOPE_HELP : invoices.error);
-	}
-
-	const observed = await observedDomains(vendorSlug);
-	const { data: vendorRow } = await db.from("vendors").select("domain").eq("id", vendorId).maybeSingle();
-	const mapping = mapPayments(fetched.subscriptions, observed, invoices.payments, {
-		vendorDomain: vendorRow?.domain,
-		productScope: new Set(credential.productIds),
-	});
-	// Every company with a settled, in-scope invoice, whether or not it signed
-	// in. The unobserved ones go to vendor_stripe_payers, NOT to evidence: they
-	// exist only so the logo wall can say "paying, verified by Stripe" for a
-	// company the vendor already shows publicly that pays without logging in
-	// (a managed account). Evidence stays observed-only, and so does every
-	// count on the proof.
-	const allPaying = mapPayments(fetched.subscriptions, observed, invoices.payments, {
-		vendorDomain: vendorRow?.domain,
-		productScope: new Set(credential.productIds),
-		allowUnobserved: true,
-	});
-
-	const syncedAt = new Date().toISOString();
-	const truncated = fetched.truncated || invoices.truncated;
-
-	// A test key is allowed to reach this point precisely so the counts below
-	// are real and a vendor can see their wiring works — but nothing is written
-	// as evidence, because evidence from test mode is not evidence.
-	if (!credential.livemode) {
-		// Clears rather than merely skipping. A vendor who swaps a live key for
-		// a test one would otherwise keep publishing the live key's evidence
-		// forever: the live path replaces evidence wholesale on every sync, and
-		// this branch is the only one that never reaches it. Test payments
-		// corroborate nothing, and neither does a key nobody has connected.
-		await clearEvidence(vendorId);
-		await recordSuccess(vendorId, syncedAt);
-		return {
-			ok: true,
-			matched: mapping.matched.length,
-			unmatched: mapping.unmatched.length,
-			testMode: true,
-			truncated,
-		};
-	}
-
-	// Replace rather than merge. A subscription that was cancelled since the
-	// last sync must DISAPPEAR from evidence — merging would leave a stale row
-	// asserting a customer still pays when they stopped, which is the worst
-	// kind of wrong for a signed claim.
-	await clearEvidence(vendorId);
-
-	const observedPaying = new Set(mapping.matched.map((m) => m.domain));
-	const unobservedPayers = allPaying.matched.filter((m) => !observedPaying.has(m.domain));
-	if (unobservedPayers.length > 0) {
-		await db.from("vendor_stripe_payers").insert(
-			unobservedPayers.map((m) => ({ vendor_id: vendorId, domain: m.domain, since: m.since, synced_at: syncedAt })),
-		);
-	}
-
-	if (mapping.matched.length > 0) {
-		const { error } = await db.from("vendor_payment_evidence").insert(
-			mapping.matched.map((m) => ({
-				vendor_id: vendorId,
-				domain: m.domain,
-				since: m.since,
-				currency: m.currency,
-				monthly_amount: m.monthlyAmount,
-				subscription_count: m.subscriptionCount,
-				synced_at: syncedAt,
-			}))
-		);
-		if (error) return recordFailure(vendorId, "Couldn't store payment evidence.");
-	}
-
-	if (mapping.unmatched.length > 0) {
-		await db.from("vendor_payment_unmatched").insert(
-			mapping.unmatched.map((u) => ({
-				vendor_id: vendorId,
-				subscription_id: u.subscriptionId,
-				reason: u.reason,
-				domain: u.domain,
-				synced_at: syncedAt,
-			}))
-		);
-	}
-
-	await recordSuccess(vendorId, syncedAt);
-
+	await recordSuccess(vendorId, new Date().toISOString());
 	return {
 		ok: true,
-		matched: mapping.matched.length,
-		unmatched: mapping.unmatched.length,
-		testMode: false,
-		truncated,
+		bound: true,
+		chargesEnabled: account.account.charges_enabled === true,
+		testMode: !credential.livemode,
+		truncated: false,
 	};
 }
 
-async function clearEvidence(vendorId: string): Promise<void> {
+/** The old name, kept so existing callers keep working. */
+export const syncVendorPayments = syncVendorStripe;
+
+/** Delete anything the retired payment sync left behind. */
+async function clearRetiredPaymentRows(vendorId: string): Promise<void> {
 	const db = dbClient();
 	if (!db) return;
 	await db.from("vendor_payment_evidence").delete().eq("vendor_id", vendorId);
 	await db.from("vendor_payment_unmatched").delete().eq("vendor_id", vendorId);
 	await db.from("vendor_stripe_payers").delete().eq("vendor_id", vendorId);
+}
+
+/** Forget what the account said, so a stale read never vouches for the vendor. */
+async function clearRecordedAccount(vendorId: string): Promise<void> {
+	const db = dbClient();
+	if (!db) return;
+	await db
+		.from("vendor_stripe_credentials")
+		.update({
+			account_checked_at: null,
+			stripe_charges_enabled: null,
+			stripe_business_name: null,
+			stripe_country: null,
+			stripe_business_url_host: null,
+		})
+		.eq("vendor_id", vendorId);
 }
 
 async function recordSuccess(vendorId: string, syncedAt: string): Promise<void> {
@@ -261,13 +123,7 @@ async function recordSuccess(vendorId: string, syncedAt: string): Promise<void> 
 		.eq("vendor_id", vendorId);
 }
 
-/**
- * Record a failed sync, and delete the evidence once failures pile up.
- *
- * `last_synced_at` is deliberately NOT touched. It used to be stamped here,
- * which made the one column that could answer "how old is this evidence?" say
- * "just now" every hour a broken key failed.
- */
+/** Record a failed read, and clear the recorded account once failures pile up. */
 async function recordFailure(vendorId: string, error: string): Promise<SyncResult> {
 	const db = dbClient();
 	if (!db) return { ok: false, error };
@@ -288,46 +144,9 @@ async function recordFailure(vendorId: string, error: string): Promise<SyncResul
 		})
 		.eq("vendor_id", vendorId);
 
-	if (failures >= FAILURES_BEFORE_CLEARING) await clearEvidence(vendorId);
+	if (failures >= FAILURES_BEFORE_CLEARING) await clearRecordedAccount(vendorId);
 	// Exactly at the threshold, so one failing streak is one email.
 	if (failures === FAILURES_BEFORE_CLEARING) await notifyVendor(vendorId, "stripe_failing", `streak@${new Date().toISOString()}`, { detail: error });
 
 	return { ok: false, error };
-}
-
-/**
- * Domains this vendor has actually been observed serving.
- *
- * Read fresh on every sync rather than cached: the whole point of the join is
- * that payment alone is not evidence about usage, and a stale usage list would
- * let a company that stopped using the product keep its payment-corroborated
- * claim. Returns an empty set on a failed read, which mapPayments treats as
- * "nothing matches" — the safe direction.
- */
-async function observedDomains(vendorSlug: string): Promise<Set<string>> {
-	const db = dbClient();
-	if (!db) return new Set();
-
-	const since = new Date(Date.now() - OBSERVED_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-	// Paged. A truncated set here does not fail loudly — it silently drops
-	// domains, so a real customer's real payment gets rejected as
-	// `no_observed_traffic` and their tier-3 evidence quietly disappears.
-	try {
-		const rows = await readAllRows<{ domain: string }>(`observed domains for ${vendorSlug}`, (from, to) =>
-			db
-				.from("hot_rollups")
-				.select("domain")
-				.eq("vendor_slug", vendorSlug)
-				.gte("window_start", since)
-				.order("window_start", { ascending: true })
-				.order("domain", { ascending: true })
-				.range(from, to),
-		);
-		return new Set(rows.map((r) => r.domain));
-	} catch (e) {
-		console.error("[letterprove:stripe-sync] observed-domain read failed", e instanceof Error ? e.message : String(e));
-		// Empty set, which mapPayments treats as "nothing matches" — the safe
-		// direction, and the behaviour this had before paging.
-		return new Set();
-	}
 }
