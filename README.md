@@ -727,6 +727,13 @@ way. Letter unlisted its own proofs (Letter, Lettertrace) on 2026-10-14: agents
 correctly discount a proof from a company that shares an owner with the issuer,
 and Letterprove should be represented by outside vendors' proofs.
 
+A new proof joins the directory once its first snapshot has sign-ins. The
+first publish leaves a proof with no signed sign-ins unlisted and marked
+`system:awaiting_data`; the hourly freeze lists it with the first snapshot
+that has a company in it (`system:first_data`). A vendor's own
+`set_proof_listing` choice is never overridden, and `get_status` reports
+`listing_pending_data` while it waits.
+
 ### Endpoints
 
 | Path | Serves |

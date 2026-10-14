@@ -99,6 +99,9 @@ export const getStatusOutput = z.object({
 		.describe(
 			"Whether the proof appears in Letterprove's listings (discovery, sitemap, llms.txt). False = unlisted: still served at its URL, never enumerated, marked noindex. Presentation only; the signed document is the same.",
 		),
+	listing_pending_data: z
+		.boolean()
+		.describe("True while a new proof waits for its first snapshot with sign-ins; it joins the directory automatically then. A vendor's own set_proof_listing choice is never overridden."),
 	ever_received_at: z
 		.string()
 		.nullable()
@@ -138,6 +141,10 @@ export const publishProofsOutput = z.object({
 	published: z.literal(true),
 	published_at: z.string(),
 	slug: z.string().describe("For building the now-live /proofs and /attest URLs."),
+	listed: z.boolean().describe("Whether the proof is in Letterprove's directory now."),
+	listing_pending_data: z
+		.boolean()
+		.describe("True while a new proof waits for its first snapshot with sign-ins; it joins the directory automatically then."),
 });
 
 export const setProofListingInput = z.object({

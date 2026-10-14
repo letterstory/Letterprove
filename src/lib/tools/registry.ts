@@ -72,6 +72,7 @@ import { vendorReadUsage } from "@/lib/billing/vendor-usage";
 import { scriptModules, scriptStatus, setPlainModules } from "@/lib/vendors/script";
 import { verifySite } from "@/lib/vendors/site-proof";
 import { rivalHoldsDomain, unpublishRivals } from "@/lib/vendors/domain-claim";
+import { listingPendingData, LISTING_AWAITING_DATA, shouldAwaitData } from "@/lib/vendors/listing";
 
 import { displayFor, LOCKED as LOCKED_DISPLAY, setDisplay } from "@/lib/attest/display";
 
@@ -585,6 +586,7 @@ export const TOOLS: BoundTool[] = [
 					published: result.publishedAt !== null,
 					published_at: result.publishedAt,
 					listed: result.listed,
+					listing_pending_data: result.listingPendingData,
 					ever_received_at: result.everReceivedAt,
 					last_received_at: result.lastReceivedAt,
 					rejected_origins: result.rejectedOrigins,
@@ -1078,7 +1080,7 @@ export const TOOLS: BoundTool[] = [
 		 */
 		name: "publish_proofs",
 		description:
-			"Make the caller's vendor proofs public — /proofs/{slug}, /attest/{slug} and both chain routes start resolving. Collection, rollups and signing were already running; this only opens the doors. Args: none.",
+			"Make the caller's vendor proofs public — /proofs/{slug}, /attest/{slug} and both chain routes start resolving. Collection, rollups and signing were already running; this only opens the doors. A new proof joins the directory once its first snapshot has sign-ins (listing_pending_data until then). Args: none.",
 		capability: "vendor:write",
 		inputSchema: S.publishProofsInput,
 		outputSchema: S.publishProofsOutput,
@@ -1090,7 +1092,7 @@ export const TOOLS: BoundTool[] = [
 
 			const { data: vendor } = await db
 				.from("vendors")
-				.select("slug, domain, domain_verified_at, proofs_published_at")
+				.select("slug, domain, domain_verified_at, proofs_published_at, proofs_listed, listed_changed_by")
 				.eq("id", vendorId)
 				.maybeSingle();
 			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
@@ -1108,14 +1110,48 @@ export const TOOLS: BoundTool[] = [
 			if (vendor.proofs_published_at) {
 				return {
 					ok: true,
-					body: { published: true, published_at: vendor.proofs_published_at, slug: vendor.slug },
+					body: {
+						published: true,
+						published_at: vendor.proofs_published_at,
+						slug: vendor.slug,
+						listed: vendor.proofs_listed !== false,
+						listing_pending_data: listingPendingData(vendor),
+					},
 				};
 			}
 
+			// A first publish with no sign-ins in a signed snapshot yet stays out of
+			// the directory until there are some (src/lib/vendors/listing.ts). A
+			// vendor who already chose a listing keeps that choice.
+			let latestCompanies: number | null = null;
+			try {
+				const { data: latest } = await db
+					.from("published_aggregates")
+					.select("attestation")
+					.eq("vendor_slug", vendor.slug)
+					.order("hour_bucket", { ascending: false })
+					.limit(1)
+					.maybeSingle<{ attestation: { companies_observed?: number } | null }>();
+				latestCompanies = latest?.attestation?.companies_observed ?? null;
+			} catch {
+				// Unread means "no data known": the proof waits, which is the safe side.
+			}
+			const awaitData = shouldAwaitData(vendor, latestCompanies);
+
 			const publishedAt = new Date().toISOString();
-			const { error } = await db.from("vendors").update({ proofs_published_at: publishedAt }).eq("id", vendorId);
+			const { error } = await db
+				.from("vendors")
+				.update({
+					proofs_published_at: publishedAt,
+					...(awaitData ? { proofs_listed: false, listed_changed_by: LISTING_AWAITING_DATA, listed_changed_at: publishedAt } : {}),
+				})
+				.eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
-			return { ok: true, body: { published: true, published_at: publishedAt, slug: vendor.slug } };
+			const listed = awaitData ? false : vendor.proofs_listed !== false;
+			return {
+				ok: true,
+				body: { published: true, published_at: publishedAt, slug: vendor.slug, listed, listing_pending_data: awaitData },
+			};
 		},
 	}),
 	defineTool({

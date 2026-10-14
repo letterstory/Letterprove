@@ -256,6 +256,7 @@ describe("dispatchTool", () => {
 			count: 3,
 			publishedAt: "2026-01-01T00:00:00.000Z",
 			listed: true,
+			listingPendingData: false,
 			everReceivedAt: "2025-12-01T00:00:00.000Z",
 			lastReceivedAt: "2026-01-02T00:00:00.000Z",
 			rejectedOrigins: [{ host: "staging.acme.com", events_24h: 4, last_at: "2026-01-02T00:00:00.000Z", addable: true, reason: "needs_proof" }],
@@ -278,6 +279,7 @@ describe("dispatchTool", () => {
 					published: true,
 					published_at: "2026-01-01T00:00:00.000Z",
 					listed: true,
+					listing_pending_data: false,
 					ever_received_at: "2025-12-01T00:00:00.000Z",
 					last_received_at: "2026-01-02T00:00:00.000Z",
 					rejected_origins: [{ host: "staging.acme.com", events_24h: 4, last_at: "2026-01-02T00:00:00.000Z", addable: true, reason: "needs_proof" }],
@@ -1117,7 +1119,15 @@ describe("publish_proofs and unpublish_proofs", () => {
 		expect(body.published).toBe(true);
 		expect(body.slug).toBe("acme");
 		expect(typeof body.published_at).toBe("string");
-		expect(vendorUpdates).toEqual([{ proofs_published_at: body.published_at }]);
+		// No signed snapshot with sign-ins yet: the new proof waits to be listed.
+		expect(vendorUpdates).toEqual([
+			{
+				proofs_published_at: body.published_at,
+				proofs_listed: false,
+				listed_changed_by: "system:awaiting_data",
+				listed_changed_at: body.published_at,
+			},
+		]);
 	});
 
 	/*
@@ -1163,6 +1173,8 @@ describe("publish_proofs and unpublish_proofs", () => {
 			published: true,
 			published_at: "2026-09-02T09:00:00.000Z",
 			slug: "acme",
+			listed: true,
+			listing_pending_data: false,
 		});
 		expect(vendorUpdates).toEqual([]);
 	});

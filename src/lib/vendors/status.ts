@@ -2,6 +2,7 @@ import { dbClient } from "@/lib/db/client";
 import { rejectedOriginsFor, type RejectedOrigin } from "@/lib/telemetry/rejected-origins";
 import { rowDomainProof } from "@/lib/vendors/site-proof";
 import type { DomainProof } from "@/lib/attest/domain-proof";
+import { listingPendingData } from "@/lib/vendors/listing";
 
 export type VendorStatusResult =
 	| {
@@ -11,6 +12,8 @@ export type VendorStatusResult =
 			count: number;
 			publishedAt: string | null;
 			listed: boolean;
+			/** Unlisted only until the first signed snapshot with sign-ins; then listed automatically. */
+			listingPendingData: boolean;
 			/** First accepted event ever. Survives hot_events' 35-day retention. */
 			everReceivedAt: string | null;
 			/** Latest accepted event still held (35 days), or null. */
@@ -50,7 +53,7 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 
 	const { data: vendor } = await db
 		.from("vendors")
-		.select("slug, domain, proofs_published_at, proofs_listed, first_event_at, domain_verified_at, site_verified_at, site_verified_url")
+		.select("slug, domain, proofs_published_at, proofs_listed, listed_changed_by, first_event_at, domain_verified_at, site_verified_at, site_verified_url")
 		.eq("id", vendorId)
 		.maybeSingle();
 	if (!vendor) return { ok: false, status: 404, error: "Not configured" };
@@ -80,6 +83,7 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 		count: total,
 		publishedAt: vendor.proofs_published_at ?? null,
 		listed: vendor.proofs_listed !== false,
+		listingPendingData: listingPendingData(vendor),
 		everReceivedAt: iso(vendor.first_event_at ?? latest?.receipt_ts ?? null),
 		lastReceivedAt: iso(latest?.receipt_ts ?? null),
 		rejectedOrigins,
