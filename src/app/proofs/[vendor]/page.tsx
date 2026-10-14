@@ -119,8 +119,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								</h2>
 								<p className="mt-4 text-sm text-fog">
 									<span className="font-semibold text-mint">
-										{a.logos.verified} of {a.logos.on_page} logos verified: {logoSplit(a.logos).paying} paying
-										(verified by Stripe), {logoSplit(a.logos).active} signed in in the last 30 days.
+										{a.logos.verified} of {a.logos.on_page} logos verified, {logoSplit(a.logos).paying} of them paying
+										(verified by Stripe).
 									</span>{" "}
 									Checked against{" "}
 									<a className="break-all text-mint hover:underline" href={a.logos.page}>
