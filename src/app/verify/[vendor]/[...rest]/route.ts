@@ -137,18 +137,6 @@ function num(v: unknown): string {
  * it, and what the vendor reports about itself. Nothing here is computed —
  * every value is a field from the table below, formatted.
  */
-/** How each hideable section reads in the "Hidden by the vendor" line. */
-const HIDDEN_LABELS: Record<string, string> = {
-	sessions: "session counts",
-	reported_history: "PostHog history",
-	logos: "logo verification",
-	stripe_business: "Stripe business details",
-	payment_details: "payment details",
-	observed_since: "first observed date",
-	hosts: "extra hosts",
-	growth: "companies per month",
-	retention: "retention",
-};
 
 /** "2026-10" → "Oct 2026". */
 function monthLabel(month: string): string {
@@ -195,7 +183,7 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 	const legacyPayments = "payment_scope" in f || "paying_since" in f || "paying" in f;
 	const payingSince = fmtDay(f.paying_since);
 	const binding =
-		f.stripe_binding === "domain_match" ? "Bound to its domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : "Not connected";
+		f.stripe_binding === "domain_match" ? "Bound to its domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : null;
 	const businessLine = business
 		? [
 				business.verified ? "Verified by Stripe" : "Not verified by Stripe",
@@ -264,7 +252,7 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 					: DOMAIN_PROOF_LABEL.dns
 				: (domainProofLine(domainProof, domainName) ?? DOMAIN_PROOF_LABEL[domainProof]),
 		)}</dd></div>` +
-		`<div><dt>Business</dt><dd>${esc(businessLine)}</dd></div>` +
+		(businessLine ? `<div><dt>Business</dt><dd>${esc(businessLine)}</dd></div>` : "") +
 		("observed_since" in f ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` : "") +
 		`</dl></section>`;
 
@@ -294,21 +282,6 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 	const retention = f.retention as { cohort?: number; retained?: number } | undefined;
 	if (retention && typeof retention.cohort === "number" && typeof retention.retained === "number") {
 		html += `<section><h2>Retention</h2><p><strong>Of ${num(retention.cohort)} companies observed 90 to 60 days ago, ${num(retention.retained)} were also observed in the last 30 days.</strong></p></section>`;
-	}
-
-	const omitted = f.omitted && typeof f.omitted === "object" ? Object.entries(f.omitted as Record<string, string>).filter(([, r]) => r !== "hidden") : [];
-	if (omitted.length > 0) {
-		const reasons: Record<string, string> = {
-			insufficient_history: "not enough history yet",
-			not_connected: "not connected",
-			not_configured: "not set up",
-			domain_not_verified: "needs DNS verification",
-		};
-		html += `<p class="muted">Not shown: ${esc(omitted.map(([k, r]) => `${HIDDEN_LABELS[k] ?? k} (${reasons[r] ?? r})`).join(", "))}.</p>`;
-	}
-	const hidden = Array.isArray(f.hidden_by_vendor) ? (f.hidden_by_vendor as string[]) : [];
-	if (hidden.length > 0) {
-		html += `<p class="muted">Hidden by the vendor: ${esc(hidden.map((h) => HIDDEN_LABELS[h] ?? h).join(", "))}. These fields are left out of this document by the vendor's choice.</p>`;
 	}
 
 	if (typeof f.issuer_affiliation === "string" && f.issuer_affiliation) {

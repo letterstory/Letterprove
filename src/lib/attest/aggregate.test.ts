@@ -280,13 +280,14 @@ describe("aggregateBody", () => {
 			expect((await aggregateBody("lettertrace"))!.tier).toBe(3);
 		});
 
-		it("says Stripe isn't connected rather than staying silent", async () => {
+		it("says nothing about Stripe when it isn't connected", async () => {
 			await withRollups([row("globex.com", 2)]);
 			await asVendor();
 			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.stripe_account_bound).toBe(false);
+			expect(b).not.toHaveProperty("stripe_account_bound");
+			expect(b).not.toHaveProperty("stripe_binding");
 			expect(b).not.toHaveProperty("stripe_business");
-			expect(b.omitted?.stripe_business).toBe("not_connected");
+			expect(JSON.stringify(b)).not.toContain("not_connected");
 			expect(b.tier).toBe(1);
 		});
 
@@ -367,7 +368,7 @@ describe("aggregateBody", () => {
 			expect(b.companies_observed).toBe(1);
 		});
 
-		it("omits what the vendor hid, says so in hidden_by_vendor and omitted, and keeps the tier", async () => {
+		it("omits what the vendor hid, says nothing about it, and keeps the tier", async () => {
 			await withRollups([row("globex.com", 2)], false);
 			await asVendor({});
 			const ev = await import("./vendor-evidence");
@@ -382,8 +383,8 @@ describe("aggregateBody", () => {
 			expect(b).not.toHaveProperty("logins");
 			expect(b).not.toHaveProperty("reported_history");
 			expect(b).not.toHaveProperty("observed_since");
-			expect(b.hidden_by_vendor).toEqual(["sessions", "reported_history", "observed_since"]);
-			expect(b.omitted).toMatchObject({ sessions: "hidden", reported_history: "hidden", observed_since: "hidden" });
+			expect(b).not.toHaveProperty("hidden_by_vendor");
+			expect(b).not.toHaveProperty("omitted");
 			expect(b.vendor_stated).toEqual([]);
 			expect(b.tier).toBe(1);
 			expect(b.companies_observed).toBe(1);
@@ -411,23 +412,19 @@ describe("aggregateBody", () => {
 			const hidden = (await aggregateBody("lettertrace"))!;
 			expect(hidden).not.toHaveProperty("growth");
 			expect(hidden).not.toHaveProperty("retention");
-			expect(hidden.hidden_by_vendor).toEqual(["growth", "retention"]);
+			expect(hidden).not.toHaveProperty("hidden_by_vendor");
 			vi.mocked(g.growthFor).mockResolvedValue(null);
 			vi.mocked(g.retentionFor).mockResolvedValue(null);
 			vi.mocked(ev.observedSince).mockResolvedValue(null);
 		});
 
-		it("gives a reason for every absent section, so absent never reads as zero", async () => {
+		it("leaves absent sections out without a reason, so hidden and missing look the same", async () => {
 			await withRollups([row("globex.com", 2)]);
 			await asVendor({});
 			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.omitted).toEqual({
-				stripe_business: "not_connected",
-				growth: "insufficient_history",
-				retention: "insufficient_history",
-				reported_history: "not_connected",
-				logos: "not_configured",
-			});
+			expect(b).not.toHaveProperty("omitted");
+			expect(b).not.toHaveProperty("growth");
+			expect(b).not.toHaveProperty("logos");
 		});
 
 		it("keeps the logo count but names no company when logo_names is off", async () => {
@@ -450,14 +447,14 @@ describe("aggregateBody", () => {
 			expect(b.logos).toEqual({ page: "https://lettertrace.com/customers", listed: 2, on_page: 2, verified: 2 });
 			expect(JSON.stringify(b)).not.toContain("Globex");
 			expect(JSON.stringify(b)).not.toContain("Initech");
-			expect(b.hidden_by_vendor).toEqual([]);
+			expect(b).not.toHaveProperty("hidden_by_vendor");
 		});
 
-		it("states that nothing is hidden when the vendor shows everything", async () => {
+		it("carries no hidden-sections list when the vendor shows everything", async () => {
 			await withRollups([row("globex.com", 2)], false);
 			await asVendor({});
 			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.hidden_by_vendor).toEqual([]);
+			expect(b).not.toHaveProperty("hidden_by_vendor");
 			expect(b.sessions).toBe(2);
 		});
 	});

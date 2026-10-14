@@ -781,7 +781,7 @@ const displaySections = z.object({
 
 export const getProofDisplayInput = empty;
 export const getProofDisplayOutput = z.object({
-	sections: displaySections.describe("True means shown on your public proof. Hidden sections are listed on the proof as hidden by you."),
+	sections: displaySections.describe("True means shown on your public proof. A hidden section is simply left out; the proof says nothing about it."),
 	locked: z.array(z.string()).describe("Always shown: domain, tier, companies observed, verify link."),
 });
 

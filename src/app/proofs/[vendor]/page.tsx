@@ -20,26 +20,6 @@ function hostOf(url: string): string {
 	}
 }
 
-/** How each hideable section reads in the "Hidden by" note. */
-const HIDDEN_LABELS: Record<string, string> = {
-	sessions: "session counts",
-	reported_history: "PostHog history",
-	logos: "logo verification",
-	stripe_business: "Stripe business details",
-	observed_since: "first observed date",
-	hosts: "extra hosts",
-	growth: "companies per month",
-	retention: "retention",
-};
-
-/** How each omitted section reads in the "Not shown" note (absent ≠ none). */
-const OMITTED_REASONS: Record<string, string> = {
-	insufficient_history: "not enough history yet",
-	not_connected: "not connected",
-	not_configured: "not set up",
-	domain_not_verified: "needs DNS verification",
-};
-
 /**
  * Per-vendor page title, replacing the generic site-wide one.
  *
@@ -99,8 +79,9 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	const shownDomain = a?.domain ?? proof.vendor.domain;
 	const binding = a?.stripe_binding ?? null;
 	const business = a?.stripe_business ?? null;
-	const omitted = Object.entries(a?.omitted ?? {}).filter(([, reason]) => reason !== "hidden");
-	const hidden = new Set<string>(a?.hidden_by_vendor ?? []);
+	// A proof shows only what is present: no "not connected", no "hidden by".
+	const showBusiness = Boolean(business || binding);
+	const identityTiles = 1 + (showBusiness ? 1 : 0) + (a?.observed_since ? 1 : 0);
 
 	return (
 		<>
@@ -164,7 +145,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 
 						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Identity</h2>
 						<dl
-							className={`mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${hidden.has("observed_since") ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}
+							className={`mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${identityTiles === 3 ? "sm:grid-cols-3" : identityTiles === 2 ? "sm:grid-cols-2" : ""}`}
 						>
 							<Tile
 								label="Domain"
@@ -181,17 +162,10 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									)
 								}
 							/>
+							{showBusiness && (
 							<Tile
 								label="Business"
-								value={
-									business?.verified
-										? "Verified by Stripe"
-										: business
-											? "Not verified by Stripe"
-											: binding
-												? "Bound to domain"
-												: "Not connected"
-								}
+								value={business?.verified ? "Verified by Stripe" : business ? "Not verified by Stripe" : "Bound to domain"}
 								sub={
 									business ? (
 										<span className="text-xs text-fog">
@@ -206,9 +180,8 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 									) : undefined
 								}
 							/>
-							{!hidden.has("observed_since") && (
-								<Tile label="First observed" value={a.observed_since ? <AttestedAt iso={a.observed_since} /> : "—"} />
 							)}
+							{a.observed_since && <Tile label="First observed" value={<AttestedAt iso={a.observed_since} />} />}
 						</dl>
 
 						<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Last {a.window_days} days</h2>
@@ -308,19 +281,6 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 							</>
 						)}
 					</>
-				)}
-
-				{a && omitted.length > 0 && (
-					<p className="mt-10 text-sm text-fog">
-						Not shown:{" "}
-						{omitted.map(([field, reason]) => `${HIDDEN_LABELS[field] ?? field} (${OMITTED_REASONS[reason] ?? reason})`).join(", ")}.
-					</p>
-				)}
-
-				{a && hidden.size > 0 && (
-					<p className="mt-10 text-sm text-fog">
-						Hidden by {proof.vendor.name}: {[...hidden].map((h) => HIDDEN_LABELS[h] ?? h).join(", ")}.
-					</p>
 				)}
 
 				<section className="mt-12 rounded-lg border border-edge bg-panel p-6">

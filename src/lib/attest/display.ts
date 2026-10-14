@@ -3,9 +3,9 @@
  *
  * Optional sections can be hidden; the core of the claim cannot. The domain,
  * the tier, companies observed and the verify link are what the proof IS, so
- * a vendor can't remove them. Whatever is hidden is listed in the
- * attestation's `hidden_by_vendor`, so an agent reading the proof knows a
- * section is missing by the vendor's choice, not because there is no data.
+ * a vendor can't remove them. A hidden section is simply absent: the proof
+ * says nothing about what the vendor chose not to show (since 2026-10-14), so
+ * it looks the same as a section with no data.
  */
 
 import { dbClient } from "@/lib/db/client";
