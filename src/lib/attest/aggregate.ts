@@ -103,9 +103,9 @@ export interface AggregateBody {
 	 * are not counted here unless the vendor added them explicitly.
 	 */
 	hosts?: number;
-	/** Whether the connected Stripe account is the vendor's own. False when Stripe isn't connected. */
+	/** Whether the connected Stripe account is the vendor's own. Present only when Stripe is connected and shown. */
 	stripe_account_bound?: boolean;
-	/** How that was established: its published domains match, or staff approved it. Null when not bound. */
+	/** How that was established: its published domains match, or staff approved it. Present only with stripe_account_bound. */
 	stripe_binding?: StripeBinding | null;
 	/**
 	 * The business behind the vendor's own Stripe account, as Stripe states it:
@@ -129,7 +129,7 @@ export interface AggregateBody {
 	window_days: number;
 	/** Distinct company domains observed. NOT a customer count — see module doc. */
 	companies_observed: number;
-	/** Absent when the vendor hides session counts (`hidden_by_vendor` lists "sessions"). */
+	/** Absent when the vendor hides session counts. */
 	sessions?: number;
 	signups?: number;
 	logins?: number;
@@ -169,21 +169,12 @@ export interface AggregateBody {
 	/** RETIRED 2026-10-14 (payments are no longer read). Older documents carry it. */
 	payment_scope?: PaymentScope;
 	/**
-	 * Optional sections the vendor chose not to show (src/lib/attest/display.ts):
-	 * any of "sessions", "reported_history", "logos", "stripe_business",
-	 * "observed_since", "hosts", "growth", "retention". Those fields are omitted from this document by
-	 * the vendor's choice, not for lack of data. Empty when nothing is hidden.
-	 * The domain, tier, companies observed and verify link can never be hidden.
-	 * Absent before 2026-10-13.
+	 * RETIRED 2026-10-14: a proof says nothing about what the vendor chose not
+	 * to show, so a hidden section and a missing one now look the same (absent).
+	 * Older documents carry these; the verifier still accepts them.
 	 */
 	hidden_by_vendor?: string[];
-	/**
-	 * Why each optional section is absent, so an agent can tell "none" from "not
-	 * shown": `hidden` (the vendor chose), `insufficient_history` (too little
-	 * observation yet), `not_connected` (the source isn't connected),
-	 * `not_configured` (the vendor never set it up), `domain_not_verified` (it
-	 * needs a proven domain). Keyed by field. Since 2026-10-14.
-	 */
+	/** RETIRED 2026-10-14, see hidden_by_vendor. Older documents carry it. */
 	omitted?: Record<string, OmitReason>;
 	/**
 	 * Companies observed per calendar month (UTC), oldest first, up to six
@@ -343,12 +334,6 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 	const growth = rawGrowth ? markPartialMonths(rawGrowth, firstSeen) : null;
 	if (logos && !display.logo_names) delete logos.companies;
 
-	const omitted: Record<string, OmitReason> = {};
-	if (!business) omitted.stripe_business = "not_connected";
-	if (!growth) omitted.growth = proven ? "insufficient_history" : "domain_not_verified";
-	if (!retention) omitted.retention = proven ? "insufficient_history" : "domain_not_verified";
-	if (!history) omitted.reported_history = vendor.domainVerified ? "not_connected" : "domain_not_verified";
-	if (!logos) omitted.logos = vendor.domainVerified ? (wall ? "insufficient_history" : "not_configured") : "domain_not_verified";
 
 	return applyDisplay({
 		vendor: vendor.slug,
@@ -358,9 +343,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		domain_proof: proof,
 		domain_verified: proof === "dns",
 		hosts: vendor.domainVerified ? hosts : 0,
-		stripe_account_bound: business !== null,
-		stripe_binding: business?.binding ?? null,
-		...(business ? { stripe_business: business } : {}),
+		// Present only when Stripe is connected: a proof never says what's missing.
+		...(business ? { stripe_account_bound: true, stripe_binding: business.binding, stripe_business: business } : {}),
 		window_days: WINDOW_DAYS,
 		companies_observed: attributable.length,
 		...summed,
@@ -372,7 +356,6 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		...(logos ? { logos } : {}),
 		...(growth ? { growth } : {}),
 		...(retention ? { retention } : {}),
-		omitted,
 		observed_through: now,
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),
@@ -387,7 +370,7 @@ const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
 	sessions: ["sessions", "signups", "logins"],
 	reported_history: ["reported_history"],
 	logos: ["logos"],
-	stripe_business: ["stripe_business"],
+	stripe_business: ["stripe_business", "stripe_account_bound", "stripe_binding"],
 	observed_since: ["observed_since"],
 	hosts: ["hosts"],
 	growth: ["growth"],
@@ -395,21 +378,17 @@ const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
 };
 
 /**
- * Omit what the vendor chose to hide, and say so in `hidden_by_vendor`. Pure.
- * The tier is computed before this and is never affected; `vendor_stated`
- * only lists fields still present.
+ * Omit what the vendor chose to hide, and say nothing about it: a hidden
+ * section looks exactly like one with no data. Pure. The tier is computed
+ * before this and is never affected; `vendor_stated` only lists fields still
+ * present.
  */
 export function applyDisplay<T extends Omit<AggregateBody, "prev_hash">>(body: T, display: DisplaySettings): T {
-	const hidden = hiddenSections(display);
 	const out: Record<string, unknown> = { ...body };
-	const omitted: Record<string, OmitReason> = { ...((out.omitted as Record<string, OmitReason> | undefined) ?? {}) };
-	for (const section of hidden) {
+	for (const section of hiddenSections(display)) {
 		for (const field of SECTION_FIELDS[section]) delete out[field];
-		omitted[SECTION_FIELDS[section][0]] = "hidden";
 	}
-	if ("omitted" in out || hidden.length > 0) out.omitted = omitted;
 	if (Array.isArray(out.vendor_stated)) out.vendor_stated = (out.vendor_stated as string[]).filter((f) => f in out);
-	out.hidden_by_vendor = hidden;
 	return out as T;
 }
 

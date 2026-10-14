@@ -512,12 +512,9 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 field.
               </li>
               <li>
-                <code>hidden_by_vendor</code> lists the optional sections the
-                vendor chose not to show, and <code>omitted</code> gives the
-                reason every optional field is absent: <code>hidden</code>,{" "}
-                <code>insufficient_history</code>, <code>not_connected</code>,{" "}
-                <code>not_configured</code> or <code>domain_not_verified</code>.
-                Absent never means zero.
+                Optional sections appear only when present; a missing section
+                is not evidence of zero. A section the vendor chose to hide
+                looks the same as one with no data.
               </li>
               <li>
                 Documents signed before the 2026-10-14 change may carry{" "}

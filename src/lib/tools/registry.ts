@@ -899,7 +899,7 @@ export const TOOLS: BoundTool[] = [
 	 * ----------------------------------------------------------- proof display
 	 *
 	 * Optional proof sections a vendor can hide (src/lib/attest/display.ts).
-	 * The attestation lists what is hidden in hidden_by_vendor.
+	 * A hidden section is simply absent; the attestation says nothing about it.
 	 */
 	defineTool({
 		name: "get_proof_display",

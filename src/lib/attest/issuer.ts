@@ -20,7 +20,7 @@ export const ISSUER_OPERATOR = "Letter Company";
 /** What a vendor decides. Kept to what the code actually lets a vendor do. */
 export const VENDOR_CONTROLS = [
 	"whether its proofs are public",
-	"which optional sections show (sessions, PostHog history, logos, Stripe business details, first observed date, extra hosts, growth, retention) — a hidden section is listed in `hidden_by_vendor`, and every absent section's reason is in `omitted`",
+	"which optional sections show (sessions, PostHog history, logos, Stripe business details, first observed date, extra hosts, growth, retention) — a hidden section is simply absent; the proof says nothing about it",
 	"whether verified logo companies are named or only counted",
 	"which extra hosts on its own domain the collector accepts events from",
 ] as const;
