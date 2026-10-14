@@ -1,4 +1,5 @@
 import { DOMAIN_PROOF_LABEL, docDomainProof, domainProofLine } from "@/lib/attest/domain-proof";
+import { displayForSlug } from "@/lib/attest/display";
 import { NextResponse } from "next/server";
 import { logProofAccess } from "@/lib/access/log";
 import { publishedVendorAggregateChain } from "@/lib/attest/aggregate";
@@ -86,7 +87,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ vend
 			check.ok ? "Verified: issued by Letterprove" : "Not verified",
 			verdict(check.ok, statement) +
 				freshness +
-				summary(signed as Record<string, unknown>, vendor) +
+				summary(signed as Record<string, unknown>, vendor, (await displayForSlug(vendor)).logos) +
 				`<section><h2>Every signed field</h2><p class="muted">Exactly what was signed, in full. Compare any copy against these values.</p><div class="table"><table>${rows}</table></div></section>` +
 				`<footer><p>Keys: <a href="${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json">${VERIFY_ORIGIN}/.well-known/letterprove-jwks.json</a>. ` +
 				`Machine-readable: <a href="?format=json">?format=json</a>.</p></footer>`,
@@ -145,7 +146,7 @@ function monthLabel(month: string): string {
 	return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-function summary(f: Record<string, unknown>, vendor: string): string {
+function summary(f: Record<string, unknown>, vendor: string, showLogos = true): string {
 	const tier = typeof f.tier === "number" ? f.tier : null;
 	const window = typeof f.window_days === "number" ? f.window_days : 30;
 	const domainProof = docDomainProof(f as Parameters<typeof docDomainProof>[0]);
@@ -177,7 +178,7 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 	html += `</section>`;
 
 	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
-	if (logos && typeof logos.verified === "number" && typeof logos.page === "string") {
+	if (showLogos && logos && typeof logos.verified === "number" && typeof logos.page === "string") {
 		const items = (logos.companies ?? [])
 			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
 			.join("");

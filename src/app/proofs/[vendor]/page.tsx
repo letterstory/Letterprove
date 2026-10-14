@@ -10,6 +10,7 @@ import { ISSUER_OPERATOR } from "@/lib/attest/issuer";
 import { verifyLink } from "@/lib/attest/verify-link";
 import { logoSplit, payingSentence } from "@/lib/attest/paying-copy";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
+import { displayForSlug } from "@/lib/attest/display";
 import { DOMAIN_PROOF_LABEL, docDomainProof, domainProofOf } from "@/lib/attest/domain-proof";
 
 function hostOf(url: string): string {
@@ -70,6 +71,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	// same document /attest/{vendor}.json serves, so a human and an agent see the
 	// same numbers from the same source. Nothing here names a customer.
 	const a = proof.attestation;
+	const showLogos = (await displayForSlug(slug)).logos;
 
 	const host = (await headers()).get("host") ?? "localhost";
 	const origin = `${host.startsWith("localhost") ? "http" : "https"}://${host}`;
@@ -120,7 +122,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 					</p>
 				) : (
 					<>
-						{a.logos && (
+						{a.logos && showLogos && (
 							<>
 								<h2 className="mt-10 text-sm font-semibold tracking-widest text-fog uppercase">
 									Logos on {hostOf(a.logos.page)}
