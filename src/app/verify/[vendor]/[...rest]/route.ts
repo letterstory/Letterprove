@@ -174,8 +174,8 @@ function summary(f: Record<string, unknown>, vendor: string): string {
 		const items = (logos.companies ?? [])
 			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
 			.join("");
-		const { paying: payingLogos, active: activeLogos } = logoSplit(logos as Parameters<typeof logoSplit>[0]);
-		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified: ${num(payingLogos)} paying (verified by Stripe), ${num(activeLogos)} signed in in the last 30 days</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
+		const { paying: payingLogos } = logoSplit(logos as Parameters<typeof logoSplit>[0]);
+		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified, ${num(payingLogos)} of them paying (verified by Stripe)</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
 	}
 	const payingFig = f.paying as PayingFigure | undefined;
 	if (payingFig && typeof payingFig.companies === "number") {
