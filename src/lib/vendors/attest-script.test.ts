@@ -4,10 +4,19 @@ import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 /**
- * public/attest.js, run in a sandbox with a fake page. It is plain ES5 shipped
- * as-is, so this executes the real file rather than a copy.
+ * public/attest.js and public/visit.js, run in a sandbox with a fake page.
+ * Both are plain ES5 shipped as-is, so this executes the real files rather
+ * than copies. `scripts` runs several on ONE page, in order, to test the
+ * dedupe between them (window.__lettervisit).
  */
 const SOURCE = readFileSync(join(process.cwd(), "public/attest.js"), "utf8");
+const VISIT_SOURCE = readFileSync(join(process.cwd(), "public/visit.js"), "utf8");
+const SCRIPTS = {
+	attest: { source: SOURCE, src: "https://app.letterprove.com/attest.js" },
+	visit: { source: VISIT_SOURCE, src: "https://lettervisit.com/v.js" },
+};
+
+const PIXEL = { customer_id: "1091", profile_id: "abcDEF123" };
 
 function run({
 	debug = false,
@@ -15,13 +24,17 @@ function run({
 	configStatus = 200,
 	modules = undefined as Record<string, boolean> | undefined,
 	agent = false,
+	pixel = false,
+	scripts = ["attest"] as (keyof typeof SCRIPTS)[],
 } = {}) {
 	const beacons: { url: string; body: unknown }[] = [];
 	const logs: string[] = [];
+	const configUrls: string[] = [];
+	const inserted: { id: string; src: string }[] = [];
 	const attrs: Record<string, string> = { "data-key": "lp_live_x" };
 	if (debug) attrs["data-debug"] = "";
 	const scriptEl = {
-		src: "https://app.letterprove.com/attest.js",
+		src: SCRIPTS[scripts[0]].src,
 		getAttribute: (n: string) => attrs[n] ?? null,
 		hasAttribute: (n: string) => n in attrs,
 	};
@@ -38,7 +51,9 @@ function run({
 	}
 	const fetch = vi.fn(async (url: string) => {
 		if (url.includes("/api/v1/config")) {
-			return { ok: configStatus === 200, status: configStatus, json: async () => ({ cfg: 1, signals: [], ...(modules ? { modules } : {}) }) };
+			configUrls.push(url);
+			const body = { cfg: 1, signals: [], ...(modules ? { modules } : {}), ...(pixel ? { visitors: { pixel: PIXEL } } : {}) };
+			return { ok: configStatus === 200, status: configStatus, json: async () => body };
 		}
 		return { ok: true, status: 204 };
 	});
@@ -50,10 +65,24 @@ function run({
 			return true;
 		},
 	};
-	const document = { currentScript: scriptEl, getElementsByTagName: () => [scriptEl], getElementById: () => null };
+	const head = {
+		appendChild: (el: { id: string; src: string }) => inserted.push({ id: el.id, src: el.src }),
+	};
+	const document = {
+		currentScript: scriptEl,
+		head,
+		getElementsByTagName: () => [scriptEl],
+		getElementById: (id: string) => inserted.find((el) => el.id === id) ?? null,
+		createElement: () => ({ setAttribute: () => {} }) as Record<string, unknown>,
+	};
 	const context = { window, document, navigator, fetch, location: window.location, URL, JSON, Math, Date, String };
-	vm.runInNewContext(SOURCE, context);
-	return { window, beacons, logs, settle: () => new Promise((r) => setTimeout(r, 0)) };
+	// The sandbox's global object is not `window`, so the scripts' `window.x` and a bare global differ; this keeps them one.
+	(context as Record<string, unknown>).window = window;
+	for (const name of scripts) {
+		scriptEl.src = SCRIPTS[name].src;
+		vm.runInNewContext(SCRIPTS[name].source, context);
+	}
+	return { window, beacons, logs, configUrls, inserted, settle: () => new Promise((r) => setTimeout(r, 0)) };
 }
 
 describe("attest.js", () => {
@@ -109,4 +138,71 @@ describe("attest.js", () => {
 		expect(page.beacons.some((b) => b.url.endsWith("/api/v1/observe"))).toBe(true);
 		expect(page.beacons.some((b) => b.url.endsWith("/api/v1/agent-visit"))).toBe(true);
 	});
+});
+
+describe("attest.js and the Visitors script", () => {
+	const agentVisits = (page: ReturnType<typeof run>) => page.beacons.filter((b) => b.url.endsWith("/api/v1/agent-visit"));
+	const pixels = (page: ReturnType<typeof run>) => page.inserted.filter((el) => el.id === "__maverick__");
+
+	it("attest.js asks for the config as s=attest, visit.js as s=visit through its own origin", async () => {
+		const attest = run({ scripts: ["attest"] });
+		const visit = run({ scripts: ["visit"] });
+		await Promise.all([attest.settle(), visit.settle()]);
+		expect(attest.configUrls).toEqual(["https://app.letterprove.com/api/v1/config?k=lp_live_x&s=attest"]);
+		expect(visit.configUrls).toEqual(["https://lettervisit.com/api/v1/config?k=lp_live_x&s=visit"]);
+	});
+
+	it("visit.js sends the agent beacon through its own origin, and nothing for a person", async () => {
+		const agent = run({ scripts: ["visit"], agent: true, modules: { proofs: true, agent_visitors: true, human_visitors: false } });
+		await agent.settle();
+		expect(agentVisits(agent)).toEqual([{ url: "https://lettervisit.com/api/v1/agent-visit", body: { k: "lp_live_x", path: "/", client: true, webdriver: false } }]);
+		const person = run({ scripts: ["visit"], modules: { proofs: true, agent_visitors: true, human_visitors: false } });
+		await person.settle();
+		expect(person.beacons).toEqual([]);
+	});
+
+	it("visit.js sends no agent beacon when agent visitors is off, and keeps it on for a config without modules", async () => {
+		const off = run({ scripts: ["visit"], agent: true, modules: { proofs: true, agent_visitors: false, human_visitors: false } });
+		await off.settle();
+		expect(agentVisits(off)).toEqual([]);
+		const legacy = run({ scripts: ["visit"], agent: true });
+		await legacy.settle();
+		expect(agentVisits(legacy)).toHaveLength(1);
+	});
+
+	it("visit.js loads the pixel only when the config carries one, and never sends a sign-in", async () => {
+		const on = run({ scripts: ["visit"], pixel: true, stub: true });
+		await on.settle();
+		expect(pixels(on)).toHaveLength(1);
+		expect(on.beacons.filter((b) => b.url.endsWith("/api/v1/observe"))).toEqual([]);
+		const off = run({ scripts: ["visit"] });
+		await off.settle();
+		expect(pixels(off)).toEqual([]);
+	});
+
+	it("visit.js sets window.__lettervisit before anything else, even for a bad key", async () => {
+		const page = run({ scripts: ["visit"], configStatus: 404 });
+		expect(page.window.__lettervisit).toBe(true);
+	});
+
+	it("legacy: attest.js alone still sends the agent beacon and loads the pixel", async () => {
+		const page = run({ scripts: ["attest"], agent: true, pixel: true });
+		await page.settle();
+		expect(agentVisits(page)).toHaveLength(1);
+		expect(pixels(page)).toHaveLength(1);
+	});
+
+	for (const order of [
+		["attest", "visit"],
+		["visit", "attest"],
+	] as (keyof typeof SCRIPTS)[][]) {
+		it(`both on one page (${order.join(" then ")}): one agent beacon, one pixel, sign-ins still from attest.js`, async () => {
+			const page = run({ scripts: order, agent: true, pixel: true, stub: true });
+			await page.settle();
+			expect(agentVisits(page)).toHaveLength(1);
+			expect(agentVisits(page)[0].url).toBe("https://lettervisit.com/api/v1/agent-visit");
+			expect(pixels(page)).toHaveLength(1);
+			expect(page.beacons.filter((b) => b.url.endsWith("/api/v1/observe")).map((b) => (b.body as { ev: string }).ev)).toEqual(["session", "login"]);
+		});
+	}
 });

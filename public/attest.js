@@ -29,6 +29,14 @@
  * own headers. Ordinary visitors send nothing. See src/lib/agents/visits.ts.
  * It goes once the config confirms the agent_visitors module is on.
  *
+ * Two scripts now: attest.js is attestation-first, and the Visitors script
+ * (public/visit.js, served as lettervisit.com/v.js) owns agent visits and the
+ * visitor pixel. When the Visitors script is on the page it sets
+ * `window.__lettervisit`, and this script then sends no agent beacon and loads
+ * no pixel, so nothing is counted twice. The agent beacon and pixel below are
+ * the LEGACY path, kept so a site with only this tag (letter.dev,
+ * app.letterstory.com, every install before the split) behaves as it always did.
+ *
  * Modules: the config's `modules` says which parts run. proofs off means
  * identify/signup/login send nothing; agent_visitors off means no agent
  * beacon; the visitor pixel loads only when human visitors is on.
@@ -76,7 +84,7 @@
 		}
 	}
 
-	var CONFIG_URL = origin + "/api/v1/config?k=" + encodeURIComponent(key);
+	var CONFIG_URL = origin + "/api/v1/config?k=" + encodeURIComponent(key) + "&s=attest";
 	var OBSERVE_URL = origin + "/api/v1/observe";
 	var AGENT_VISIT_URL = origin + "/api/v1/agent-visit";
 	// A self-identified agent or headless browser. Deliberately small: the
@@ -189,6 +197,13 @@
 				ready = true;
 				log("key accepted; ready" + (queue.length ? ", sending " + queue.length + " queued event(s)" : ""));
 				flush();
+				// Legacy path: only when the Visitors script is not on the page.
+				// Read here, after the config round trip, so a Visitors tag placed
+				// after this one has long since set the flag.
+				if (window.__lettervisit) {
+					log("the Visitors script is on this page; agent visits and the pixel are left to it");
+					return;
+				}
 				if (modules.agent_visitors) agentView();
 				if (body.visitors && body.visitors.pixel) loadVisitorPixel(body.visitors.pixel);
 			})
@@ -216,6 +231,9 @@
 		try {
 			var webdriver = navigator.webdriver === true;
 			if (!webdriver && !AGENT_UA.test(navigator.userAgent || "")) return;
+			// Shared with visit.js: whichever script beacons first wins.
+			if (window.__letterAgentSent) return;
+			window.__letterAgentSent = true;
 			beacon(
 				AGENT_VISIT_URL,
 				JSON.stringify({ k: key, path: location.pathname, client: true, webdriver: webdriver })
@@ -226,9 +244,10 @@
 	}
 
 	/**
-	 * Visitor identification, only when the vendor turned it on (the config
-	 * carries `visitors.pixel` then and never otherwise). Loads the identification
-	 * Intelligence pixel exactly as Letter's own sites do, once. Skipped on
+	 * Visitor identification (LEGACY path; visit.js owns it when present), only
+	 * when the vendor turned it on (the config carries `visitors.pixel` then and
+	 * never otherwise). Loads the identification pixel exactly as Letter's own
+	 * sites do, once. Skipped on
 	 * localhost and preview hosts, and when the page already runs the pixel.
 	 * Nothing it identifies passes through this script or reaches the proof:
 	 * see src/lib/vendors/visitors.ts.

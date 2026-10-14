@@ -603,8 +603,8 @@ Two ways in, because most agents never run JavaScript:
 
 | Mode | Who sends it | What it sees |
 |---|---|---|
-| **client** | `attest.js`, automatically, on any page where `navigator.webdriver` is set or the user-agent names an agent. Sends only `{k, path, client: true, webdriver}`; the server reads the user-agent, address and `Signature-Agent` from the request's own headers and the host from `Origin`. | Agents that render pages in a real browser (ChatGPT's agent, Comet, headless browsers). |
-| **server** | An optional few lines in the vendor's server (`get_install_snippet` → `server_snippet`: a Next.js middleware and a generic Node version), forwarding `{k, ua, ip, path, host, signature_agent}` fire-and-forget with `keepalive`. | Everything that fetches HTML and leaves: ChatGPT/Claude/Perplexity fetchers, GPTBot, ClaudeBot, Googlebot, Bingbot. |
+| **client** | The Visitors script (`visit.js`; on the legacy path, `attest.js`), automatically, on any page where `navigator.webdriver` is set or the user-agent names an agent. Sends only `{k, path, client: true, webdriver}`; the server reads the user-agent, address and `Signature-Agent` from the request's own headers and the host from `Origin`. | Agents that render pages in a real browser (ChatGPT's agent, Comet, headless browsers). |
+| **server** | An optional few lines in the vendor's server (`get_install_snippet` → `server_snippet`: a Next.js middleware and a generic Node version), forwarding to `https://lettervisit.com/api/v1/agent-visit` `{k, ua, ip, path, host, signature_agent}` fire-and-forget with `keepalive`. | Everything that fetches HTML and leaves: ChatGPT/Claude/Perplexity fetchers, GPTBot, ClaudeBot, Googlebot, Bingbot. |
 
 Rules: browsers and unrecognisable clients are dropped before any database
 read; the host must be the vendor's verified domain or an accepted host
@@ -624,6 +624,36 @@ itself, and both are why none of it is ever evidence. ChatGPT's agent browses
 under an ordinary Chrome user-agent and is recognised by `Signature-Agent:
 "https://chatgpt.com"` (stored as claimed; the signature itself is not
 checked).
+
+### Two scripts: Visitors and Letterprove — **Decided (10-14)**
+
+Two tags, one per product, sharing one key and one config:
+
+| Tag | File | Does |
+|---|---|---|
+| `<script src="https://lettervisit.com/v.js" data-key="KEY">` | `public/visit.js` | Agent visits (client mode above) and the visitor pixel. No identify, no sign-ins. |
+| `<script src="{this app}/attest.js" data-key="KEY">` | `public/attest.js` | Sign-ins for the proof (`identify`/`signup`/`login`). |
+
+lettervisit.com is this app under the Visitors name: its `/v.js`,
+`/api/v1/config` and `/api/v1/agent-visit` are rewrites to `/visit.js` and the
+same routes here (landing repo, `lettervisit` branch). The address is the one
+exception to "the snippet names the origin serving the page" and is written
+down once, `VISITORS_ORIGIN` in `src/lib/vendors/install.ts` (env-overridable).
+Proxied requests keep `Origin` and `User-Agent`; the visitor's address is the
+first `x-forwarded-for` hop (`clientIp`).
+
+**Dedupe flag.** `visit.js` sets `window.__lettervisit = true` before anything
+else. `attest.js` checks it after its config round trip and, when set, sends no
+agent beacon and loads no pixel. Whichever script beacons first also sets
+`window.__letterAgentSent`, so load order cannot double a visit. Without the
+Visitors tag, `attest.js` keeps doing both (the **legacy** path: letter.dev,
+app.letterstory.com and every install before the split).
+
+The config takes `s=visit|attest` (no `s` = an older `attest.js`) and stamps
+`vendors.visitors_script_seen_at` / `proofs_script_seen_at` the first time
+each is seen; `config_pings` still means "either script". `get_script` returns
+`visitors_snippet` and `proofs_snippet` (`snippet` stays as a legacy alias of
+the latter) and both timestamps under `status`.
 
 ### Reliability
 
@@ -1138,6 +1168,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 37 | **One script, three modules, and a vendor-chosen proof layout.** Each vendor has one script with modules `proofs` (sign-ins, the evidence), `agent_visitors` (AI agents and crawlers, private) and `human_visitors` (visitor identification, private; the existing visitor-identification switch). `/v1/config` tells attest.js which run and the collectors drop what is off. `get_script` returns the tag, server snippet, recipes, agent kit, modules and install status (script loaded, server snippet forwarding, first agent visit, first sign-in). Agent visits are counted before DNS proof, but only for the vendor's own domain and hosts beneath it: private analytics that never reach an attestation. A vendor may hide optional proof sections (`sessions`, `reported_history`, `logos`, `payment_details`, `observed_since`, `hosts`); the domain, tier, companies observed and verify link are locked, and the attestation lists hidden sections in `hidden_by_vendor` so a reader knows they were left out by choice. Hiding never changes the tier | ✅ **Decided (10-13)**, Matthew and Casey — see `src/lib/vendors/script.ts`, `src/lib/attest/display.ts` |
 | 38 | **Growth and retention, from Letterprove's own observations.** Two optional sections, on by default and hideable: `growth`, companies observed per calendar month for up to six months (the highest `companies_observed` in any signed snapshot that month, read from `published_aggregates`; absent with under two months), and `retention`, of the company domains observed in the 30 days ending 60 days ago, how many were also observed in the last 30 days (`cohort`, `retained`, `window: "60d"`; absent when the cohort is under 10). Counts only, never names, never the tier. Also: human-facing copy no longer shows the Stripe product count (`payment_scope.products` read as a customer metric to an agent); pages say "Payments verified by Stripe, for the products the vendor chose", and the field stays in the signed body | ✅ **Decided (10-13)**, Matthew and Casey — see `src/lib/attest/growth.ts` |
 | 39 | **The paying count and logo names are the vendor's choice, set in the interface.** Display settings gain `paying_count` (`hidden` by default, `signed_in`: observed companies with a settled invoice in the bound Stripe, `all`: every attributable company with a settled, in-scope invoice there, observed or not) and `logo_names` (default on). When shown, the attestation carries `paying: {scope, companies}`; it is opt-in, never listed in `hidden_by_vendor`, only from a bound account, and never moves the tier. With `logo_names` off, `logos` keeps `verified` plus its `paying`/`active` split and drops `companies`. Supersedes the fixed hiding in 35 | ✅ **Decided (10-13)**, Matthew: "everything should be configurable" |
+| 40 | **Two scripts: Visitors (`lettervisit.com/v.js`) for AI agents and people, Letterprove (`attest.js`) for attestation.** One key and one config; `window.__lettervisit` stops `attest.js` counting what the Visitors tag already counts; `attest.js` alone keeps its old behaviour. Server snippets forward to lettervisit.com | ✅ **Decided (10-14)** — see [Two scripts](#two-scripts-visitors-and-letterprove--decided-10-14) |
 
 ### Open
 

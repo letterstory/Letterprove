@@ -66,6 +66,26 @@ describe("scripts", () => {
 		expect(body.status).toMatchObject({ script_seen_at: null, server_seen_at: null, first_signin_at: null, domain_verified: true });
 	});
 
+	it("returns two tags, Visitors and Letterprove, with snippet kept as the Letterprove one", async () => {
+		const body = (await tool("get_script", {}, VERIFIED)).body as Record<string, unknown>;
+		expect(body.visitors_snippet).toBe('<script src="https://lettervisit.com/v.js" data-key="lp_live_ver"></script>');
+		expect(String(body.proofs_snippet)).toMatch(/\/attest\.js" data-key="lp_live_ver"><\/script>$/);
+		expect(body.snippet).toBe(body.proofs_snippet);
+		expect((body.server_snippet as { endpoint: string }).endpoint).toBe("https://lettervisit.com/api/v1/agent-visit");
+	});
+
+	it("records the first load of each script separately", async () => {
+		const { recordScriptSeen } = await import("@/lib/vendors/script");
+		const status = async () => ((await tool("get_script", {}, VERIFIED)).body as { status: Record<string, unknown> }).status;
+		expect(await status()).toMatchObject({ visitors_script_seen_at: null, proofs_script_seen_at: null });
+		await recordScriptSeen(VERIFIED, "visit");
+		const afterVisit = await status();
+		expect(afterVisit.visitors_script_seen_at).toEqual(expect.any(String));
+		expect(afterVisit.proofs_script_seen_at).toBeNull();
+		await recordScriptSeen(VERIFIED, "attest");
+		expect((await status()).proofs_script_seen_at).toEqual(expect.any(String));
+	});
+
 	it("turns modules on and off, and refuses human visitors before DNS proof", async () => {
 		const off = await tool("set_script_modules", { proofs: false, agent_visitors: false }, VERIFIED);
 		expect((off.body as { modules: unknown }).modules).toEqual({ proofs: false, agent_visitors: false, human_visitors: false });

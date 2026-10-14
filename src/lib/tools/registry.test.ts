@@ -572,7 +572,7 @@ describe("dispatchTool", () => {
 					snippet: installSnippet(origin, "lp_live_acme_9f2c"),
 					origin,
 					publishable_key: "lp_live_acme_9f2c",
-					server_snippet: serverSnippets(origin, "lp_live_acme_9f2c"),
+					server_snippet: serverSnippets("https://lettervisit.com", "lp_live_acme_9f2c"),
 					recipes: installRecipes(origin, "lp_live_acme_9f2c"),
 					agent_kit: agentKit({
 						vendorName: "Acme",
@@ -585,11 +585,12 @@ describe("dispatchTool", () => {
 				},
 			},
 		});
-		// Same origin rule as the script tag: a snippet forwarding to the wrong
-		// host is a silent outage.
+		// The server snippet is a Visitors install: it forwards to lettervisit.com,
+		// whose /api/v1/agent-visit is a rewrite to this app (install.ts
+		// VISITORS_ORIGIN). A snippet forwarding to the wrong host is a silent outage.
 		const body = (outcome as { result: { body: { server_snippet: { endpoint: string; nextjs_middleware: string } } } }).result.body;
-		expect(body.server_snippet.endpoint).toBe(`${origin}/api/v1/agent-visit`);
-		expect(body.server_snippet.nextjs_middleware).toContain(`"${origin}/api/v1/agent-visit"`);
+		expect(body.server_snippet.endpoint).toBe("https://lettervisit.com/api/v1/agent-visit");
+		expect(body.server_snippet.nextjs_middleware).toContain(`"https://lettervisit.com/api/v1/agent-visit"`);
 		expect(body.server_snippet.nextjs_middleware).toContain("event.waitUntil(");
 		expect(body.server_snippet.nextjs_middleware).toContain("export function proxy(");
 	});

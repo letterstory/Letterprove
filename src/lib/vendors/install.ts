@@ -47,6 +47,24 @@ export function originFromHeaders(headers: Headers): string | null {
 export const AGENT_VISIT_PATH = "/api/v1/agent-visit";
 
 /**
+ * The Visitors script's home. lettervisit.com rewrites /v.js to
+ * `public/visit.js` here and /api/v1/config and /api/v1/agent-visit to this
+ * app's routes (the landing repo's `lettervisit` branch, next.config), so it is
+ * this app under another name — the one exception to "the snippet names the
+ * origin serving the page", written down because the Visitors product has its
+ * own address. If those rewrites ever go, every Visitors snippet 404s silently;
+ * VISITORS_ORIGIN is the switch to point snippets back here.
+ */
+export const VISITORS_ORIGIN = (process.env.VISITORS_ORIGIN || "https://lettervisit.com").replace(/\/+$/, "");
+/** lettervisit.com/v.js; served from this app's own origin it is /visit.js. */
+export const VISITORS_SCRIPT_PATH = "/v.js";
+
+/** The Visitors tag: AI agents and people. Attestation is the separate attest.js tag (installSnippet). */
+export function visitorsSnippet(publishableKey: string): string {
+	return `<script src="${VISITORS_ORIGIN}${VISITORS_SCRIPT_PATH}" data-key="${publishableKey}"></script>`;
+}
+
+/**
  * The optional second install line: a few lines in the vendor's own server
  * that forward each request's user-agent, address and path. Needed because
  * ChatGPT, Claude, Perplexity and the search crawlers fetch HTML without
