@@ -34,7 +34,7 @@
  * beacon; the visitor pixel loads only when human visitors is on.
  *
  * One opt-in exception to "this script only reports domains": a vendor who
- * turns on visitor identification gets the Maverick pixel loaded on their
+ * turns on visitor identification gets the identification pixel loaded on their
  * site too (loadVisitorPixel below). That is a separate, vendor-private
  * product — README § Visitor identification — and nothing it sees passes
  * through this script.
@@ -227,18 +227,18 @@
 
 	/**
 	 * Visitor identification, only when the vendor turned it on (the config
-	 * carries `visitors.pixel` then and never otherwise). Loads the Maverick
+	 * carries `visitors.pixel` then and never otherwise). Loads the identification
 	 * Intelligence pixel exactly as Letter's own sites do, once. Skipped on
-	 * localhost and preview hosts, and when the page already runs Maverick.
+	 * localhost and preview hosts, and when the page already runs the pixel.
 	 * Nothing it identifies passes through this script or reaches the proof:
 	 * see src/lib/vendors/visitors.ts.
 	 */
-	var MAVERICK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+	var PIXEL_ID = /^[A-Za-z0-9_-]{1,64}$/;
 	function loadVisitorPixel(pixel) {
 		try {
 			var customerId = String(pixel.customer_id || "");
 			var profileId = String(pixel.profile_id || "");
-			if (!MAVERICK_ID.test(customerId) || !MAVERICK_ID.test(profileId)) return;
+			if (!PIXEL_ID.test(customerId) || !PIXEL_ID.test(profileId)) return;
 			var h = window.location.hostname;
 			if (h === "localhost" || h === "127.0.0.1" || /\.vercel\.app$/.test(h)) return;
 			if (window.maverick || document.getElementById("__maverick__")) return;
