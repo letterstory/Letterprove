@@ -43,5 +43,39 @@
     "1": "Invites scrutiny of production-use evidence; stacks the deck toward proof.",
     "2": "Invites scrutiny of verifiability; stacks the deck toward proof.",
     "3": "Hard fit (added 2026-10-07 for stress.mjs). Lettertrace is open-source/BYOK, so a buyer wanting a fully managed tool should NOT rank it first on fit alone — this leaves proof room to move the rank, where prompt 0 ceilinged at #1 on Claude and Gemini."
+  },
+  "observed_recommendations": {
+    "_fictional": "FICTIONAL STIMULUS (run 8, experiment 2). No such measurement was run and no such document exists. Shown only inside prompts on the experimenter's machine.",
+    "rival": "Mentionark",
+    "counts": {
+      "ChatGPT": {
+        "Lettertrace": 32,
+        "Mentionark": 21,
+        "Vellumetric": 17,
+        "Promptlark": 9,
+        "Answerwick": 6
+      },
+      "Claude": {
+        "Lettertrace": 29,
+        "Mentionark": 24,
+        "Vellumetric": 15,
+        "Promptlark": 11,
+        "Answerwick": 7
+      },
+      "Gemini": {
+        "Lettertrace": 27,
+        "Mentionark": 25,
+        "Vellumetric": 19,
+        "Promptlark": 8,
+        "Answerwick": 5
+      },
+      "Perplexity": {
+        "Lettertrace": 30,
+        "Mentionark": 22,
+        "Vellumetric": 18,
+        "Promptlark": 10,
+        "Answerwick": 4
+      }
+    }
   }
 }

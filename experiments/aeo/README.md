@@ -449,15 +449,79 @@ in 11/16 control cells, up from 4/16), so proof has nowhere to go but down;
 and Anthropic's fetch tool served a cached, pre-#167 copy of the live
 attestation in a probe, so linked proof can lag what is published.
 
+### Run 8 — 2026-10-14, the corrected-proof baseline and an observed-recommendations arm
+
+After #211 (Stripe confirms identity, never payments; no `paying` fields; growth
+months marked `partial`). Precondition checked: the 19:05 UTC snapshots of
+`letterstory` and `lettertrace` verify against the JWKS, carry no payment field,
+and `letterstory` carries `stripe_business` (tier 3). Two targets, both run on
+the run-7 design (prompts 0 and 3 × 8 rounds, seed 20261007, so Lettertrace's
+candidate orders are run 7's): **Lettertrace** on `scenarios.lettertrace-v2.json`
+(like-for-like with run 7) and **Letterstory** on the new
+`scenarios.letterstory.json` (invented competitors, checked to match no domain or
+company). Arms: control, proof_linked, proof_inline, and two experiment-2 arms
+that add a **fictional** observed-recommendations record to proof_inline
+(`observed_vendor`, `observed_neutral`: who chose the 50 questions). 320 cells,
+0 errors, ~29 min. Claude and both judges via Concentrate; **ChatGPT via
+Concentrate too, with web_search only: no code tool, so it cannot run a
+signature check (runs 4–7 had code_interpreter).** A second blind judge
+(`objections`) reads the objections run 7's schema has no slot for; run 7's
+judge is unchanged. Analysis: `analyze-run8.mjs`.
+
+Mean rank, unranked = 6, bootstrap 95% interval (n = 16 per cell):
+
+| | control | proof_linked | proof_inline | observed_vendor | observed_neutral |
+|---|---|---|---|---|---|
+| Claude · Lettertrace | 1.88 [1.31, 2.56] | 2.25 [1.63, 2.94] | 2.63 [1.94, 3.38] | 2.63 [1.88, 3.38] | 2.63 [1.94, 3.38] |
+| ChatGPT · Lettertrace | 2.50 [1.75, 3.25] | 2.50 [1.75, 3.25] | 2.56 [1.75, 3.38] | 2.63 [1.81, 3.44] | 2.75 [1.88, 3.69] |
+| Claude · Letterstory | 1.50 [1.25, 1.75] | 1.50 | 1.50 | 1.50 | 1.50 |
+| ChatGPT · Letterstory | 1.50 [1.25, 1.75] | 1.56 | 1.63 | 1.69 | 1.63 |
+
+**Letterstory measures nothing: every arm ranks it #1 on prompt 0 and #2 on
+prompt 3, 16/16, on both engines.** Fit decides; there is no headroom either way.
+
+**Lettertrace on Claude: proof still costs rank, a little more than in run 7.**
+Paired Δ vs control: proof_inline +0.56 → **+0.75** [+0.25, +1.44], proof_linked
++0.38 → +0.38. All of it is prompt 3 (prompt 0 ceilings at #1). Self-attested /
+sister company: judge 100% of proof cells vs 25% control (run 7: 100% vs 13%).
+New since run 7: "no revenue / paying not proven" in 75–100% of Claude proof
+cells vs 0% control — the document now says `stripe_business: not_connected`.
+And **Claude reads Lettertrace's usage as falling in 9/16 proof_inline cells**
+("monthly counts went 65 → 118 → 90, so they're falling in October"): the live
+`growth` marks 2026-08 `partial` but not the in-progress 2026-10, while
+Letterstory's marks the current month `partial`. That looks like a defect.
+
+**ChatGPT: unmoved, as in run 7** (Δ ≤ +0.13). "Counts domains, not
+customers/deployments" in 88–100% of its proof cells (38–69% control); affiliated
+issuer 100%. It found and fetched the proof unprompted in 1/16 Letterstory
+control cells.
+
+**Experiment 2: no-go in this form.** Relative to proof_inline, the record moved
+nothing: Claude Δ 0.00 on both targets; ChatGPT +0.06 / +0.19 (slightly worse).
+No answer relied on it (0/128); the rest discounted or rejected it. Vendor-chosen
+questions were flagged in 100% of vendor cells vs 6–38% neutral, so engines do
+read who chose the questions — but the neutral record was rejected anyway, as
+unverifiable (81–100%): it is unsigned, and Claude fetched its `answers_url`
+(which does not resolve) in 50–100% of cells. What this rules out is an
+unsigned record with no live answers. A signed one whose answers really are
+at the URL is untested.
+
+Confounds: OpenAI's fetcher served a cached pre-#211 Letterstory snapshot (13
+Oct 21:05, with `paying` fields) in the pre-run probe, so ChatGPT's linked arm
+may have read stale data (no answer quoted payment fields). Shortlist prompts
+with the vendor URL were not run: no scenario carries one.
+
 ## Files
 
 | | |
 |---|---|
 | `scenarios.json` | Vantage — fictional target and competitors (runs 1–2) |
 | `scenarios.lettertrace.json` | Lettertrace — real target, real attestation, invented competitors (runs 3–6) |
-| `scenarios.lettertrace-v2.json` | The same, with competitor names checked to match no real company (run 7 onward) |
+| `scenarios.lettertrace-v2.json` | The same, with competitor names checked to match no real company (run 7 onward); carries run 8's fictional `observed_recommendations` block |
+| `scenarios.letterstory.json` | Letterstory — real target (tier-3 proof), invented competitors, fictional `observed_recommendations` (run 8) |
 | `run.mjs` | Runner — builds briefs, calls the API, extracts signals, prints the summary (runs 1–3) |
 | `stress.mjs` | Launch stress test — four engines, seven arms including tampered/forged/stale proof, blind judge, `--mode discovery`, `--resume` (run 4) |
-| `providers.mjs` | One adapter per engine (Claude, ChatGPT, Gemini, Perplexity), one return shape |
+| `providers.mjs` | One adapter per engine (Claude, ChatGPT, Gemini, Perplexity), one return shape; ChatGPT via Concentrate (search only) when no OpenAI key |
+| `analyze-run8.mjs` | Mean rank with bootstrap intervals, fetch/cite rates, objection rates, paired Δ vs control and vs proof_inline (run 8) |
 | `access-baseline.mjs` | Tier 3 — organic AI-agent reads from production `agentic_read_events`, experiment windows excluded |
 | `results*.jsonl`, `access-baseline-*.json` | Output, git-ignored |
