@@ -29,6 +29,8 @@ const LEAD = [
 	"customer_domain",
 	"kind",
 	"domain",
+	"domain_proof",
+	"domain_verified",
 	"domain_verified_since",
 	"stripe_account_bound",
 	"stripe_binding",

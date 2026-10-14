@@ -9,6 +9,7 @@ vi.mock("@/lib/vendors/hosts", async (importOriginal) => ({
 }));
 vi.mock("@/lib/telemetry/rejected-origins", () => ({ recordRejectedOrigin: vi.fn() }));
 vi.mock("@/lib/telemetry/first-event", () => ({ markFirstEvent: vi.fn() }));
+vi.mock("@/lib/vendors/domain-claim", () => ({ rivalHoldsDomain: vi.fn(async () => false) }));
 
 import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
@@ -16,6 +17,7 @@ import { recordObservation } from "@/lib/telemetry/record";
 import { acceptedHosts } from "@/lib/vendors/hosts";
 import { recordRejectedOrigin } from "@/lib/telemetry/rejected-origins";
 import { markFirstEvent } from "@/lib/telemetry/first-event";
+import { rivalHoldsDomain } from "@/lib/vendors/domain-claim";
 import { POST } from "./route";
 
 // Verified, because every test below the refusal ones is about some other
@@ -51,31 +53,54 @@ beforeEach(() => {
 	vi.mocked(recordObservation).mockResolvedValue(undefined);
 });
 
-describe("POST /api/v1/observe — unverified vendors", () => {
-	it("refuses an event from a vendor who has not proven domain control", async () => {
-		// Not merely uncounted: refused. If an unverified vendor could still
-		// collect, whoever registers a domain first builds up history on it
-		// before the real owner ever arrives.
+describe("POST /api/v1/observe — vendors without DNS proof", () => {
+	// DNS is optional since 2026-10-14 (lib/attest/domain-proof.ts): an
+	// unproven vendor collects, and its proof is graded tier 0 or site-verified.
+	it("collects from the vendor's exact domain without DNS proof", async () => {
 		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: false } as never);
 
-		const res = await post(VALID_BODY, { origin: "https://lettertrace.com" });
+		await post(VALID_BODY, { origin: "https://lettertrace.com" });
 
-		expect(res.headers.get("x-letterprove")).not.toBe("ok");
-		expect(recordObservation).not.toHaveBeenCalled();
+		expect(recordObservation).toHaveBeenCalled();
 	});
 
-	it("still answers 204, because this endpoint never leaks collection state", async () => {
+	it("does not auto-accept hosts beneath an unproven domain", async () => {
 		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: false } as never);
+
+		await post(VALID_BODY, { origin: "https://app.lettertrace.com" });
+
+		expect(recordObservation).not.toHaveBeenCalled();
+		expect(recordRejectedOrigin).toHaveBeenCalledWith("v-1", "app.lettertrace.com");
+	});
+
+	it("accepts the host its site proof was found on, and hosts it added, exactly", async () => {
+		vi.mocked(findVendorByKey).mockResolvedValue({
+			...VENDOR,
+			domainVerified: false,
+			siteVerifiedAt: "2026-10-14T00:00:00Z",
+			siteVerifiedUrl: "https://app.lettertrace.com/login",
+		} as never);
+		vi.mocked(acceptedHosts).mockResolvedValue(new Set(["eu.lettertrace.com"]));
+
+		await post(VALID_BODY, { origin: "https://app.lettertrace.com" });
+		await post(VALID_BODY, { origin: "https://eu.lettertrace.com" });
+		await post(VALID_BODY, { origin: "https://us.lettertrace.com" });
+
+		expect(recordObservation).toHaveBeenCalledTimes(2);
+	});
+
+	it("refuses an unproven vendor once another vendor has proven the domain by DNS", async () => {
+		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: false } as never);
+		vi.mocked(rivalHoldsDomain).mockResolvedValueOnce(true);
 
 		const res = await post(VALID_BODY, { origin: "https://lettertrace.com" });
 
 		expect(res.status).toBe(204);
+		expect(recordObservation).not.toHaveBeenCalled();
 	});
 
-	it("accepts once the same vendor is verified", async () => {
-		vi.mocked(findVendorByKey).mockResolvedValue({ ...VENDOR, domainVerified: true } as never);
-
-		await post(VALID_BODY, { origin: "https://lettertrace.com" });
+	it("still auto-accepts hosts beneath a DNS-proven domain", async () => {
+		await post(VALID_BODY, { origin: "https://app.lettertrace.com" });
 
 		expect(recordObservation).toHaveBeenCalled();
 	});

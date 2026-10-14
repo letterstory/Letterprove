@@ -40,6 +40,12 @@ beforeAll(async () => {
 		 values ($1, 'e2e-observe-unverified', 'E2E Observe Unverified', 'observe-unverified.example', 'test', 'lp_live_e2e_observe_unverified', gen_random_uuid(), null)`,
 		[UNVERIFIED_VENDOR_ID],
 	);
+	// Two vendors naming one domain: the DNS-proven one outranks the other.
+	await pg.query(
+		`insert into vendors (id, slug, name, domain, category, key, letterstory_org_id, domain_verified_at)
+		 values (gen_random_uuid(), 'e2e-claim-owner', 'Owner', 'observe-claimed.example', 'test', 'lp_live_e2e_claim_owner', gen_random_uuid(), now()),
+		        (gen_random_uuid(), 'e2e-claim-squatter', 'Squatter', 'observe-claimed.example', 'test', 'lp_live_e2e_claim_squatter', gen_random_uuid(), null)`,
+	);
 });
 
 afterAll(async () => {
@@ -73,12 +79,21 @@ async function post(key: string, domain: string, origin: string) {
 }
 
 describe("POST /api/v1/observe against a real Postgres schema", () => {
-	it("refuses an event for a vendor who has not proven domain control, and writes nothing", async () => {
+	// DNS is optional since 2026-10-14: the proof is graded tier 0, not refused.
+	it("records an event for a vendor without DNS proof, from its exact domain", async () => {
 		const res = await post("lp_live_e2e_observe_unverified", "acme.com", "https://observe-unverified.example");
 
 		expect(res.status).toBe(204);
+		expect(res.headers.get("x-letterprove")).toBe("on");
+		expect(await hotEventCount("e2e-observe-unverified")).toBe(1);
+	});
+
+	it("refuses a vendor without DNS proof when another vendor has proven that domain, and writes nothing", async () => {
+		const res = await post("lp_live_e2e_claim_squatter", "acme.com", "https://observe-claimed.example");
+
+		expect(res.status).toBe(204);
 		expect(res.headers.get("x-letterprove")).toBe("off");
-		expect(await hotEventCount("e2e-observe-unverified")).toBe(0);
+		expect(await hotEventCount("e2e-claim-squatter")).toBe(0);
 	});
 
 	it("accepts and records a real row once the same vendor is verified", async () => {

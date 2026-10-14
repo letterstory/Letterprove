@@ -14,11 +14,19 @@
  */
 import { payingSentence } from "./paying-copy";
 import { leadSentence } from "./lead";
+import { docDomainProof } from "./domain-proof";
 
 import type { VendorProof } from "./proofs";
 
 export function vendorJsonLd(proof: VendorProof, origin: string): Record<string, unknown> {
 	const proofUrl = `${origin}/proofs/${proof.vendor.slug}`;
+	const domainProof = proof.attestation ? docDomainProof(proof.attestation) : proof.vendor.domain_proof;
+	const control =
+		domainProof === "dns"
+			? `controls ${proof.vendor.domain} (proven by DNS)`
+			: domainProof === "site"
+				? `runs Letterprove's script on a page of ${proof.vendor.domain} (site verified, not DNS)`
+				: `names ${proof.vendor.domain} (domain not verified)`;
 
 	return {
 		"@context": "https://schema.org",
@@ -29,8 +37,8 @@ export function vendorJsonLd(proof: VendorProof, origin: string): Record<string,
 			"@type": "Dataset",
 			name: `Letterprove attestation for ${proof.vendor.name}`,
 			description:
-				`${leadSentence(Boolean(proof.vendor.issuer_affiliation))} ` +
-				`A signed, hourly attestation that ${proof.vendor.name} controls ${proof.vendor.domain} (proven by DNS) and is backed by ` +
+				`${leadSentence(Boolean(proof.vendor.issuer_affiliation), domainProof, proof.vendor.domain)} ` +
+				`A signed, hourly attestation that ${proof.vendor.name} ${control} and is backed by ` +
 				`observed usage: ${proof.summary.companies_observed} companies observed signing in over the last 30 days, ` +
 				(proof.summary.payment_corroborated ? `with payment from them corroborated by ${proof.vendor.name}'s own Stripe account. ` : "") +
 				(proof.summary.paying ? `${payingSentence(proof.summary.paying)}. ` : "") +

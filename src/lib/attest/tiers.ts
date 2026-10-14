@@ -40,12 +40,12 @@ export interface TierDescription {
 export const TIER_LADDER: Record<Tier, TierDescription> = {
 	0: {
 		name: "vendor-asserted",
-		means: "Nothing corroborates a claim: no usage was observed, or the vendor has not proven control of its domain by DNS (or the daily re-check found the record gone).",
+		means: "Nothing corroborates a claim: no usage was observed, or the vendor has not proven control of its domain at all (`domain_proof: none`, labelled \"Domain not verified\"), or the daily re-check found its proof gone.",
 		forgeable_by: "The vendor alone, trivially. Treat as a claim, not as evidence.",
 	},
 	1: {
 		name: "script-observed",
-		means: "Letterprove's script saw people from company email domains sign in, on a domain the vendor proved it controls by DNS. `companies_observed` says how many companies; Letterprove stamps when each event arrived and the vendor never reports a number.",
+		means: "Letterprove's script saw people from company email domains sign in, on a domain the vendor proved it controls: by DNS (`domain_proof: dns`), or by carrying Letterprove's script and its key on a page of that domain (`domain_proof: site`, labelled \"Site verified\"; it proves control of a page, not the domain's DNS, and is the weaker of the two). `companies_observed` says how many companies; Letterprove stamps when each event arrived and the vendor never reports a number.",
 		forgeable_by:
 			"The vendor, with effort. The collector pins events to the vendor's verified origin, which a browser cannot forge — but a non-browser client can send whatever origin it likes, so a vendor could script sign-ins. Volume and burst anomalies are scored against it.",
 	},
@@ -57,7 +57,7 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 	},
 	3: {
 		name: "third-party confirmed",
-		means: "Tier 1, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). The tier is the strongest evidence present, not a claim that every company pays; how many pay is private to the vendor. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
+		means: "Tier 1 on a DNS-proven domain, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). Site proof never reaches tier 3. The tier is the strongest evidence present, not a claim that every company pays; how many pay is private to the vendor. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
 		forgeable_by:
 			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
 	},

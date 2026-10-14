@@ -34,6 +34,7 @@ describe("GET /.well-known/letterprove.json", () => {
 				url: "https://app.letterprove.com/proofs/lettertrace",
 				aggregate: "https://app.letterprove.com/attest/lettertrace.json",
 				aggregate_chain: "https://app.letterprove.com/attest/lettertrace/chain",
+				domain_proof: expect.stringMatching(/^(none|site|dns)$/),
 			},
 		]);
 	});

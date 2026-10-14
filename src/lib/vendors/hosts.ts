@@ -92,6 +92,22 @@ export function isOriginAccepted(origin: string, vendorDomain: string, extraHost
 	return extraHosts.has(origin);
 }
 
+/**
+ * The collector's rule for a vendor WITHOUT DNS proof (since 2026-10-14, when
+ * DNS became optional). Exact hosts only: the vendor's domain, the host its
+ * site proof was found on (lib/vendors/site-proof.ts), and the hosts it added.
+ * Nothing beneath the domain is accepted automatically, because the
+ * automatic rule rests on a DNS proof that isn't there.
+ */
+export function isOriginAcceptedWithoutDns(
+	origin: string,
+	vendorDomain: string,
+	addedHosts: ReadonlySet<string>,
+	siteHost: string | null,
+): boolean {
+	return origin === vendorDomain || origin === siteHost || addedHosts.has(origin);
+}
+
 /** Where a host needing its own proof may carry the record: the host itself, or the registrable domain. */
 export function hostVerificationHosts(host: string): string[] {
 	const base = registrableDomain(host);

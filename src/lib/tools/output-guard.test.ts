@@ -8,6 +8,9 @@ vi.mock("@/lib/vendors/status", () => ({
 		installed: true,
 		count: 3,
 		publishedAt: "2026-01-01T00:00:00.000Z",
+		domainProof: "dns",
+		siteVerifiedAt: null,
+		siteVerifiedUrl: null,
 	})),
 }));
 
@@ -64,6 +67,10 @@ describe("the output guard", () => {
 					count: 3,
 					published: true,
 					published_at: "2026-01-01T00:00:00.000Z",
+					domain_proof: "dns",
+					domain_verified: true,
+					site_verified_at: null,
+					site_verified_url: null,
 				},
 			},
 		});

@@ -23,7 +23,7 @@ const doc = (over: Partial<DiscoveryDocument> = {}): DiscoveryDocument => ({
 			vendor: "letterstory",
 			url: "https://app.letterprove.com/proofs/letterstory",
 			aggregate: "https://app.letterprove.com/attest/letterstory.json",
-			aggregate_chain: "https://app.letterprove.com/attest/letterstory/chain",
+			aggregate_chain: "https://app.letterprove.com/attest/letterstory/chain", domain_proof: "dns" as const,
 		},
 	],
 	...over,

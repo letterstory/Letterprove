@@ -119,10 +119,19 @@ type Fetcher = typeof fetch;
  * same registrable domain: a redirect off the vendor's domain is someone
  * else's page, and matching names on it would prove nothing.
  */
-export async function fetchLogoPage(pageUrl: string, fetcher: Fetcher = fetch): Promise<{ ok: true; html: string } | { ok: false; detail: string }> {
+export async function fetchLogoPage(
+	pageUrl: string,
+	fetcher: Fetcher = fetch,
+	/** Checked before every hop, redirects included; a non-null answer refuses the fetch (SSRF guard). */
+	beforeFetch?: (url: URL) => Promise<string | null>,
+): Promise<{ ok: true; html: string } | { ok: false; detail: string }> {
 	const base = registrableDomain(new URL(pageUrl).hostname.toLowerCase());
 	let current = pageUrl;
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+		if (beforeFetch) {
+			const refused = await beforeFetch(new URL(current));
+			if (refused) return { ok: false, detail: refused };
+		}
 		let res: Response;
 		try {
 			res = await fetcher(current, {

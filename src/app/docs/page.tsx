@@ -431,6 +431,20 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
                 every tier drops to 0.
               </li>
               <li>
+                <code>domain_proof</code>: how the vendor&apos;s claim to{" "}
+                <code>domain</code> is proven. <code>dns</code> (Verified by
+                DNS) allows every tier. <code>site</code> (Site verified):
+                Letterprove found the vendor&apos;s script and key on a page of
+                the domain, which proves control of a page rather than the
+                domain&apos;s DNS, so the tier stops at 1 and the Stripe binding
+                and logo wall don&apos;t count. <code>none</code> (Domain not
+                verified): the counts are the vendor&apos;s claim, tier 0.{" "}
+                <code>domain_verified</code> is true only for <code>dns</code>.
+                DNS is optional; a vendor site-verifies with{" "}
+                <code>verify_site</code>, or automatically once the script
+                loads on a page of its domain.
+              </li>
+              <li>
                 <code>hosts</code>: how many extra hosts on that domain the
                 collector accepts events from. A count, never the hosts.
               </li>

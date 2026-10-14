@@ -67,6 +67,8 @@ import {
 	type StripeBinding,
 } from "./vendor-evidence";
 
+import { domainProofOf, tierForProof, type DomainProof } from "./domain-proof";
+
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
 const WINDOW_DAYS = 30;
 
@@ -81,6 +83,20 @@ export interface AggregateBody {
 	domain?: string;
 	/** When DNS control was last proven (re-checked daily), or null when it isn't proven. */
 	domain_verified_since?: string | null;
+	/**
+	 * How the vendor's claim to `domain` is proven (lib/attest/domain-proof.ts):
+	 * `dns` (TXT record), `site` (attest.js with the vendor's key found on a page
+	 * of the domain; weaker, tier 1 at most) or `none` (the vendor's claim; tier
+	 * 0). Since 2026-10-14, when DNS became optional. Absent on older documents,
+	 * which could only be published with DNS proof.
+	 */
+	domain_proof?: DomainProof;
+	/**
+	 * True only for `domain_proof: "dns"`. Kept as a boolean for readers that
+	 * only ask "is the domain DNS-proven"; site proof is NOT domain verification.
+	 * Absent on documents signed before 2026-10-14.
+	 */
+	domain_verified?: boolean;
 	/**
 	 * How many extra hosts the vendor added for the collector to accept. A
 	 * count, never the hosts. Hosts beneath the verified domain are covered by
@@ -223,8 +239,7 @@ interface Totals {
  * and there isn't any.
  */
 export function earnedAggregateTier(observed: boolean, domainVerified: boolean, payingCompanies = 0): Tier {
-	if (!observed || !domainVerified) return 0;
-	return payingCompanies > 0 ? 3 : 1;
+	return tierForProof(observed, domainVerified ? "dns" : "none", payingCompanies);
 }
 
 /** Every domain this vendor was observed for in the window, with its totals. */
@@ -293,7 +308,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		{ sessions: 0, signups: 0, logins: 0 }
 	);
 
-	const [scope, binding, hosts, firstObserved, history] = await Promise.all([
+	const [scope, boundAccount, hosts, firstObserved, history] = await Promise.all([
 		vendor.id ? paymentScopeFor(vendor.id) : Promise.resolve(null),
 		vendor.id ? stripeBinding(vendor.id, vendor.domain) : Promise.resolve(null),
 		vendor.id ? hostCount(vendor.id) : Promise.resolve(0),
@@ -302,6 +317,10 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		// the domain is proven.
 		vendor.id && vendor.domainVerified ? reportedHistory(vendor.id, attributable) : Promise.resolve(null),
 	]);
+	// The Stripe binding matches the account to the vendor's domain, so it
+	// only stands on a DNS-proven domain; site proof is not enough (since
+	// 2026-10-14, when DNS became optional).
+	const binding = vendor.domainVerified ? boundAccount : null;
 	// Payment only counts from an account that is the vendor's own. The Stripe
 	// sync already clears evidence on a mismatch; this holds even if a row
 	// outlives that.
@@ -318,6 +337,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 			: null;
 	const now = new Date().toISOString();
 	const observed = attributable.length > 0;
+	const proof = domainProofOf(vendor);
 	const [display, growth, retention] = await Promise.all([
 		vendor.id ? displayFor(vendor.id) : Promise.resolve({ ...DEFAULT_DISPLAY }),
 		vendor.domainVerified ? growthFor(vendor.slug) : Promise.resolve(null),
@@ -337,6 +357,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		kind: "aggregate",
 		domain: vendor.domain,
 		domain_verified_since: vendor.domainVerified && vendor.domainVerifiedAt ? new Date(vendor.domainVerifiedAt).toISOString() : null,
+		domain_proof: proof,
+		domain_verified: proof === "dns",
 		hosts: vendor.domainVerified ? hosts : 0,
 		stripe_account_bound: binding !== null,
 		stripe_binding: binding,
@@ -346,7 +368,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		domains_excluded: excluded.length,
 		paying_since: paying.since,
 		observed_since: firstObserved ?? (observed ? now : null),
-		tier: earnedAggregateTier(observed, vendor.domainVerified, paying.companies),
+		tier: tierForProof(observed, proof, paying.companies),
 		vendor_stated: history ? ["reported_history"] : [],
 		...(history ? { reported_history: history } : {}),
 		...(logos ? { logos } : {}),

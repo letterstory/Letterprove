@@ -16,7 +16,8 @@
 ## Current state (updated 2026-10-13)
 
 - **What it attests.** One signed proof per vendor, about the vendor: its domain (proven by DNS, re-checked daily), its Stripe account (bound to that domain, or approved by Letterprove staff), and the companies observed signing in to its product. Customers are counted, never named, unless the vendor opts in to verified logo names from its own public logo wall.
-- **Tiers issued today.** Tier 0 (nothing proven), tier 1 (sign-ins observed on the DNS-proven domain) and tier 3 (tier 1 plus settled invoices in the vendor's bound, live-mode Stripe account; live since 2026-10-12). Tier 2 is not issued: it needs the network (ASN) binding, which is not built. Tier 4 (customer counter-signature) was retired on 2026-10-12; old documents that carry it still verify.
+- **Domain proof is optional (since 2026-10-14).** Every proof states `domain_proof`: `dns` (TXT record, re-checked daily), `site` ("Site verified": Letterprove found `attest.js` with the vendor's key on a page of the domain; weaker, tier 1 at most) or `none` ("Domain not verified": the counts are the vendor's claim, tier 0). See [Domain proof](#domain-proof-three-states--decided-10-14).
+- **Tiers issued today.** Tier 0 (nothing proven), tier 1 (sign-ins observed on a DNS- or site-verified domain) and tier 3 (tier 1 plus settled invoices in the vendor's bound, live-mode Stripe account; live since 2026-10-12). Tier 2 is not issued: it needs the network (ASN) binding, which is not built. Tier 4 (customer counter-signature) was retired on 2026-10-12; old documents that carry it still verify.
 - **Optional sections a vendor can show or hide.** Paying count (hidden, signed-in and paying, or all paying via Stripe), verified logo wall, PostHog history (labelled vendor-reported, never moves the tier), growth per month, retention, sessions, first observed. The domain, tier, companies observed and verify link are always shown; hidden sections are listed in `hidden_by_vendor`.
 - **Signing.** Letterprove computes each snapshot; Letterstory scores it for fraud and signs it. A new snapshot is frozen every hour and hash-chained to the one before, and frozen rows cannot be rewritten.
 - **This repository is public** (MIT). Every attestation's `method` field links to the exact commit that computed it.
@@ -103,16 +104,17 @@ can weigh it instead of trusting it:
 | Tier | Source | Forgeable by the vendor? |
 |:---:|---|---|
 | **0** | Vendor-asserted — the ordinary logo wall | Trivially |
-| **1** | Observed by our script, on a domain the vendor proved by DNS | With effort |
+| **1** | Observed by our script, on a domain the vendor proved by DNS, or site-verified (its script and key on a page there) | With effort |
 | ~~**2**~~ | ~~Bound to network facts the vendor doesn't choose (ASN)~~ — **not issued** until the ASN binding is built; documents signed before 10-13 may carry it, read them as tier 1 | — |
 | **3** | Tier 1, plus at least one observed company paying a settled invoice in the vendor's own (bound) live Stripe. The highest tier; how many pay is private to the vendor | Only by paying themselves real money |
 
 Tier 4 (a customer counter-signature) was retired on 10-12. Old documents may still carry it and still verify; read them as tier 3.
 
 **The tier comes from evidence alone** ([decision 29](#decision-log)). Nobody
-sets it, the vendor included: no DNS proof or nothing observed is tier 0,
-companies observed signing in on the DNS-proven domain is tier 1, and at least
-one of those companies paying through the vendor's own Stripe is tier 3 — the
+sets it, the vendor included: no domain proof or nothing observed is tier 0,
+companies observed signing in on a DNS- or site-verified domain is tier 1, and
+at least one of those companies paying through the vendor's own Stripe (on a
+DNS-proven domain) is tier 3 — the
 strongest evidence class present, always published beside the counts
 ([decision 30](#decision-log)). Domain proof is re-checked daily, so a lapsed
 or removed record stops counting.
@@ -141,6 +143,44 @@ ledger, and does not contact the vendor's customers (see
 
 Rigor compounds. Ship tier 1, then 3, then the ASN binding for 2, and never
 print the word *verified* where the tier doesn't earn it.
+
+### Domain proof: three states — **Decided (10-14)**
+
+DNS used to be required before anything was collected or published. It was
+the largest piece of setup friction, so it is now optional, and the proof says
+plainly which of three states the vendor's claim to its domain is in. The
+signed field is `domain_proof` (`src/lib/attest/domain-proof.ts`); the label
+appears on the proof page, the verify page, the lead sentence, JSON-LD,
+`/llms.txt` and the discovery document.
+
+| `domain_proof` | Label | What proves it | Highest tier |
+|---|---|---|:---:|
+| `dns` | Verified by DNS | The vendor's TXT record at `_letterprove.<domain>`, re-checked daily | 3 |
+| `site` | Site verified | Letterprove fetched an https page the vendor named on the domain (or a host beneath it) and found `attest.js` with the vendor's current key in a `<script>` tag. Re-fetched daily; three answered misses over two days clear it | 1 |
+| `none` | Domain not verified | Nothing. The counts are the vendor's claim | 0 |
+
+**Why site proof earns tier 1 and no more.** Tier 1 says browser sign-ins were
+observed on pages the vendor controls; a page carrying the vendor's own key
+establishes that for the host it was found on, which an impersonator who only
+registered the domain name cannot do. It proves control of a page, not of the
+domain's DNS (one team, one CMS login or one compromised page can carry the
+tag), so it never reaches tier 3, and the Stripe binding and the logo wall,
+both matched to the domain, count only with DNS. `domain_verified` stays in the
+document and is true only for `dns`.
+
+**What collection accepts without DNS.** Exact hosts only: the vendor's
+domain, the host its site proof was found on, and hosts it added. Hosts
+beneath the domain are accepted automatically only with DNS proof.
+
+**DNS outranks every unproven claim.** Several vendors may name one domain
+without proving it; only DNS-verified domains are unique. When one proves it by
+DNS, every other vendor naming that domain has its proofs taken private, its
+events refused, and `publish_proofs` answers `domain_claimed`
+(`src/lib/vendors/domain-claim.ts`). An unproven proof page is also kept out of
+search indexes. This replaces the old rule that refused all collection before
+DNS so that nobody could build history on a domain before its owner arrived:
+the history can now exist, but it is labelled as the vendor's claim, graded
+tier 0, and it does not outlive the owner's arrival.
 
 ---
 
@@ -1170,6 +1210,7 @@ signing](#what-is-actually-signing--decided-08-13).
 | 38 | **Growth and retention, from Letterprove's own observations.** Two optional sections, on by default and hideable: `growth`, companies observed per calendar month for up to six months (the highest `companies_observed` in any signed snapshot that month, read from `published_aggregates`; absent with under two months), and `retention`, of the company domains observed in the 30 days ending 60 days ago, how many were also observed in the last 30 days (`cohort`, `retained`, `window: "60d"`; absent when the cohort is under 10). Counts only, never names, never the tier. Also: human-facing copy no longer shows the Stripe product count (`payment_scope.products` read as a customer metric to an agent); pages say "Payments verified by Stripe, for the products the vendor chose", and the field stays in the signed body | ✅ **Decided (10-13)**, Matthew and Casey — see `src/lib/attest/growth.ts` |
 | 39 | **The paying count and logo names are the vendor's choice, set in the interface.** Display settings gain `paying_count` (`hidden` by default, `signed_in`: observed companies with a settled invoice in the bound Stripe, `all`: every attributable company with a settled, in-scope invoice there, observed or not) and `logo_names` (default on). When shown, the attestation carries `paying: {scope, companies}`; it is opt-in, never listed in `hidden_by_vendor`, only from a bound account, and never moves the tier. With `logo_names` off, `logos` keeps `verified` plus its `paying`/`active` split and drops `companies`. Supersedes the fixed hiding in 35 | ✅ **Decided (10-13)**, Matthew: "everything should be configurable" |
 | 40 | **Two scripts: Visitors (`lettervisit.com/v.js`) for AI agents and people, Letterprove (`attest.js`) for attestation.** One key and one config; `window.__lettervisit` stops `attest.js` counting what the Visitors tag already counts; `attest.js` alone keeps its old behaviour. Server snippets forward to lettervisit.com | ✅ **Decided (10-14)** — see [Two scripts](#two-scripts-visitors-and-letterprove--decided-10-14) |
+| 41 | **DNS is optional; a proof states one of three domain proofs.** `domain_proof` is `dns`, `site` (attest.js with the vendor's key found on a page of the domain, `verify_site`, auto-tried from `/v1/config`) or `none`; tier caps at 3, 1 and 0 respectively; `domain_verified` is true only for `dns`. Without DNS the collector accepts exact hosts only, the Stripe binding and logo wall don't count, and a DNS proof by another vendor takes unproven claimants private (`domain_claimed`). Every public surface labels the state | ✅ **Decided (10-14)**, Matthew + Casey — see [Domain proof](#domain-proof-three-states--decided-10-14) |
 
 ### Open
 

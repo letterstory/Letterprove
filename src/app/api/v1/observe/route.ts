@@ -1,7 +1,18 @@
 import { hostnameOf } from "@/lib/vendors/domain";
 import { requestGeo } from "@/lib/telemetry/geo";
 import { findVendorByKey } from "@/lib/fixtures/vendors";
-import { acceptedHosts, isOriginAccepted } from "@/lib/vendors/hosts";
+import { acceptedHosts, isOriginAccepted, isOriginAcceptedWithoutDns } from "@/lib/vendors/hosts";
+import { rivalHoldsDomain } from "@/lib/vendors/domain-claim";
+
+/** The host of the page site proof was found on, or null. */
+function siteHostOf(url: string | null | undefined): string | null {
+	if (!url) return null;
+	try {
+		return new URL(url).hostname.toLowerCase();
+	} catch {
+		return null;
+	}
+}
 import { recordRejectedOrigin } from "@/lib/telemetry/rejected-origins";
 import { markFirstEvent } from "@/lib/telemetry/first-event";
 import { collectorModules } from "@/lib/vendors/script";
@@ -83,9 +94,12 @@ export async function POST(request: Request) {
 	// The vendor's domain, any host beneath it, or one of the extra hosts its
 	// DNS proof covers (src/lib/vendors/hosts.ts holds the rule). The extra
 	// list is looked up only on a miss, so the common vendor pays nothing.
-	const accepted =
-		origin === vendor.domain ||
-		isOriginAccepted(origin, vendor.domain, origin.endsWith(`.${vendor.domain}`) ? new Set() : await acceptedHosts(vendor.id));
+	// Without DNS proof (allowed since 2026-10-14) only exact hosts count:
+	// the domain, the site-proof host, and hosts the vendor added.
+	const accepted = vendor.domainVerified
+		? origin === vendor.domain ||
+			isOriginAccepted(origin, vendor.domain, origin.endsWith(`.${vendor.domain}`) ? new Set() : await acceptedHosts(vendor.id))
+		: origin === vendor.domain || isOriginAcceptedWithoutDns(origin, vendor.domain, await acceptedHosts(vendor.id), siteHostOf(vendor.siteVerifiedUrl));
 	if (!accepted) {
 		// Counted, never stored as an event: the vendor sees "events are arriving
 		// from staging.acme.com" instead of a step that stays quiet forever.
@@ -94,22 +108,18 @@ export async function POST(request: Request) {
 	}
 
 	/*
-	 * Refuse anything from a vendor who has not proven DNS control of the
-	 * domain they claim.
+	 * DNS is optional since 2026-10-14 (lib/attest/domain-proof.ts). A vendor
+	 * without it collects, and its proof is graded on what it did prove: tier 0
+	 * with no proof, at most tier 1 with site proof, and labelled on every
+	 * surface. This route used to refuse unproven vendors outright so that
+	 * whoever registered a domain first couldn't build a foothold before the
+	 * owner arrived. The foothold is now bounded instead: DNS outranks every
+	 * unproven claim, so once another vendor proves this domain, this vendor's
+	 * events are refused here and its proofs go private (lib/vendors/domain-claim.ts).
 	 *
-	 * Capping their published tier at 0 (which earned() also does) is not
-	 * enough on its own. If an unverified vendor may still collect, whoever
-	 * registers a domain FIRST establishes a foothold on it — events, rollups,
-	 * history — before the real owner ever arrives. Refusing at the door means
-	 * an impersonator accumulates nothing at all, and the legitimate owner
-	 * verifies into a clean slate rather than one already occupied.
-	 *
-	 * Same silent 204 as every other refusal here: this endpoint is
-	 * sendBeacon-safe and must never surface collection state to a page. The
-	 * vendor sees it in the dashboard, which tells them plainly that nothing
-	 * is counted until they verify.
+	 * Same silent 204 as every other refusal here.
 	 */
-	if (!vendor.domainVerified) return collectorResponse(false);
+	if (!vendor.domainVerified && (await rivalHoldsDomain(vendor.domain, vendor.id))) return collectorResponse(false);
 
 	// The vendor turned the proofs module off in its script. attest.js stops
 	// sending once its (CDN-cached) config catches up; this makes it final now.

@@ -1,5 +1,7 @@
 import { dbClient } from "@/lib/db/client";
 import { rejectedOriginsFor, type RejectedOrigin } from "@/lib/telemetry/rejected-origins";
+import { rowDomainProof } from "@/lib/vendors/site-proof";
+import type { DomainProof } from "@/lib/attest/domain-proof";
 
 export type VendorStatusResult =
 	| {
@@ -14,6 +16,10 @@ export type VendorStatusResult =
 			lastReceivedAt: string | null;
 			/** Origins whose events were dropped in the last 24h. */
 			rejectedOrigins: RejectedOrigin[];
+			/** none / site / dns: how the domain is proven, and so the highest tier it can carry. */
+			domainProof: DomainProof;
+			siteVerifiedAt: string | null;
+			siteVerifiedUrl: string | null;
 	  }
 	| { ok: false; status: number; error: string };
 
@@ -43,7 +49,7 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 
 	const { data: vendor } = await db
 		.from("vendors")
-		.select("slug, domain, proofs_published_at, first_event_at")
+		.select("slug, domain, proofs_published_at, first_event_at, domain_verified_at, site_verified_at, site_verified_url")
 		.eq("id", vendorId)
 		.maybeSingle();
 	if (!vendor) return { ok: false, status: 404, error: "Not configured" };
@@ -75,6 +81,9 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusRes
 		everReceivedAt: iso(vendor.first_event_at ?? latest?.receipt_ts ?? null),
 		lastReceivedAt: iso(latest?.receipt_ts ?? null),
 		rejectedOrigins,
+		domainProof: rowDomainProof(vendor),
+		siteVerifiedAt: iso(vendor.site_verified_at ?? null),
+		siteVerifiedUrl: vendor.site_verified_url ?? null,
 	};
 }
 
