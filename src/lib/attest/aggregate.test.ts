@@ -17,19 +17,22 @@ vi.mock("./geo-distribution", () => ({
 }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("./payment-evidence", () => ({ paymentScopeFor: vi.fn(async () => null) }));
-vi.mock("./growth", () => ({ growthFor: vi.fn(async () => null), retentionFor: vi.fn(async () => null) }));
+vi.mock("./growth", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./growth")>()),
+	growthFor: vi.fn(async () => null),
+	retentionFor: vi.fn(async () => null),
+}));
 vi.mock("./display", async (importOriginal) => {
 	const real = await importOriginal<typeof import("./display")>();
 	return { ...real, displayFor: vi.fn(async () => ({ ...real.DEFAULT_DISPLAY })) };
 });
-vi.mock("./vendor-evidence", () => ({
+vi.mock("./vendor-evidence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./vendor-evidence")>()),
 	stripeBinding: vi.fn(async () => null),
+	stripeBusiness: vi.fn(async () => null),
 	hostCount: vi.fn(async () => 0),
-	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
 	observedSince: vi.fn(async () => null),
 	reportedHistory: vi.fn(async () => null),
-	payingDomainsAmong: vi.fn(async () => new Set()),
-	stripePayingDomains: vi.fn(async () => new Set()),
 }));
 vi.mock("@/lib/vendors/logo-wall", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/vendors/logo-wall")>()),
@@ -109,26 +112,10 @@ describe("aggregateBody", () => {
 		expect(b.vendor_stated).toEqual([]);
 	});
 
-	it("states its Stripe product scope as counts while Stripe is connected, and nothing otherwise", async () => {
+	it("publishes no payment scope or payment figure, whatever Stripe holds", async () => {
 		await withRollups([row("globex.com", 2)]);
-		expect((await aggregateBody("lettertrace"))!).not.toHaveProperty("payment_scope");
-
-		const { findVendor } = await import("@/lib/fixtures/vendors");
-		const { paymentScopeFor } = await import("./payment-evidence");
-		vi.mocked(findVendor).mockResolvedValue({
-			id: "v-1",
-			slug: "lettertrace",
-			name: "Lettertrace",
-			domain: "lettertrace.com",
-			category: "x",
-			key: "k",
-			domainVerified: true,
-			customers: [],
-		} as never);
-		vi.mocked(paymentScopeFor).mockResolvedValueOnce({ mode: "selected", products: 3 });
 		const b = (await aggregateBody("lettertrace"))!;
-		expect(b.payment_scope).toEqual({ mode: "selected", products: 3 });
-		expect(paymentScopeFor).toHaveBeenCalledWith("v-1");
+		for (const k of ["payment_scope", "paying", "paying_since"]) expect(b).not.toHaveProperty(k);
 	});
 
 	// The same DNS gate as a customer claim: an observation pinned to a domain
@@ -249,11 +236,13 @@ describe("aggregateBody", () => {
 			} as never);
 		}
 
-		it("states who the vendor is: its proven domain, since when, hosts and Stripe binding", async () => {
+		const business = { verified: true, name: "Lettertrace Inc.", country: "US", website: "lettertrace.com", website_matches_domain: true, binding: "domain_match" as const };
+
+		it("states who the vendor is: its proven domain, since when, hosts and the Stripe-verified business", async () => {
 			await withRollups([row("globex.com", 2)]);
 			await asVendor();
 			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
+			vi.mocked(ev.stripeBusiness).mockResolvedValueOnce(business);
 			vi.mocked(ev.hostCount).mockResolvedValueOnce(2);
 			vi.mocked(ev.observedSince).mockResolvedValueOnce("2026-09-03T01:05:00.000Z");
 
@@ -263,40 +252,45 @@ describe("aggregateBody", () => {
 			expect(b.hosts).toBe(2);
 			expect(b.stripe_account_bound).toBe(true);
 			expect(b.stripe_binding).toBe("domain_match");
+			expect(b.stripe_business).toEqual(business);
 			expect(b.observed_since).toBe("2026-09-03T01:05:00.000Z");
 		});
 
-		it("is tier 3 when at least one observed company pays, and never publishes how many", async () => {
+		it("is tier 3 with a Stripe-verified business on a DNS-proven domain, and publishes no payment figure", async () => {
 			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
 			await asVendor();
 			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("staff_override");
-			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+			vi.mocked(ev.stripeBusiness).mockResolvedValueOnce(business);
 
 			const b = (await aggregateBody("lettertrace"))!;
 			expect(b.tier).toBe(3);
-			expect(b).not.toHaveProperty("paying_companies");
 			expect(b.companies_observed).toBe(2);
-			expect(b.paying_since).toBe("2025-11-03T00:00:00.000Z");
-			expect(b.stripe_binding).toBe("staff_override");
-			// Joined against the attestation's own observed companies.
-			expect(ev.payingAmong).toHaveBeenCalledWith("v-1", ["globex.com", "initech.com"]);
+			for (const k of ["paying", "paying_since", "payment_scope", "paying_companies"]) expect(b).not.toHaveProperty(k);
 		});
 
-		it("counts no payment from a Stripe account that isn't bound to the vendor", async () => {
+		it("stays tier 1 when Stripe hasn't verified the business, or its website is elsewhere", async () => {
 			await withRollups([row("globex.com", 2)]);
 			await asVendor();
 			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.payingAmong).mockResolvedValue({ companies: 5, since: "2025-01-01T00:00:00.000Z" });
-
-			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.stripe_account_bound).toBe(false);
-			expect(b).not.toHaveProperty("paying_companies");
-			expect(b.tier).toBe(1);
-			expect(ev.payingAmong).not.toHaveBeenCalled();
+			vi.mocked(ev.stripeBusiness).mockResolvedValueOnce({ ...business, verified: false });
+			expect((await aggregateBody("lettertrace"))!.tier).toBe(1);
+			vi.mocked(ev.stripeBusiness).mockResolvedValueOnce({ ...business, website: "other.com", website_matches_domain: false });
+			expect((await aggregateBody("lettertrace"))!.tier).toBe(1);
+			vi.mocked(ev.stripeBusiness).mockResolvedValueOnce({ ...business, website: "other.com", website_matches_domain: false, binding: "staff_override" });
+			expect((await aggregateBody("lettertrace"))!.tier).toBe(3);
 		});
 
-		it("claims nothing about identity or payment when the domain isn't proven", async () => {
+		it("says Stripe isn't connected rather than staying silent", async () => {
+			await withRollups([row("globex.com", 2)]);
+			await asVendor();
+			const b = (await aggregateBody("lettertrace"))!;
+			expect(b.stripe_account_bound).toBe(false);
+			expect(b).not.toHaveProperty("stripe_business");
+			expect(b.omitted?.stripe_business).toBe("not_connected");
+			expect(b.tier).toBe(1);
+		});
+
+		it("claims nothing about identity when the domain isn't proven", async () => {
 			await withRollups([row("globex.com", 2)], false);
 			await asVendor({ domainVerified: false, domainVerifiedAt: null });
 			const ev = await import("./vendor-evidence");
@@ -310,19 +304,17 @@ describe("aggregateBody", () => {
 			expect(b.tier).toBe(0);
 		});
 
-		it("grades a site-verified domain at tier 1 at most, and never binds Stripe to it", async () => {
+		it("grades a site-verified domain at tier 1 at most, even with a Stripe-verified business", async () => {
 			await withRollups([row("globex.com", 2)], false);
 			await asVendor({ domainVerified: false, domainVerifiedAt: null, siteVerifiedAt: "2026-10-14T00:00:00.000Z" });
 			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
-			vi.mocked(ev.payingAmong).mockResolvedValue({ companies: 3, since: "2025-11-03T00:00:00.000Z" });
+			vi.mocked(ev.stripeBusiness).mockResolvedValueOnce(business);
 
 			const b = (await aggregateBody("lettertrace"))!;
 			expect(b.domain_proof).toBe("site");
 			expect(b.domain_verified).toBe(false);
 			expect(b.tier).toBe(1);
-			expect(b.stripe_account_bound).toBe(false);
-			expect(b.stripe_binding).toBeNull();
+			expect(b.stripe_business).toEqual(business);
 		});
 
 		it("states a DNS-proven domain as domain_proof dns", async () => {
@@ -333,14 +325,10 @@ describe("aggregateBody", () => {
 			expect(b.domain_verified).toBe(true);
 		});
 
-		it("names a logo only when it is on the vendor's page and observed, without moving the tier", async () => {
+		it("names a logo only when it is on the vendor's page and observed signing in, without moving the tier", async () => {
 			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
 			await asVendor({});
-			const ev = await import("./vendor-evidence");
 			const lw = await import("@/lib/vendors/logo-wall");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
-			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
-			vi.mocked(ev.stripePayingDomains).mockResolvedValueOnce(new Set(["globex.com"]));
 			vi.mocked(lw.readLogoWall).mockResolvedValueOnce({
 				page_url: "https://lettertrace.com/customers",
 				checked_at: new Date().toISOString(),
@@ -358,14 +346,11 @@ describe("aggregateBody", () => {
 				listed: 3,
 				on_page: 2,
 				verified: 1,
-				paying: 1,
-				active: 0,
-				companies: [{ name: "Globex", domain: "globex.com", status: "paying" }],
+				companies: [{ name: "Globex", domain: "globex.com", status: "active" }],
 			});
-			// Observed but not on the page; on the page but not observed: neither is named.
 			expect(JSON.stringify(b)).not.toContain("initech");
 			expect(JSON.stringify(b)).not.toContain("Hooli");
-			expect(b.tier).toBe(3);
+			expect(b.tier).toBe(1);
 		});
 
 		it("publishes PostHog history as vendor-stated, without moving the tier", async () => {
@@ -382,7 +367,7 @@ describe("aggregateBody", () => {
 			expect(b.companies_observed).toBe(1);
 		});
 
-		it("omits what the vendor hid, says so in hidden_by_vendor, and keeps the tier", async () => {
+		it("omits what the vendor hid, says so in hidden_by_vendor and omitted, and keeps the tier", async () => {
 			await withRollups([row("globex.com", 2)], false);
 			await asVendor({});
 			const ev = await import("./vendor-evidence");
@@ -398,24 +383,26 @@ describe("aggregateBody", () => {
 			expect(b).not.toHaveProperty("reported_history");
 			expect(b).not.toHaveProperty("observed_since");
 			expect(b.hidden_by_vendor).toEqual(["sessions", "reported_history", "observed_since"]);
-			// vendor_stated only lists fields still present.
+			expect(b.omitted).toMatchObject({ sessions: "hidden", reported_history: "hidden", observed_since: "hidden" });
 			expect(b.vendor_stated).toEqual([]);
 			expect(b.tier).toBe(1);
 			expect(b.companies_observed).toBe(1);
 			expect(b.domain).toBe("lettertrace.com");
 		});
 
-		it("carries growth and retention when there is enough history, and drops them when hidden", async () => {
+		it("carries growth (partial months marked) and retention, and drops them when hidden", async () => {
 			await withRollups([row("globex.com", 2)], false);
 			await asVendor({});
 			const g = await import("./growth");
+			const ev = await import("./vendor-evidence");
+			vi.mocked(ev.observedSince).mockResolvedValue("2026-09-15T00:00:00.000Z");
 			const growth = [{ month: "2026-09", companies_observed: 60 }, { month: "2026-10", companies_observed: 87 }];
 			const retention = { cohort: 50, retained: 41, window: "60d" as const };
 			vi.mocked(g.growthFor).mockResolvedValue(growth);
 			vi.mocked(g.retentionFor).mockResolvedValue(retention);
 
 			const shown = (await aggregateBody("lettertrace"))!;
-			expect(shown.growth).toEqual(growth);
+			expect(shown.growth?.[0]).toEqual({ month: "2026-09", companies_observed: 60, partial: true });
 			expect(shown.retention).toEqual(retention);
 			expect(shown.tier).toBe(1);
 
@@ -427,71 +414,26 @@ describe("aggregateBody", () => {
 			expect(hidden.hidden_by_vendor).toEqual(["growth", "retention"]);
 			vi.mocked(g.growthFor).mockResolvedValue(null);
 			vi.mocked(g.retentionFor).mockResolvedValue(null);
+			vi.mocked(ev.observedSince).mockResolvedValue(null);
 		});
 
-		it("publishes no paying count by default, and never lists it as hidden", async () => {
+		it("gives a reason for every absent section, so absent never reads as zero", async () => {
 			await withRollups([row("globex.com", 2)]);
 			await asVendor({});
-			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
-			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
-
 			const b = (await aggregateBody("lettertrace"))!;
-			expect(b).not.toHaveProperty("paying");
-			expect(b.hidden_by_vendor).toEqual([]);
-			expect(b.tier).toBe(3);
+			expect(b.omitted).toEqual({
+				stripe_business: "not_connected",
+				growth: "insufficient_history",
+				retention: "insufficient_history",
+				reported_history: "not_connected",
+				logos: "not_configured",
+			});
 		});
 
-		it("publishes the signed-in paying count when the vendor opts in", async () => {
+		it("keeps the logo count but names no company when logo_names is off", async () => {
 			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
 			await asVendor({});
-			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
-			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
-			const display = await import("./display");
-			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, paying_count: "signed_in" });
-
-			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.paying).toEqual({ scope: "signed_in", companies: 1 });
-			expect(b.hidden_by_vendor).toEqual([]);
-			expect(b.tier).toBe(3);
-		});
-
-		it("counts every attributable Stripe payer for scope all, observed or not", async () => {
-			await withRollups([row("globex.com", 2)]);
-			await asVendor({});
-			const ev = await import("./vendor-evidence");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
-			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
-			// globex observed and paying, umbrella pays without signing in, gmail is a person.
-			vi.mocked(ev.stripePayingDomains).mockResolvedValue(new Set(["globex.com", "umbrella.com", "gmail.com"]));
-			const display = await import("./display");
-			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, paying_count: "all" });
-
-			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.paying).toEqual({ scope: "all", companies: 2 });
-			expect(JSON.stringify(b)).not.toContain("umbrella");
-			vi.mocked(ev.stripePayingDomains).mockResolvedValue(new Set());
-		});
-
-		it("publishes no paying count from a Stripe account that isn't bound", async () => {
-			await withRollups([row("globex.com", 2)]);
-			await asVendor({});
-			const display = await import("./display");
-			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, paying_count: "all" });
-
-			const b = (await aggregateBody("lettertrace"))!;
-			expect(b).not.toHaveProperty("paying");
-		});
-
-		it("keeps the logo counts but names no company when logo_names is off", async () => {
-			await withRollups([row("globex.com", 2), row("initech.com", 1)]);
-			await asVendor({});
-			const ev = await import("./vendor-evidence");
 			const lw = await import("@/lib/vendors/logo-wall");
-			vi.mocked(ev.stripeBinding).mockResolvedValueOnce("domain_match");
-			vi.mocked(ev.payingAmong).mockResolvedValueOnce({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
-			vi.mocked(ev.stripePayingDomains).mockResolvedValueOnce(new Set(["globex.com"]));
 			vi.mocked(lw.readLogoWall).mockResolvedValueOnce({
 				page_url: "https://lettertrace.com/customers",
 				checked_at: new Date().toISOString(),
@@ -505,7 +447,7 @@ describe("aggregateBody", () => {
 			vi.mocked(display.displayFor).mockResolvedValueOnce({ ...display.DEFAULT_DISPLAY, logo_names: false });
 
 			const b = (await aggregateBody("lettertrace"))!;
-			expect(b.logos).toEqual({ page: "https://lettertrace.com/customers", listed: 2, on_page: 2, verified: 2, paying: 1, active: 1 });
+			expect(b.logos).toEqual({ page: "https://lettertrace.com/customers", listed: 2, on_page: 2, verified: 2 });
 			expect(JSON.stringify(b)).not.toContain("Globex");
 			expect(JSON.stringify(b)).not.toContain("Initech");
 			expect(b.hidden_by_vendor).toEqual([]);

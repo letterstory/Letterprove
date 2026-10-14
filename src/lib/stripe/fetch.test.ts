@@ -339,14 +339,26 @@ describe("fetchAccount", () => {
 			{
 				id: "acct_1",
 				email: "founder@Acme.com",
-				business_profile: { url: "https://www.acme.com/", support_email: "help@support.acme.com", support_url: null },
+				charges_enabled: true,
+				country: "us",
+				business_profile: { name: "Acme Inc.", url: "https://www.acme.com/", support_email: "help@support.acme.com", support_url: null },
 			} as never,
 		]);
 
 		const result = await fetchAccount("rk_live_x");
 
 		expect(calls[0].pathname).toBe("/v1/account");
-		expect(result).toEqual({ ok: true, account: { id: "acct_1", domains: ["acme.com", "support.acme.com"] } });
+		expect(result).toEqual({
+			ok: true,
+			account: {
+				id: "acct_1",
+				domains: ["acme.com", "support.acme.com"],
+				charges_enabled: true,
+				business_name: "Acme Inc.",
+				country: "US",
+				business_url_host: "acme.com",
+			},
+		});
 	});
 
 	it("names a missing Accounts permission as a scope problem", async () => {

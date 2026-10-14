@@ -57,7 +57,7 @@ export function noticeFor(kind: NoticeKind, ctx: { vendorName: string; domain: s
 			return {
 				subject: `Letterprove can't read ${ctx.vendorName}'s Stripe account`,
 				paragraphs: [
-					`The last three hourly reads of your Stripe account failed, so payments no longer count toward your proof until it works again.${ctx.detail ? ` Stripe said: "${ctx.detail}"` : ""}`,
+					`The last three hourly reads of your Stripe account failed, so your proof no longer shows a Stripe-verified business until it works again.${ctx.detail ? ` Stripe said: "${ctx.detail}"` : ""}`,
 					`This usually means the restricted key was deleted or lost a permission. Create a new restricted key and connect it again.`,
 				],
 			};

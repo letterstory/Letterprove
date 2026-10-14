@@ -7,7 +7,6 @@ import { jwksResult } from "@/lib/attest/keys";
 import type { SignedAttestation } from "@/lib/attest/types";
 import { methodUrl } from "@/lib/attest/method";
 import { verifyAttestation } from "@/lib/attest/verify";
-import { logoSplit, payingSentence, type PayingFigure } from "@/lib/attest/paying-copy";
 import { leadSentence, METHODOLOGY_URL } from "@/lib/attest/lead";
 import { parseVerifyPath, snapshotStamp, VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { proofHtml, proofJson, retiredCustomerProof } from "@/lib/http";
@@ -132,6 +131,7 @@ const HIDDEN_LABELS: Record<string, string> = {
 	sessions: "session counts",
 	reported_history: "PostHog history",
 	logos: "logo verification",
+	stripe_business: "Stripe business details",
 	payment_details: "payment details",
 	observed_since: "first observed date",
 	hosts: "extra hosts",
@@ -150,9 +150,14 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 	const tier = typeof f.tier === "number" ? f.tier : null;
 	const window = typeof f.window_days === "number" ? f.window_days : 30;
 	const domainProof = docDomainProof(f as Parameters<typeof docDomainProof>[0]);
+	const business = f.stripe_business as
+		| { verified?: boolean; name?: string | null; country?: string | null; website?: string | null; website_matches_domain?: boolean; binding?: string }
+		| undefined;
 	const tierLine =
 		tier === 3
-			? "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them are corroborated by settled invoices in its own Stripe account."
+			? business
+				? "Companies were observed signing in on the vendor's DNS-proven domain, and Stripe has verified the business behind the vendor's own Stripe account at that domain."
+				: "Companies were observed signing in on the vendor's DNS-proven domain, and payments from them were corroborated by settled invoices in its own Stripe account (signed before 2026-10-14, when payments were still read)."
 			: tier === 1
 				? domainProof === "site"
 					? "Companies were observed signing in on the vendor's domain, which is site verified (its script and key are on a page there), not proven by DNS."
@@ -163,10 +168,20 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 						: "Nothing is corroborated yet."
 					: "";
 	const tile = (k: string, v: string, sub = "") => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
-	const payments = tier === 3 ? "Corroborated" : f.stripe_account_bound ? "Not yet" : "Not connected";
+	// Legacy payment fields: only on documents signed before 2026-10-14.
+	const legacyPayments = "payment_scope" in f || "paying_since" in f || "paying" in f;
 	const payingSince = fmtDay(f.paying_since);
 	const binding = f.stripe_binding === "domain_match" ? "Bound to its domain" : f.stripe_binding === "staff_override" ? "Approved by Letterprove" : "Not connected";
-	const scope = f.payment_scope as { mode?: string; products?: number } | undefined;
+	const businessLine = business
+		? [
+				business.verified ? "Verified by Stripe" : "Not verified by Stripe",
+				[business.name, business.country].filter(Boolean).join(", "),
+				business.website ? `website ${business.website}${business.website_matches_domain ? "" : " (not on this domain)"}` : "",
+				business.binding === "staff_override" ? "related company, approved by Letterprove" : "",
+			]
+				.filter(Boolean)
+				.join(" · ")
+		: binding;
 	const history = f.reported_history as { companies?: number; since?: string; active_companies_30d?: number; observed_also_reported?: number } | undefined;
 
 	const method = typeof f.method === "string" && f.method ? f.method : METHODOLOGY_URL;
@@ -180,22 +195,17 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 	const logos = f.logos as { page?: string; on_page?: number; verified?: number; companies?: { name: string; status: string }[] } | undefined;
 	if (showLogos && logos && typeof logos.verified === "number" && typeof logos.page === "string") {
 		const items = (logos.companies ?? [])
-			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe" : "Signed in, last 30 days"}</span></li>`)
+			.map((c) => `<li><span>${esc(c.name)}</span><span class="muted">${c.status === "paying" ? "Paying, verified by Stripe (signed before 2026-10-14)" : "Signed in, last 30 days"}</span></li>`)
 			.join("");
-		const { paying: payingLogos } = logoSplit(logos as Parameters<typeof logoSplit>[0]);
-		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified, ${num(payingLogos)} of them paying (verified by Stripe)</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
-	}
-	const payingFig = f.paying as PayingFigure | undefined;
-	if (payingFig && typeof payingFig.companies === "number") {
-		html += `<section><h2>Paying</h2><p><strong>${esc(payingSentence(payingFig))}.</strong></p></section>`;
+		html += `<section><h2>Logos on the vendor's site</h2><p><strong>${num(logos.verified)} of ${num(logos.on_page)} logos verified</strong> on <a href="${esc(logos.page)}">${esc(logos.page.replace(/^https:\/\//, ""))}</a>. Verified means Letterprove observed someone from that company signing in over the last 30 days.</p>${items ? `<ul class="logos">${items}</ul>` : ""}</section>`;
 	}
 
 	html += `<section><h2>What backs it · last ${window} days</h2><div class="tiles">` +
 		tile("Companies observed", num(f.companies_observed), "signing in, by company domain") +
-		tile("Payments, via Stripe", payments, payingSince ? `first verified payment ${payingSince}` : "") +
+		(legacyPayments ? tile("Payments, via Stripe", tier === 3 ? "Corroborated" : "Not corroborated", payingSince ? `first verified payment ${payingSince}` : "signed before 2026-10-14") : "") +
 		(typeof f.sessions === "number" ? tile("Sessions", num(f.sessions)) : "") +
 		tile("Excluded domains", num(f.domains_excluded), "free mail and unattributable") +
-		`</div><p class="muted">Counts only. No customer is named anywhere in this document.${scope && tier === 3 ? (scope.mode === "selected" ? " Payments verified by Stripe, for the products the vendor chose." : " Payments verified by Stripe.") : ""}</p></section>`;
+		`</div><p class="muted">Counts only. No customer is named here except verified companies from the vendor's own public logo wall.</p></section>`;
 
 	html += `<section><h2>Who the vendor is</h2><dl class="facts">` +
 		`<div><dt>Domain</dt><dd>${esc(
@@ -205,7 +215,7 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 					: DOMAIN_PROOF_LABEL.dns
 				: domainProofLine(domainProof, domainName) ?? DOMAIN_PROOF_LABEL[domainProof],
 		)}</dd></div>` +
-		`<div><dt>Stripe account</dt><dd>${esc(binding)}</dd></div>` +
+		`<div><dt>Business</dt><dd>${esc(businessLine)}</dd></div>` +
 		("observed_since" in f ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` : "") +
 		`</dl></section>`;
 
@@ -217,17 +227,27 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
 	}
 
-	const growth = Array.isArray(f.growth) ? (f.growth as { month: string; companies_observed: number }[]) : [];
+	const growth = Array.isArray(f.growth) ? (f.growth as { month: string; companies_observed: number; partial?: boolean }[]) : [];
 	if (growth.length > 0) {
 		html += `<section><h2>Companies observed per month</h2><div class="tiles">` +
-			growth.map((g) => tile(monthLabel(g.month), num(g.companies_observed))).join("") +
-			`</div><p class="muted">The highest number of companies observed in any signed snapshot that month.</p></section>`;
+			growth.map((g) => tile(g.partial ? `${monthLabel(g.month)} (partial)` : monthLabel(g.month), num(g.companies_observed))).join("") +
+			`</div><p class="muted">The highest number of companies observed in any signed snapshot that month.${growth.some((g) => g.partial) ? " Partial means observation started less than 30 days before that month's count, so it is lower partly because observation had only just begun." : ""}</p></section>`;
 	}
 	const retention = f.retention as { cohort?: number; retained?: number } | undefined;
 	if (retention && typeof retention.cohort === "number" && typeof retention.retained === "number") {
-		html += `<section><h2>Retention</h2><p><strong>Of ${num(retention.cohort)} companies active 60 days ago, ${num(retention.retained)} are still signing in.</strong></p><p class="muted">Active 60 days ago means observed in the 30 days ending 60 days ago. Still signing in means observed in the last 30 days.</p></section>`;
+		html += `<section><h2>Retention</h2><p><strong>Of ${num(retention.cohort)} companies observed 90 to 60 days ago, ${num(retention.retained)} were also observed in the last 30 days.</strong></p></section>`;
 	}
 
+	const omitted = f.omitted && typeof f.omitted === "object" ? Object.entries(f.omitted as Record<string, string>).filter(([, r]) => r !== "hidden") : [];
+	if (omitted.length > 0) {
+		const reasons: Record<string, string> = {
+			insufficient_history: "not enough history yet",
+			not_connected: "not connected",
+			not_configured: "not set up",
+			domain_not_verified: "needs a verified domain",
+		};
+		html += `<p class="muted">Not shown: ${esc(omitted.map(([k, r]) => `${HIDDEN_LABELS[k] ?? k} (${reasons[r] ?? r})`).join(", "))}.</p>`;
+	}
 	const hidden = Array.isArray(f.hidden_by_vendor) ? (f.hidden_by_vendor as string[]) : [];
 	if (hidden.length > 0) {
 		html += `<p class="muted">Hidden by the vendor: ${esc(hidden.map((h) => HIDDEN_LABELS[h] ?? h).join(", "))}. These fields are left out of this document by the vendor's choice.</p>`;

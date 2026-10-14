@@ -147,10 +147,10 @@ function runChecks() {
 				: "fraud-features.ts not found",
 		},
 		{
-			label: "Tier 3 — Stripe corroboration",
+			label: "Tier 3 — Stripe-verified business",
 			state: stripeIsReachable ? "done" : hasStripeSync ? "partial" : "planned",
 			detail: stripeIsReachable
-				? "lib/stripe/sync.ts joins settled invoices to observed domains and writes vendor_payment_evidence; a subscription with no invoice that actually settled is not evidence, and a TEST-mode key stores nothing"
+				? "lib/stripe/sync.ts re-reads the vendor's own Stripe account hourly (Stripe verification, business name, country, website); no payments are read, and a TEST-mode key never counts as verified"
 				: hasStripeSync
 					? "lib/stripe/sync.ts and vendor_payment_evidence are intact, but nothing outside src/lib/stripe imports them — the vendor dashboard that called them went with the auth unification and no tool replaced it"
 					: "no lib/stripe/sync.ts or vendor_payment_evidence table — schema designed for it, not built",

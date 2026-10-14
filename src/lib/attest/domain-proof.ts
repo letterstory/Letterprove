@@ -24,17 +24,24 @@ export function domainProofOf(v: { domainVerified?: boolean; siteVerifiedAt?: st
 /**
  * The tier the aggregate earns. Site proof stops at tier 1, never above DNS:
  * tier 1 says browser sign-ins were observed on pages the vendor controls,
- * which a page carrying the vendor's key establishes. Tier 3 needs the Stripe
- * account bound to the domain, and that binding is a DNS fact.
+ * which a page carrying the vendor's key establishes.
  *
- *   3 — dns, companies observed, at least one pays through the bound account;
+ * Tier 3 adds a third party vouching for WHO the vendor is: Stripe has
+ * verified the business behind the vendor's own Stripe account (it can accept
+ * payments), and that account's website is on the vendor's domain (or staff
+ * approved the account). It still needs DNS: tying a Stripe account's website
+ * to "this vendor" is only as strong as the vendor's proof of the domain, and a
+ * page carrying our key proves a page, not the domain. Since 2026-10-14 no
+ * payments are read; before that, tier 3 meant an observed company had paid.
+ *
+ *   3 — dns, companies observed, Stripe-verified business at that domain;
  *   1 — dns or site, companies observed;
  *   0 — nothing observed, or no proof of the domain at all.
  */
-export function tierForProof(observed: boolean, proof: DomainProof, payingCompanies = 0): Tier {
+export function tierForProof(observed: boolean, proof: DomainProof, stripeBusinessConfirmed = false): Tier {
 	if (!observed || proof === "none") return 0;
 	if (proof === "site") return 1;
-	return payingCompanies > 0 ? 3 : 1;
+	return stripeBusinessConfirmed ? 3 : 1;
 }
 
 /** Labels, one per state, used on every public surface. */

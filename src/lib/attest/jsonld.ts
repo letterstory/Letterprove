@@ -12,7 +12,6 @@
  * verifiable surface is our own JSON, and nothing here is signed. Don't grow
  * this into a second, weaker copy of the attestation.
  */
-import { payingSentence } from "./paying-copy";
 import { leadSentence } from "./lead";
 import { docDomainProof } from "./domain-proof";
 
@@ -40,9 +39,8 @@ export function vendorJsonLd(proof: VendorProof, origin: string): Record<string,
 				`${leadSentence(Boolean(proof.vendor.issuer_affiliation), domainProof, proof.vendor.domain)} ` +
 				`A signed, hourly attestation that ${proof.vendor.name} ${control} and is backed by ` +
 				`observed usage: ${proof.summary.companies_observed} companies observed signing in over the last 30 days, ` +
-				(proof.summary.payment_corroborated ? `with payment from them corroborated by ${proof.vendor.name}'s own Stripe account. ` : "") +
-				(proof.summary.paying ? `${payingSentence(proof.summary.paying)}. ` : "") +
-				`Counts only; no customer is named. It links to the open-source logic that computed it.`,
+				(proof.summary.business_verified ? `and Stripe has verified the business behind ${proof.vendor.name}'s own Stripe account. ` : "") +
+				`Counts only. It links to the open-source logic that computed it.`,
 			url: proofUrl,
 			dateModified: proof.summary.last_attested,
 			isAccessibleForFree: true,

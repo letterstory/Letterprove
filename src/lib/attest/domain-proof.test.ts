@@ -12,19 +12,19 @@ describe("domainProofOf", () => {
 });
 
 describe("tierForProof", () => {
-	it("caps an unproven domain at tier 0 whatever was observed or paid", () => {
-		expect(tierForProof(true, "none", 9)).toBe(0);
+	it("caps an unproven domain at tier 0 whatever was observed or confirmed", () => {
+		expect(tierForProof(true, "none", true)).toBe(0);
 	});
 	it("caps site proof at tier 1, never above what DNS gives", () => {
-		expect(tierForProof(true, "site", 0)).toBe(1);
-		expect(tierForProof(true, "site", 5)).toBe(1);
+		expect(tierForProof(true, "site", false)).toBe(1);
+		expect(tierForProof(true, "site", true)).toBe(1);
 	});
-	it("keeps DNS grading unchanged", () => {
-		expect(tierForProof(true, "dns", 0)).toBe(1);
-		expect(tierForProof(true, "dns", 1)).toBe(3);
+	it("gives tier 3 on DNS only with a Stripe-confirmed business", () => {
+		expect(tierForProof(true, "dns", false)).toBe(1);
+		expect(tierForProof(true, "dns", true)).toBe(3);
 	});
 	it("is 0 with nothing observed", () => {
-		expect(tierForProof(false, "dns", 3)).toBe(0);
+		expect(tierForProof(false, "dns", true)).toBe(0);
 		expect(tierForProof(false, "site")).toBe(0);
 	});
 });

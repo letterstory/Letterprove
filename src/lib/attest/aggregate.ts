@@ -3,23 +3,22 @@
  *
  * It says two things about a vendor and nothing about anyone else:
  *
- *   1. WHO THEY ARE. The domain they proved by DNS (re-checked daily), since
- *      when, how many extra hosts the collector accepts, and whether the
- *      Stripe account they connected is theirs (its published domains match,
- *      or staff approved it).
+ *   1. WHO THEY ARE. The domain they proved (by DNS, re-checked daily, or by
+ *      site proof), since when, how many extra hosts the collector accepts,
+ *      and the business Stripe has verified behind their own Stripe account
+ *      (`stripe_business`: verified, name, country, website, and whether that
+ *      website is on their domain). Stripe is used for nothing else: since
+ *      2026-10-14 no payment is read or published.
  *   2. WHAT BACKS IT. How many companies were observed signing in over the
- *      last 30 days, how many sessions, and how many of those companies are
- *      paying through that Stripe account — counts, never names.
+ *      last 30 days and how many sessions — counts, never names.
  *
- * NO CUSTOMER IS EVER NAMED. Customer domains exist internally because they
- * are the join key between observed sign-ins and Stripe payments; nothing in
- * this body, or anywhere public, carries one. Per-customer documents were
- * retired on 2026-10-13 (README decision 30).
+ * NO CUSTOMER IS EVER NAMED, except on the vendor's opt-in logo wall (README
+ * decision 36), and only companies already on that public page. Per-customer
+ * documents were retired on 2026-10-13 (README decision 30).
  *
  * WHAT IT DELIBERATELY DOES NOT SAY. Not "customers" — "companies observed".
  * A session from `someone@acme.com` proves a person at Acme used the product;
- * it does not prove Acme buys it. Tier 3 says that at least one of them is a
- * settled invoice in the vendor's own Stripe account says Acme does.
+ * it does not prove Acme buys it, and nothing here claims it does.
  *
  * Unattributable domains are counted and excluded, never silently dropped:
  * `domains_excluded` is published alongside so the headline can be read
@@ -50,21 +49,21 @@ import { readAllRows } from "@/lib/db/read-all";
 import { dbClient } from "@/lib/db/client";
 import { loadAggregateHistory } from "@/rollup/aggregate-history";
 import type { PaymentScope, Tier } from "./types";
-import { paymentScopeFor } from "./payment-evidence";
 import { nextSnapshotAt, SNAPSHOT_CADENCE_SECONDS } from "./cadence";
 import { verifyLink } from "./verify-link";
 import { DEFAULT_DISPLAY, displayFor, hiddenSections, type DisplaySection, type DisplaySettings } from "./display";
-import { growthFor, retentionFor, type GrowthPoint, type Retention } from "./growth";
+import { growthFor, markPartialMonths, retentionFor, type GrowthPoint, type Retention } from "./growth";
 import { withDisclosure } from "./issuer";
 import { publicLogos, readLogoWall, type PublicLogos } from "@/lib/vendors/logo-wall";
 import {
 	hostCount,
 	observedSince,
-	payingAmong,
-	stripePayingDomains, reportedHistory,
-	stripeBinding,
+	reportedHistory,
+	stripeBusiness,
+	stripeBusinessConfirms,
 	type ReportedHistory,
 	type StripeBinding,
+	type StripeBusiness,
 } from "./vendor-evidence";
 
 import { domainProofOf, tierForProof, type DomainProof } from "./domain-proof";
@@ -109,12 +108,21 @@ export interface AggregateBody {
 	/** How that was established: its published domains match, or staff approved it. Null when not bound. */
 	stripe_binding?: StripeBinding | null;
 	/**
+	 * The business behind the vendor's own Stripe account, as Stripe states it:
+	 * `verified` (Stripe lets the account accept payments, which it allows only
+	 * after verifying the business), name, country, website, and whether that
+	 * website is on the vendor's domain. Identity only: no payment is read.
+	 * Absent when Stripe isn't connected or the account isn't the vendor's.
+	 * Since 2026-10-14.
+	 */
+	stripe_business?: StripeBusiness;
+	/**
 	 * RETIRED 2026-10-13 (README decision 35): no longer published. Snapshots
 	 * signed between #182 and that change carry it; they still verify. The
 	 * count stays private to the vendor; tier 3 says payment is corroborated.
 	 */
 	paying_companies?: number;
-	/** Earliest settled invoice from an observed company in the bound Stripe account, or null. */
+	/** RETIRED 2026-10-14 (payments are no longer read). Older documents carry it. */
 	paying_since?: string | null;
 	/** When Letterprove first observed usage for this vendor, from its own frozen record. */
 	observed_since?: string | null;
@@ -156,40 +164,39 @@ export interface AggregateBody {
 	 * before 2026-10-13.
 	 */
 	logos?: PublicLogos;
-	/**
-	 * How many companies pay, when the vendor opted to show it (display
-	 * `paying_count`). scope "signed_in": observed companies with a settled
-	 * invoice in the bound Stripe; "all": every company with a settled,
-	 * in-scope invoice there. Absent by default and when Stripe isn't bound.
-	 */
+	/** RETIRED 2026-10-14 (payments are no longer read). Older documents carry it. */
 	paying?: { scope: "signed_in" | "all"; companies: number };
-	/**
-	 * Which of the vendor's Stripe products its payment corroboration counts,
-	 * present only while Stripe is connected. Counts, never product names: a
-	 * reader is owed whether "pays" means everything the account bills or only
-	 * the products the vendor said are this product. Absent before 2026-10-13.
-	 */
+	/** RETIRED 2026-10-14 (payments are no longer read). Older documents carry it. */
 	payment_scope?: PaymentScope;
 	/**
 	 * Optional sections the vendor chose not to show (src/lib/attest/display.ts):
-	 * any of "sessions", "reported_history", "logos", "payment_details",
-	 * "observed_since", "hosts". Those fields are omitted from this document by
+	 * any of "sessions", "reported_history", "logos", "stripe_business",
+	 * "observed_since", "hosts", "growth", "retention". Those fields are omitted from this document by
 	 * the vendor's choice, not for lack of data. Empty when nothing is hidden.
 	 * The domain, tier, companies observed and verify link can never be hidden.
 	 * Absent before 2026-10-13.
 	 */
 	hidden_by_vendor?: string[];
 	/**
+	 * Why each optional section is absent, so an agent can tell "none" from "not
+	 * shown": `hidden` (the vendor chose), `insufficient_history` (too little
+	 * observation yet), `not_connected` (the source isn't connected),
+	 * `not_configured` (the vendor never set it up), `domain_not_verified` (it
+	 * needs a proven domain). Keyed by field. Since 2026-10-14.
+	 */
+	omitted?: Record<string, OmitReason>;
+	/**
 	 * Companies observed per calendar month (UTC), oldest first, up to six
 	 * months: the highest companies_observed any frozen snapshot carried that
-	 * month. From Letterprove's own signed history. Absent with under two
-	 * months of history. Absent before 2026-10-13.
+	 * month. From Letterprove's own signed history. `partial: true` marks a
+	 * month with no full 30-day window of observation behind it (since
+	 * 2026-10-14). Absent with under two months of history. Absent before
+	 * 2026-10-13.
 	 */
 	growth?: GrowthPoint[];
 	/**
-	 * Of the company domains observed in the 30 days ending 60 days ago
-	 * (`cohort`), how many were also observed in the last 30 days
-	 * (`retained`). Counts only. Absent when the cohort is under 10. Absent
+	 * Of the company domains observed from 90 to 60 days ago (`cohort`), how
+	 * many were also observed in the last 30 days (`retained`). Counts only. Absent when the cohort is under 10. Absent
 	 * before 2026-10-13.
 	 */
 	retention?: Retention;
@@ -209,6 +216,8 @@ export interface AggregateBody {
 
 export type SignedAggregate = AggregateBody & { key_id: string; signature: string };
 
+export type OmitReason = "hidden" | "insufficient_history" | "not_connected" | "not_configured" | "domain_not_verified";
+
 interface Totals {
 	sessions: number;
 	signups: number;
@@ -217,12 +226,10 @@ interface Totals {
 
 /**
  * What the evidence supports for the vendor claim: the strongest evidence
- * class present. Tier 3 says "at least one observed company pays"; how many is
- * private to the vendor since decision 35, so the copy around it must never
- * read as "every company pays".
+ * class present (see domain-proof.ts tierForProof).
  *
- *   3 — companies observed on a verified domain, and at least one of them
- *       pays through the vendor's own (bound) Stripe account;
+ *   3 — companies observed on a DNS-proven domain, and Stripe has verified
+ *       the business behind the vendor's own Stripe account at that domain;
  *   1 — companies observed on a verified domain;
  *   0 — nothing observed, or the domain isn't proven.
  *
@@ -238,8 +245,8 @@ interface Totals {
  * Capped at 0 with nothing observed: a tier is a statement about evidence,
  * and there isn't any.
  */
-export function earnedAggregateTier(observed: boolean, domainVerified: boolean, payingCompanies = 0): Tier {
-	return tierForProof(observed, domainVerified ? "dns" : "none", payingCompanies);
+export function earnedAggregateTier(observed: boolean, domainVerified: boolean, stripeBusinessConfirmed = false): Tier {
+	return tierForProof(observed, domainVerified ? "dns" : "none", stripeBusinessConfirmed);
 }
 
 /** Every domain this vendor was observed for in the window, with its totals. */
@@ -308,50 +315,41 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		{ sessions: 0, signups: 0, logins: 0 }
 	);
 
-	const [scope, boundAccount, hosts, firstObserved, history] = await Promise.all([
-		vendor.id ? paymentScopeFor(vendor.id) : Promise.resolve(null),
-		vendor.id ? stripeBinding(vendor.id, vendor.domain) : Promise.resolve(null),
+	const proof = domainProofOf(vendor);
+	const [business, hosts, firstObserved, history] = await Promise.all([
+		// Stripe's statement about the business stands on its own (the account
+		// must publish the vendor's domain to count at all), so it is shown at
+		// any domain proof. Only tier 3 also needs DNS (domain-proof.ts).
+		vendor.id ? stripeBusiness(vendor.id, vendor.domain) : Promise.resolve(null),
 		vendor.id ? hostCount(vendor.id) : Promise.resolve(0),
 		observedSince(vendor.slug),
 		// History is bound to the vendor's hosts, so it only means anything once
-		// the domain is proven.
+		// the domain is proven by DNS.
 		vendor.id && vendor.domainVerified ? reportedHistory(vendor.id, attributable) : Promise.resolve(null),
 	]);
-	// The Stripe binding matches the account to the vendor's domain, so it
-	// only stands on a DNS-proven domain; site proof is not enough (since
-	// 2026-10-14, when DNS became optional).
-	const binding = vendor.domainVerified ? boundAccount : null;
-	// Payment only counts from an account that is the vendor's own. The Stripe
-	// sync already clears evidence on a mismatch; this holds even if a row
-	// outlives that.
-	const paying = binding && vendor.id ? await payingAmong(vendor.id, attributable) : { companies: 0, since: null };
+	const wall = vendor.id && vendor.domainVerified ? await readLogoWall(vendor.id) : null;
 	// Logos are named only from the vendor's own public wall, only when on that
-	// page and observed, and payment only counts from a bound account.
-	const logos =
-		vendor.id && vendor.domainVerified
-			? publicLogos(
-					await readLogoWall(vendor.id),
-					new Set(attributable),
-					binding ? await stripePayingDomains(vendor.id) : new Set<string>(),
-				)
-			: null;
+	// page and observed signing in.
+	const logos = wall ? publicLogos(wall, new Set(attributable)) : null;
 	const now = new Date().toISOString();
 	const observed = attributable.length > 0;
-	const proof = domainProofOf(vendor);
-	const [display, growth, retention] = await Promise.all([
+	const proven = proof !== "none";
+	const [display, rawGrowth, retention] = await Promise.all([
 		vendor.id ? displayFor(vendor.id) : Promise.resolve({ ...DEFAULT_DISPLAY }),
-		vendor.domainVerified ? growthFor(vendor.slug) : Promise.resolve(null),
-		vendor.domainVerified ? retentionFor(vendor.slug, vendor.domain) : Promise.resolve(null),
+		proven ? growthFor(vendor.slug) : Promise.resolve(null),
+		proven ? retentionFor(vendor.slug, vendor.domain) : Promise.resolve(null),
 	]);
-	// The paying figure is opt-in and only from a bound account.
-	let payingFigure: { scope: "signed_in" | "all"; companies: number } | null = null;
-	if (binding && vendor.id && vendor.domainVerified && display.paying_count !== "hidden") {
-		payingFigure =
-			display.paying_count === "signed_in"
-				? { scope: "signed_in", companies: paying.companies }
-				: { scope: "all", companies: partitionDomains(await stripePayingDomains(vendor.id), vendor.domain).attributable.length };
-	}
+	const firstSeen = firstObserved ?? (observed ? now : null);
+	const growth = rawGrowth ? markPartialMonths(rawGrowth, firstSeen) : null;
 	if (logos && !display.logo_names) delete logos.companies;
+
+	const omitted: Record<string, OmitReason> = {};
+	if (!business) omitted.stripe_business = "not_connected";
+	if (!growth) omitted.growth = proven ? "insufficient_history" : "domain_not_verified";
+	if (!retention) omitted.retention = proven ? "insufficient_history" : "domain_not_verified";
+	if (!history) omitted.reported_history = vendor.domainVerified ? "not_connected" : "domain_not_verified";
+	if (!logos) omitted.logos = vendor.domainVerified ? (wall ? "insufficient_history" : "not_configured") : "domain_not_verified";
+
 	return applyDisplay({
 		vendor: vendor.slug,
 		kind: "aggregate",
@@ -360,22 +358,21 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		domain_proof: proof,
 		domain_verified: proof === "dns",
 		hosts: vendor.domainVerified ? hosts : 0,
-		stripe_account_bound: binding !== null,
-		stripe_binding: binding,
+		stripe_account_bound: business !== null,
+		stripe_binding: business?.binding ?? null,
+		...(business ? { stripe_business: business } : {}),
 		window_days: WINDOW_DAYS,
 		companies_observed: attributable.length,
 		...summed,
 		domains_excluded: excluded.length,
-		paying_since: paying.since,
-		observed_since: firstObserved ?? (observed ? now : null),
-		tier: tierForProof(observed, proof, paying.companies),
+		observed_since: firstSeen,
+		tier: tierForProof(observed, proof, stripeBusinessConfirms(business)),
 		vendor_stated: history ? ["reported_history"] : [],
 		...(history ? { reported_history: history } : {}),
 		...(logos ? { logos } : {}),
-		...(payingFigure ? { paying: payingFigure } : {}),
-		...(scope ? { payment_scope: scope } : {}),
 		...(growth ? { growth } : {}),
 		...(retention ? { retention } : {}),
+		omitted,
 		observed_through: now,
 		published_at: now,
 		next_snapshot_at: nextSnapshotAt(now),
@@ -390,7 +387,7 @@ const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
 	sessions: ["sessions", "signups", "logins"],
 	reported_history: ["reported_history"],
 	logos: ["logos"],
-	payment_details: ["payment_scope", "paying_since"],
+	stripe_business: ["stripe_business"],
 	observed_since: ["observed_since"],
 	hosts: ["hosts"],
 	growth: ["growth"],
@@ -405,7 +402,12 @@ const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
 export function applyDisplay<T extends Omit<AggregateBody, "prev_hash">>(body: T, display: DisplaySettings): T {
 	const hidden = hiddenSections(display);
 	const out: Record<string, unknown> = { ...body };
-	for (const section of hidden) for (const field of SECTION_FIELDS[section]) delete out[field];
+	const omitted: Record<string, OmitReason> = { ...((out.omitted as Record<string, OmitReason> | undefined) ?? {}) };
+	for (const section of hidden) {
+		for (const field of SECTION_FIELDS[section]) delete out[field];
+		omitted[SECTION_FIELDS[section][0]] = "hidden";
+	}
+	if ("omitted" in out || hidden.length > 0) out.omitted = omitted;
 	if (Array.isArray(out.vendor_stated)) out.vendor_stated = (out.vendor_stated as string[]).filter((f) => f in out);
 	out.hidden_by_vendor = hidden;
 	return out as T;

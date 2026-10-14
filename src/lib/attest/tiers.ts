@@ -57,9 +57,9 @@ export const TIER_LADDER: Record<Tier, TierDescription> = {
 	},
 	3: {
 		name: "third-party confirmed",
-		means: "Tier 1 on a DNS-proven domain, and at least one of the observed companies paid an invoice that actually settled, read directly from the vendor's own live-mode Stripe account — an account that publishes the vendor's verified domain, or one Letterprove staff approved (`stripe_binding`). Site proof never reaches tier 3. The tier is the strongest evidence present, not a claim that every company pays; how many pay is private to the vendor. A subscription on its own does not qualify: a free one reaches `active` for nothing.",
+		means: "Tier 1 on a DNS-proven domain, and a third party vouches for who the vendor is: Stripe has verified the business behind the vendor's own live-mode Stripe account (the account can accept payments, which Stripe allows only after checking the legal entity, the people behind it and a bank account), and that account's website is on the vendor's domain, or Letterprove staff approved the account (`stripe_binding: staff_override`). Shown in `stripe_business`. Site proof never reaches tier 3. Since 2026-10-14 no payment is read: tier 3 says nothing about revenue or which companies pay. On documents signed before then without `stripe_business`, it meant at least one observed company had paid a settled invoice in that account.",
 		forgeable_by:
-			"A vendor willing to pay themselves. Every condition is checked against a third party's ledger rather than the vendor's word, and money has to genuinely move through a processor in a Stripe-verified live account — but a vendor prepared to spend real money on a lie can still reach it. Read this as corroboration, not as immunity.",
+			"A vendor that controls a Stripe-verified business account publishing its domain, which in practice means a real, registered business at that domain. It does not stop a real business from scripting sign-ins (see tier 1). Read this as confirmation of identity, not of usage or revenue.",
 	},
 	4: {
 		name: "customer counter-signed (retired)",

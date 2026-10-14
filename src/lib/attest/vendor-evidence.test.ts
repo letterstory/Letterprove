@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { observedSince, payingAmong, stripeBinding } from "./vendor-evidence";
+import { observedSince, stripeBinding, stripeBusiness, stripeBusinessConfirms } from "./vendor-evidence";
 
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/lib/vendors/hosts", () => ({ acceptedHosts: vi.fn(async () => new Set()) }));
@@ -71,28 +71,58 @@ describe("stripeBinding", () => {
 	});
 });
 
-describe("payingAmong", () => {
-	it("counts only observed domains with a positive settled amount, and dates from the earliest", async () => {
-		await useDb({
-			vendor_payment_evidence: {
-				data: [
-					{ domain: "globex.com", since: "2025-06-01T00:00:00Z", monthly_amount: 5000 },
-					{ domain: "initech.com", since: "2025-01-01T00:00:00Z", monthly_amount: "1200" },
-					{ domain: "unobserved.com", since: "2024-01-01T00:00:00Z", monthly_amount: 9000 },
-					{ domain: "zero.com", since: "2023-01-01T00:00:00Z", monthly_amount: 0 },
-				],
-			},
-		});
-		expect(await payingAmong("v1", ["globex.com", "initech.com", "zero.com", "quiet.com"])).toEqual({
-			companies: 2,
-			since: "2025-01-01T00:00:00.000Z",
+describe("stripeBusiness", () => {
+	const noOverride = { data: { stripe_account_override_account_id: null, stripe_account_override_at: null } };
+	const now = new Date().toISOString();
+	const cred = (extra: Record<string, unknown> = {}) => ({
+		data: {
+			stripe_account_id: "acct_1",
+			stripe_account_domains: ["acme.com"],
+			account_checked_at: now,
+			livemode: true,
+			stripe_charges_enabled: true,
+			stripe_business_name: "Acme Inc.",
+			stripe_country: "US",
+			stripe_business_url_host: "www.acme.com",
+			...extra,
+		},
+	});
+
+	it("states what Stripe says about the vendor's own account, and nothing about payments", async () => {
+		await useDb({ vendor_stripe_credentials: cred(), vendors: noOverride });
+		expect(await stripeBusiness("v1", "acme.com")).toEqual({
+			verified: true,
+			name: "Acme Inc.",
+			country: "US",
+			website: "www.acme.com",
+			website_matches_domain: true,
+			binding: "domain_match",
 		});
 	});
 
-	it("claims nothing when the read fails or nothing was observed", async () => {
-		await useDb({ vendor_payment_evidence: { data: null, error: { message: "boom" } } });
-		expect(await payingAmong("v1", ["globex.com"])).toEqual({ companies: 0, since: null });
-		expect(await payingAmong("v1", [])).toEqual({ companies: 0, since: null });
+	it("is never verified on a test key or without charges enabled", async () => {
+		await useDb({ vendor_stripe_credentials: cred({ livemode: false }), vendors: noOverride });
+		expect((await stripeBusiness("v1", "acme.com"))?.verified).toBe(false);
+		await useDb({ vendor_stripe_credentials: cred({ stripe_charges_enabled: false }), vendors: noOverride });
+		expect((await stripeBusiness("v1", "acme.com"))?.verified).toBe(false);
+	});
+
+	it("is null for someone else's account or a read older than a day", async () => {
+		await useDb({ vendor_stripe_credentials: cred({ stripe_account_domains: ["other.com"] }), vendors: noOverride });
+		expect(await stripeBusiness("v1", "acme.com")).toBeNull();
+		await useDb({ vendor_stripe_credentials: cred({ account_checked_at: "2020-01-01T00:00:00Z" }), vendors: noOverride });
+		expect(await stripeBusiness("v1", "acme.com")).toBeNull();
+	});
+});
+
+describe("stripeBusinessConfirms", () => {
+	const base = { verified: true, name: "Acme", country: "US", website: "acme.com", website_matches_domain: true, binding: "domain_match" as const };
+	it("needs Stripe's verification and the website on the domain, or a staff approval", () => {
+		expect(stripeBusinessConfirms(base)).toBe(true);
+		expect(stripeBusinessConfirms({ ...base, verified: false })).toBe(false);
+		expect(stripeBusinessConfirms({ ...base, website_matches_domain: false })).toBe(false);
+		expect(stripeBusinessConfirms({ ...base, website_matches_domain: false, binding: "staff_override" })).toBe(true);
+		expect(stripeBusinessConfirms(null)).toBe(false);
 	});
 });
 

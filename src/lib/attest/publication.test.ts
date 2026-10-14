@@ -30,14 +30,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db/client", () => ({ dbClient: vi.fn() }));
 vi.mock("@/rollup/aggregate-history", () => ({ loadAggregateHistory: vi.fn() }));
 vi.mock("@/rollup/history", () => ({ loadPersistedChain: vi.fn() }));
-vi.mock("./vendor-evidence", () => ({
+vi.mock("./vendor-evidence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./vendor-evidence")>()),
 	stripeBinding: vi.fn(async () => null),
+	stripeBusiness: vi.fn(async () => null),
 	hostCount: vi.fn(async () => 0),
-	payingAmong: vi.fn(async () => ({ companies: 0, since: null })),
 	observedSince: vi.fn(async () => null),
 	reportedHistory: vi.fn(async () => null),
-	payingDomainsAmong: vi.fn(async () => new Set()),
-	stripePayingDomains: vi.fn(async () => new Set()),
 }));
 vi.mock("@/lib/access/log", () => ({ logProofAccess: vi.fn() }));
 // Reached transitively through countersign -> fraudFeatures, against a query
@@ -336,7 +335,7 @@ describe("publishing is a flip, not a rebuild", () => {
 /*
  * Decision 30: Letterprove attests the vendor, in counts, and names no
  * customer. The fixture's one customer ("Ten Events", tenevents.com) is
- * observed, on the vendor's private list, AND paying — the strongest case for
+ * observed, on the vendor's private list, at tier 3 — the strongest case for
  * a leak — and no public response may carry its domain, its name or its slug.
  */
 describe("no public route ever emits a customer", () => {
@@ -353,10 +352,10 @@ describe("no public route ever emits a customer", () => {
 		vi.mocked(loadAggregateHistory).mockResolvedValue([]);
 		const ev = await import("./vendor-evidence");
 		vi.mocked(ev.stripeBinding).mockResolvedValue("domain_match");
-		vi.mocked(ev.payingAmong).mockResolvedValue({ companies: 1, since: "2025-11-03T00:00:00.000Z" });
+		vi.mocked(ev.stripeBusiness).mockResolvedValue({ verified: true, name: "Lettertrace Inc.", country: "US", website: "lettertrace.com", website_matches_domain: true, binding: "domain_match" });
 	});
 
-	it("keeps the observed, paying customer out of every response body", async () => {
+	it("keeps the observed customer out of every response body", async () => {
 		const bodies: [string, string][] = [];
 		const read = async (label: string, res: Response | Promise<Response>) => bodies.push([label, await (await res).text()]);
 		const v = { params: Promise.resolve({ vendor: "lettertrace" }) };
@@ -369,7 +368,7 @@ describe("no public route ever emits a customer", () => {
 		await read("/llms.txt", (await import("@/app/llms.txt/route")).GET(req("https://app.letterprove.com/llms.txt", "text/plain")));
 
 		const attestation = JSON.parse(bodies[0][1]) as { verify: string; tier: number };
-		// The case is real: the paying customer earns tier 3, and the count itself is never published (decision 35).
+		// The case is real: tier 3 (a Stripe-verified business), and no payment figure is published.
 		expect(attestation).not.toHaveProperty("paying_companies");
 		expect(attestation.tier).toBe(3);
 

@@ -41,8 +41,8 @@ function mockDb(
 const ACME = { id: "11111111-1111-1111-1111-111111111111", slug: "acme" };
 const GLOBEX = { id: "22222222-2222-2222-2222-222222222222", slug: "globex" };
 
-function synced(over: Record<string, unknown> = {}) {
-	return { ok: true as const, matched: 2, unmatched: 0, testMode: false, truncated: false, ...over };
+function synced(over: { testMode?: boolean } = {}) {
+	return { ok: true as const, bound: true, chargesEnabled: true, testMode: false, truncated: false as const, ...over };
 }
 
 describe("syncAllVendorPayments", () => {
@@ -73,7 +73,7 @@ describe("syncAllVendorPayments", () => {
 	// failure would page hourly about the product working as specified.
 	it("counts a test-mode sync as a success and not a failure", async () => {
 		mockDb([ACME.id], [ACME]);
-		vi.mocked(syncVendorPayments).mockResolvedValue(synced({ testMode: true, matched: 3 }));
+		vi.mocked(syncVendorPayments).mockResolvedValue(synced({ testMode: true }));
 
 		const result = await syncAllVendorPayments();
 
@@ -108,15 +108,7 @@ describe("syncAllVendorPayments", () => {
 		expect(result.failures[0].detail).toContain("socket hang up");
 	});
 
-	it("reports a truncated subscription list without calling the sync a failure", async () => {
-		mockDb([ACME.id], [ACME]);
-		vi.mocked(syncVendorPayments).mockResolvedValue(synced({ truncated: true }));
 
-		const result = await syncAllVendorPayments();
-
-		expect(result.ok).toBe(true);
-		expect(result.truncated).toEqual(["acme"]);
-	});
 
 	// A failed enumeration is not a vendor's fault and must not be reported as
 	// one: nothing was synced, and naming a vendor would send an investigation

@@ -92,12 +92,13 @@ describe("the docs page", () => {
 		const text = await render("app.letterprove.com");
 		// Companies observed are not customers, and the docs say so.
 		expect(text).toMatch(/does not prove the company buys it/);
-		// Tier 3 is never read as "every company pays".
-		expect(text).toMatch(/Tier 3 never means every company pays/);
+		// Tier 3 is identity, never payments.
+		expect(text).toMatch(/Tier 3 says who you are. It says nothing about payments/);
+		expect(text).toMatch(/tier 3 confirms identity, not usage or revenue/);
 		// Tier 2 is not issued: the ASN binding it describes is not built.
 		expect(text).toMatch(/Tier 2 is not issued/);
 		// Customers are never named.
-		expect(text).toMatch(/never names, publishes or contacts your customers/);
+		expect(text).toMatch(/never contacts your customers, and never names them/);
 		// A valid signature is not the claim; the tier is.
 		expect(text).toMatch(/tier-0 document asserts nothing beyond the vendor existing/);
 	});

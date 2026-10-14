@@ -20,17 +20,18 @@ export const ISSUER_OPERATOR = "Letter Company";
 /** What a vendor decides. Kept to what the code actually lets a vendor do. */
 export const VENDOR_CONTROLS = [
 	"whether its proofs are public",
-	"which of its Stripe products count as this product — the attestation states how many (`payment_scope`), never which",
+	"which optional sections show (sessions, PostHog history, logos, Stripe business details, first observed date, extra hosts, growth, retention) — a hidden section is listed in `hidden_by_vendor`, and every absent section's reason is in `omitted`",
+	"whether verified logo companies are named or only counted",
 	"which extra hosts on its own domain the collector accepts events from",
 ] as const;
 
 /** What a vendor cannot do, and why each holds. */
 export const VENDOR_CANNOT = [
-	"write, edit or delete any measured figure or tier — usage comes from Letterprove's own collector observing sign-ins on the vendor's DNS-proven domain, payment from settled invoices read directly from the vendor's Stripe, and the tier from that evidence alone",
+	"write, edit or delete any measured figure or tier — usage comes from Letterprove's own collector observing sign-ins on the vendor's domain (proven by DNS, or by site proof, which the document labels), business verification from the vendor's own Stripe account as Stripe states it, and the tier from that evidence alone",
 	"hold or use the signing key — it is kept by the issuer, never by a vendor",
 	"restate a past figure unnoticed — every hourly snapshot is hash-chained to the one before it",
-	"name or publish any customer — the attestation carries counts only, and customer domains never leave Letterprove",
-	"vouch for a Stripe account that isn't its own — the account must publish the vendor's verified domain, unless Letterprove staff approve a related company's account (`stripe_binding: staff_override`)",
+	"name or publish any customer, except companies already on its own public logo wall that Letterprove observed signing in, and only if it opts in to logo verification",
+	"vouch for a Stripe account that isn't its own — the account must publish the vendor's domain, unless Letterprove staff approve a related company's account (`stripe_binding: staff_override`)",
 ] as const;
 
 /**

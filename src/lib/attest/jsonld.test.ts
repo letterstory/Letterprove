@@ -19,7 +19,7 @@ const PROOF: VendorProof = {
 	summary: {
 		tier: 3,
 		companies_observed: 31,
-		payment_corroborated: true,
+		business_verified: true,
 		sessions_30d: 38_000,
 		last_attested: "2026-08-01T00:00:00.000Z",
 	},
@@ -69,10 +69,10 @@ describe("vendorJsonLd", () => {
 		const dataset = ld.subjectOf as Record<string, unknown>;
 
 		expect(dataset.description).toContain("31 companies observed signing in over the last 30 days");
-		expect(dataset.description).toContain("payment from them corroborated by Vantage's own Stripe account");
-		expect(dataset.description).not.toMatch(/\d+ of them paying/);
+		expect(dataset.description).toContain("Stripe has verified the business behind Vantage's own Stripe account");
+		expect(dataset.description).not.toMatch(/pay/);
 		expect(dataset.description).toContain("controls vantage.example (proven by DNS)");
-		expect(dataset.description).toContain("no customer is named");
+		expect(dataset.description).toContain("Counts only.");
 		expect(dataset.name).toBe("Letterprove attestation for Vantage");
 	});
 
@@ -119,7 +119,7 @@ describe("vendorJsonLd", () => {
 	it("survives a vendor with nothing attested yet without emitting broken markup", () => {
 		const empty: VendorProof = {
 			...PROOF,
-			summary: { tier: 0, companies_observed: 0, payment_corroborated: false, sessions_30d: 0, last_attested: "" },
+			summary: { tier: 0, companies_observed: 0, business_verified: false, sessions_30d: 0, last_attested: "" },
 		};
 
 		const dataset = vendorJsonLd(empty, ORIGIN).subjectOf as Record<string, unknown>;

@@ -363,6 +363,19 @@ export interface StripeAccountIdentity {
 	id: string;
 	/** Registrable-domain candidates the account owner published about itself. */
 	domains: string[];
+	/**
+	 * Whether Stripe lets the account accept payments. Stripe turns this on only
+	 * after it has verified the business (legal entity, the people behind it, a
+	 * bank account), so it is the one fact here Stripe checked rather than the
+	 * owner typed. Null when the response didn't say.
+	 */
+	charges_enabled?: boolean | null;
+	/** The business name the account shows (business profile, else the dashboard display name). */
+	business_name?: string | null;
+	/** Two-letter country of the account. */
+	country?: string | null;
+	/** Host of the business website on the account, if any. */
+	business_url_host?: string | null;
 }
 
 export type AccountFetchResult =
@@ -380,7 +393,10 @@ export async function fetchAccount(apiKey: string): Promise<AccountFetchResult> 
 	const res = await get<{
 		id?: string;
 		email?: string | null;
-		business_profile?: { url?: string | null; support_email?: string | null; support_url?: string | null } | null;
+		charges_enabled?: boolean | null;
+		country?: string | null;
+		business_profile?: { name?: string | null; url?: string | null; support_email?: string | null; support_url?: string | null } | null;
+		settings?: { dashboard?: { display_name?: string | null } | null } | null;
 	}>(new URL(`${API}/account`), apiKey);
 	if (!res.ok) return { ok: false, ...res.failure, scope: isScopeFailure(res.failure) };
 
@@ -392,6 +408,10 @@ export async function fetchAccount(apiKey: string): Promise<AccountFetchResult> 
 		account: {
 			id: body.id ?? "",
 			domains: [...new Set(hosts.filter((h): h is string => Boolean(h)))],
+			charges_enabled: typeof body.charges_enabled === "boolean" ? body.charges_enabled : null,
+			business_name: (profile.name || body.settings?.dashboard?.display_name || "").trim() || null,
+			country: typeof body.country === "string" && body.country ? body.country.toUpperCase() : null,
+			business_url_host: hostOf(profile.url),
 		},
 	};
 }

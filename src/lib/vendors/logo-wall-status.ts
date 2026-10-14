@@ -7,7 +7,6 @@
  * too. Only the attestation's `logos` block is public (see logo-wall.ts).
  */
 
-import { stripeBinding, stripePayingDomains } from "@/lib/attest/vendor-evidence";
 import { findVendor } from "@/lib/fixtures/vendors";
 import { tierReport } from "@/lib/tiers/report";
 import { MAX_CHECK_AGE_MS, readLogoWall, statusOf, type LogoStatus } from "./logo-wall";
@@ -31,14 +30,9 @@ export async function logoWallStatus(vendorId: string, vendorSlug: string): Prom
 	const report = await tierReport(vendorSlug);
 	const observed = new Set<string>();
 	for (const row of report?.rows ?? []) {
-		if (row.status === "observed" || row.status === "paying") observed.add(row.domain);
+		if (row.status === "observed") observed.add(row.domain);
 	}
-	const paid = await stripePayingDomains(vendorId);
-	// Same rule as the proof: payment counts only from a bound Stripe account.
-	const bound = vendor ? (await stripeBinding(vendorId, vendor.domain)) !== null : false;
-	const paying = bound ? paid : new Set<string>();
-
-	const companies = wall.companies.map((c) => ({ ...c, status: statusOf(c.domain, observed, paying) }));
+	const companies = wall.companies.map((c) => ({ ...c, status: statusOf(c.domain, observed) }));
 	const fresh = wall.checked_at !== null && Date.now() - Date.parse(wall.checked_at) <= MAX_CHECK_AGE_MS;
 	return {
 		configured: true,

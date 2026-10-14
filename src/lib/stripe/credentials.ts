@@ -91,6 +91,11 @@ export interface StripeConnection {
 	stripeAccountId: string | null;
 	stripeAccountDomains: string[];
 	accountCheckedAt: string | null;
+	/** What the account says about the business, as last read (since 2026-10-14). */
+	chargesEnabled: boolean | null;
+	businessName: string | null;
+	country: string | null;
+	businessUrlHost: string | null;
 }
 
 /** What a dashboard may see. Deliberately no key material of any kind. */
@@ -101,7 +106,7 @@ export async function connectionFor(vendorId: string): Promise<StripeConnection 
 	const { data } = await db
 		.from("vendor_stripe_credentials")
 		.select(
-			"key_last4, livemode, connected_at, last_synced_at, last_sync_error, product_ids, stripe_account_id, stripe_account_domains, account_checked_at",
+			"key_last4, livemode, connected_at, last_synced_at, last_sync_error, product_ids, stripe_account_id, stripe_account_domains, account_checked_at, stripe_charges_enabled, stripe_business_name, stripe_country, stripe_business_url_host",
 		)
 		.eq("vendor_id", vendorId)
 		.maybeSingle();
@@ -117,6 +122,10 @@ export async function connectionFor(vendorId: string): Promise<StripeConnection 
 		stripeAccountId: data.stripe_account_id ?? null,
 		stripeAccountDomains: data.stripe_account_domains ?? [],
 		accountCheckedAt: data.account_checked_at ?? null,
+		chargesEnabled: typeof data.stripe_charges_enabled === "boolean" ? data.stripe_charges_enabled : null,
+		businessName: data.stripe_business_name ?? null,
+		country: data.stripe_country ?? null,
+		businessUrlHost: data.stripe_business_url_host ?? null,
 	};
 }
 
