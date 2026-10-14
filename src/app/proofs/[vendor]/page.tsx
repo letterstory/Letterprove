@@ -37,7 +37,7 @@ const OMITTED_REASONS: Record<string, string> = {
 	insufficient_history: "not enough history yet",
 	not_connected: "not connected",
 	not_configured: "not set up",
-	domain_not_verified: "needs a verified domain",
+	domain_not_verified: "needs DNS verification",
 };
 
 /**
