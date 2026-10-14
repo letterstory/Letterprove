@@ -186,6 +186,13 @@ export const rotateKeyOutput = z
 	.describe("The old key stops working immediately; every existing install must be updated.");
 
 export const verifyDomainInput = empty;
+export const verifySiteInput = empty;
+export const verifySiteOutput = z.object({
+	verified: z.boolean().describe("Whether the site is proven now. A failed check never clears an earlier proof."),
+	checked_url: z.string().nullable().describe("The page the key was found on, or the last page tried."),
+	reason: z.string().describe("What the check found, in plain words."),
+	verified_at: z.string().nullable().optional(),
+});
 /**
  * Two branches, because a failed DNS lookup is not a failed request. DNS may be
  * briefly unreachable, and a lookup that fails must never cost a vendor
@@ -793,8 +800,23 @@ export const getVisitorsOutput = z.object({
 		.nullable()
 		.describe("Why the live pull failed, when it did. Null on success."),
 	companies: z.array(visitorCompany).describe("One row per visiting company, most people first. Private: never published."),
-	visitors: z.array(visitorPerson).describe("Identified people, newest first. Pulled live from the identification provider; Letterprove stores none of it."),
-	total: z.number().describe("Identified people in the window before `limit` applied."),
+	visitors: z
+		.array(visitorPerson)
+		.describe("Identified people shown in full, oldest first seen first. Pulled live from the identification provider; Letterprove stores none of it."),
+	total: z.number().describe("Identified people in the window before `limit` applied, locked ones included."),
+	free_limit: z.number().int().describe("How many identified people are shown in full for free (10). The rest are locked until unlocked after a call."),
+	unlocked: z.boolean().describe("Whether everyone is shown (the free limit was lifted)."),
+	shown: z.number().int().describe("People returned in full, before `limit`."),
+	locked: z.number().int().describe("People identified beyond the free limit: a count only, no names, companies or emails. Book a call to unlock them."),
+});
+
+export const setVisitorIdentificationUnlockedInput = z.object({
+	vendor: z.string().min(1).describe("Vendor slug."),
+	unlocked: z.boolean().describe("True shows every identified person; false restores the free limit."),
+});
+export const setVisitorIdentificationUnlockedOutput = z.object({
+	vendor: z.string(),
+	unlocked: z.boolean().describe("True: every identified person is shown. False: the first 10 in full, the rest as a locked count."),
 });
 
 /*
@@ -869,6 +891,10 @@ export const getScriptOutput = z.object({
 		first_agent_visit_at: z.string().nullable().describe("First AI agent or crawler visit counted."),
 		first_signin_at: z.string().nullable().describe("First sign-in counted for your proof."),
 		domain_verified: z.boolean(),
+		site_verified_at: z
+			.string()
+			.nullable()
+			.describe("When Letterprove found your key in your script tag on your homepage. Proves the site is yours, so People can be turned on without DNS."),
 	}),
 	human_visitors_tracking: z.enum(["off", "active", "pending_registration"]),
 });
@@ -876,7 +902,7 @@ export const getScriptOutput = z.object({
 export const setScriptModulesInput = z.object({
 	proofs: z.boolean().optional(),
 	agent_visitors: z.boolean().optional(),
-	human_visitors: z.boolean().optional().describe("Turning this on needs a DNS-verified domain."),
+	human_visitors: z.boolean().optional().describe("Turning this on needs the site proven: your Visitors script found on your homepage (verify_site), or the DNS record."),
 });
 export const setScriptModulesOutput = getScriptOutput;
 

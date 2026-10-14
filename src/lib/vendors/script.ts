@@ -31,6 +31,7 @@ export interface ScriptStatus {
 	first_agent_visit_at: string | null;
 	first_signin_at: string | null;
 	domain_verified: boolean;
+	site_verified_at: string | null;
 }
 
 const MEMO_MS = 60_000;
@@ -145,11 +146,12 @@ export async function scriptStatus(vendorId: string): Promise<ScriptStatus | nul
 	if (!db) return null;
 	const { data: vendor } = await db
 		.from("vendors")
-		.select("slug, domain_verified_at, server_seen_at, first_event_at, visitors_script_seen_at, proofs_script_seen_at")
+		.select("slug, domain_verified_at, site_verified_at, server_seen_at, first_event_at, visitors_script_seen_at, proofs_script_seen_at")
 		.eq("id", vendorId)
 		.maybeSingle<{
 			slug: string;
 			domain_verified_at: string | null;
+			site_verified_at: string | null;
 			server_seen_at: string | null;
 			first_event_at: string | null;
 			visitors_script_seen_at: string | null;
@@ -175,5 +177,6 @@ export async function scriptStatus(vendorId: string): Promise<ScriptStatus | nul
 		first_agent_visit_at: iso(firstVisit?.data?.first_at),
 		first_signin_at: iso(vendor.first_event_at),
 		domain_verified: Boolean(vendor.domain_verified_at),
+		site_verified_at: iso(vendor.site_verified_at),
 	};
 }

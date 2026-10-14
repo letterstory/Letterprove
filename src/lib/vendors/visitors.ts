@@ -27,13 +27,27 @@ import {
  * Visitors tab (src/lib/phantom-visitors/service.ts there), whose design this
  * follows. Our Maverick account is one PARTNER account holding every tracked
  * site, so a pull sees everyone's people. A record reaches a vendor only when
- * it was seen on that vendor's DNS-verified domain or one of its accepted
+ * it was seen on that vendor's verified domain or one of its accepted
  * hosts, or carries the clientRef this feature stamped on the vendor's own
  * registration. Anything else is dropped. And the vendor has to be verified
  * at the moment of the read: identities for a domain nobody currently proves
  * are not handed to anyone.
  *
+ * VERIFIED MEANS EITHER PROOF. The DNS record (domain_verified_at), or the
+ * vendor's own key found in its script tag on its homepage (site_verified_at,
+ * src/lib/vendors/site-verify.ts). Only someone who can edit the site can put
+ * that key there, so it proves control of the site as well as DNS proves the
+ * domain, and People needs nothing beyond the Visitors script the vendor
+ * installs anyway. The attestation still requires DNS.
+ *
  * OPT-IN. Off until the vendor turns it on (set_visitor_identification).
+ *
+ * FREE TIER. The first FREE_VISITOR_LIMIT people identified (oldest first seen
+ * in the window) are shown in full; everyone after them is a count only
+ * (`locked`), with no name, company or email, and stays out of the company
+ * rollup, until staff set visitor_identification_unlocked after a call. The
+ * order comes from the provider's first-seen times; nothing is stored to keep
+ * it, so it is "first ten in the window", not "first ten ever".
  */
 
 export type Tracking = "off" | "active" | "pending_registration";
@@ -49,6 +63,8 @@ export interface VisitorIdentificationStatus {
 interface VisitorRow {
 	domain: string;
 	domain_verified_at: string | null;
+	site_verified_at: string | null;
+	visitor_identification_unlocked: boolean | null;
 	visitor_identification_enabled: boolean | null;
 	maverick_customer_id: string | null;
 	maverick_profile_id: string | null;
@@ -56,11 +72,26 @@ interface VisitorRow {
 }
 
 const COLUMNS =
-	"domain, domain_verified_at, visitor_identification_enabled, maverick_customer_id, maverick_profile_id, maverick_domains";
+	"domain, domain_verified_at, site_verified_at, visitor_identification_unlocked, visitor_identification_enabled, maverick_customer_id, maverick_profile_id, maverick_domains";
 
 /** The clientRef stamped on registrations this feature makes, so pulled records attribute back. */
 export function clientRefFor(vendorId: string): string {
 	return `letterprove:${vendorId}`;
+}
+
+/** Either proof of control (see the header). */
+export function siteControlProven(row: Pick<VisitorRow, "domain_verified_at" | "site_verified_at">): boolean {
+	return Boolean(row.domain_verified_at || row.site_verified_at);
+}
+
+/** Staff: lift (or restore) the free limit for one vendor. False when it can't be saved. */
+export async function setVisitorIdentificationUnlocked(vendorId: string, unlocked: boolean): Promise<boolean> {
+	const db = dbClient();
+	if (!db) return false;
+	const { error } = await db.from("vendors").update({ visitor_identification_unlocked: unlocked }).eq("id", vendorId);
+	if (error) return false;
+	_resetVisitorCache();
+	return true;
 }
 
 async function readRow(vendorId: string): Promise<VisitorRow | null> {
@@ -105,14 +136,14 @@ export async function visitorIdentificationStatus(vendorId: string): Promise<Vis
 
 export type SetResult =
 	| { ok: true; status: VisitorIdentificationStatus }
-	| { ok: false; error: "not_found" | "domain_not_verified" | "storage_unavailable"; detail: string };
+	| { ok: false; error: "not_found" | "site_not_verified" | "storage_unavailable"; detail: string };
 
 type Deps = { create?: typeof partnerCreateDomain; remove?: typeof partnerDeleteDomain };
 
 /**
  * Turn visitor identification on or off.
  *
- * On: needs a DNS-verified domain, then registers the verified domain and each
+ * On: needs the site proven (DNS record or the key on its homepage), then registers the verified domain and each
  * accepted host as a Maverick Tracked Domain and records the pixel ids. A
  * Maverick failure does not fail the call — the toggle is stored and reported
  * as pending_registration, and turning it on again retries.
@@ -150,11 +181,11 @@ export async function setVisitorIdentification(vendorId: string, enabled: boolea
 		return { ok: true, status: statusOf(update) };
 	}
 
-	if (!row.domain_verified_at) {
+	if (!siteControlProven(row)) {
 		return {
 			ok: false,
-			error: "domain_not_verified",
-			detail: `Verify ${row.domain} with its DNS record first. Visitors are only identified on a domain you've proven is yours.`,
+			error: "site_not_verified",
+			detail: `Install your Visitors script on ${row.domain} first. Once it's in the page's HTML, Letterprove finds your key there and People can be turned on. Visitors are only identified on a site you've proven is yours.`,
 		};
 	}
 
@@ -190,7 +221,7 @@ export async function setVisitorIdentification(vendorId: string, enabled: boolea
 /** What /v1/config hands attest.js: the pixel ids, only while on and registered. */
 export async function visitorPixel(vendorId: string): Promise<{ customer_id: string; profile_id: string } | null> {
 	const row = await readRow(vendorId);
-	if (!row?.visitor_identification_enabled || !row.domain_verified_at) return null;
+	if (!row?.visitor_identification_enabled || !siteControlProven(row)) return null;
 	if (!row.maverick_customer_id || !row.maverick_profile_id) return null;
 	return { customer_id: row.maverick_customer_id, profile_id: row.maverick_profile_id };
 }
@@ -280,6 +311,16 @@ export function rollupCompanies(people: VisitorPerson[]): VisitorCompany[] {
 	return [...by.values()].sort((a, b) => b.people - a.people || b.visits - a.visits || (a.last_seen < b.last_seen ? 1 : -1));
 }
 
+/** People shown in full before the rest are locked (see the header). */
+export const FREE_VISITOR_LIMIT = 10;
+
+/** Pure: split attributed people into the free/unlocked part and a locked count. */
+export function applyFreeLimit(people: VisitorPerson[], unlocked: boolean): { shown: VisitorPerson[]; locked: number } {
+	const byFirstSeen = [...people].sort((a, b) => (a.first_seen < b.first_seen ? -1 : a.first_seen > b.first_seen ? 1 : a.person_id < b.person_id ? -1 : 1));
+	const shown = unlocked ? byFirstSeen : byFirstSeen.slice(0, FREE_VISITOR_LIMIT);
+	return { shown, locked: byFirstSeen.length - shown.length };
+}
+
 export interface VisitorsResult {
 	enabled: boolean;
 	tracking: Tracking;
@@ -289,8 +330,15 @@ export interface VisitorsResult {
 	error: { reason: "forbidden" | "failed"; message: string } | null;
 	companies: VisitorCompany[];
 	visitors: VisitorPerson[];
-	/** Identified people in the window before `limit` applied. */
+	/** Identified people in the window before `limit` applied, locked ones included. */
 	total: number;
+	free_limit: number;
+	/** Whether staff unlocked everyone (no free limit). */
+	unlocked: boolean;
+	/** People returned in full (before `limit`). */
+	shown: number;
+	/** People identified beyond the free limit: a count only. */
+	locked: number;
 }
 
 /** Newest-first pages of 100. The account limit is 1,000 requests an hour, shared with Letterstory. */
@@ -342,9 +390,13 @@ export async function fetchVendorVisitors(
 		companies: [],
 		visitors: [],
 		total: 0,
+		free_limit: FREE_VISITOR_LIMIT,
+		unlocked: Boolean(row.visitor_identification_unlocked),
+		shown: 0,
+		locked: 0,
 	};
 	// Off, or not currently proven: nothing is handed over.
-	if (!status.enabled || !row.domain_verified_at) return empty;
+	if (!status.enabled || !siteControlProven(row)) return empty;
 	if (!isMaverickConfigured()) return empty;
 
 	const since = new Date(Date.now() - days * 86_400_000).toISOString();
@@ -367,11 +419,15 @@ export async function fetchVendorVisitors(
 	}
 
 	const attributed = attributeVisitors(hit.people, hosts, ref, since);
+	// Locked people never leave this function, not even as a company.
+	const { shown, locked } = applyFreeLimit(attributed, empty.unlocked);
 	return {
 		...empty,
 		error: hit.error,
-		companies: rollupCompanies(attributed),
-		visitors: attributed.slice(0, limit),
+		companies: rollupCompanies(shown),
+		visitors: shown.slice(0, limit),
 		total: attributed.length,
+		shown: shown.length,
+		locked,
 	};
 }

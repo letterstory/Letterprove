@@ -666,8 +666,10 @@ describe("dispatchTool", () => {
 						domain: "new.example.com",
 						category: "retail",
 						// The domain moved, so the proof of control for the old
-						// one no longer says anything about this row.
+						// one no longer says anything about this row, and nor does
+						// the site proof (site-verify.ts).
 						domain_verified_at: null,
+						site_verified_at: null,
 					},
 				},
 			},
@@ -690,7 +692,7 @@ describe("dispatchTool", () => {
 		const outcome = await dispatchTool("update_vendor", { domain: "victim.com" }, principal(["vendor:write"]));
 
 		expect(outcome).toMatchObject({
-			result: { ok: true, body: { vendor: { domain: "victim.com", domain_verified_at: null } } },
+			result: { ok: true, body: { vendor: { domain: "victim.com", domain_verified_at: null, site_verified_at: null } } },
 		});
 	});
 

@@ -86,14 +86,14 @@ describe("scripts", () => {
 		expect((await status()).proofs_script_seen_at).toEqual(expect.any(String));
 	});
 
-	it("turns modules on and off, and refuses human visitors before DNS proof", async () => {
+	it("turns modules on and off, and refuses human visitors before the site is proven", async () => {
 		const off = await tool("set_script_modules", { proofs: false, agent_visitors: false }, VERIFIED);
 		expect((off.body as { modules: unknown }).modules).toEqual({ proofs: false, agent_visitors: false, human_visitors: false });
 		const back = await tool("set_script_modules", { proofs: true, agent_visitors: true }, VERIFIED);
 		expect((back.body as { modules: unknown }).modules).toMatchObject({ proofs: true, agent_visitors: true });
 
 		const refused = await tool("set_script_modules", { human_visitors: true }, UNVERIFIED);
-		expect(refused).toMatchObject({ ok: false, status: 409, body: { error: "domain_not_verified" } });
+		expect(refused).toMatchObject({ ok: false, status: 409, body: { error: "site_not_verified" } });
 	});
 
 	it("stops counting sign-ins at once when the proofs module is off", async () => {

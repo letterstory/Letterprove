@@ -4,6 +4,7 @@ import { oauthClientIp, oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { CURRENT_CONFIG_VERSION } from "@/lib/telemetry/events";
 import { recordConfigPing } from "@/lib/telemetry/ping";
 import { visitorPixel } from "@/lib/vendors/visitors";
+import { scheduleSiteAutoVerify } from "@/lib/vendors/site-verify";
 import { collectorModules, recordScriptSeen, scriptNameOf } from "@/lib/vendors/script";
 
 /** Per source IP — same backstop as POST /v1/observe (see that route's comment); unauthenticated and unmetered otherwise, so a burst against every key costs nothing without this. */
@@ -49,6 +50,11 @@ export async function GET(request: Request) {
 		vendor.id ? visitorPixel(vendor.id) : null,
 		vendor.id ? collectorModules(vendor.id) : { proofs: true, agent_visitors: true },
 	]);
+
+	// Once the Visitors script is live, look for the vendor's key on its
+	// homepage (src/lib/vendors/site-verify.ts) so People can be turned on
+	// without DNS. After the response, at most every ten minutes per vendor.
+	if (vendor.id && scriptNameOf(params.get("s")) === "visit") scheduleSiteAutoVerify(vendor.id);
 
 	return configJson({
 		cfg: CURRENT_CONFIG_VERSION,

@@ -73,7 +73,8 @@ import { agentKit } from "@/lib/vendors/agent-kit";
 import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { agenticReadBillingReport, previousBillingMonth } from "@/lib/staff/billing";
 import { vendorReadUsage } from "@/lib/billing/vendor-usage";
-import { fetchVendorVisitors, setVisitorIdentification, visitorIdentificationStatus } from "@/lib/vendors/visitors";
+import { fetchVendorVisitors, setVisitorIdentification, setVisitorIdentificationUnlocked, visitorIdentificationStatus } from "@/lib/vendors/visitors";
+import { verifySite } from "@/lib/vendors/site-verify";
 import { scriptModules, scriptStatus, setPlainModules } from "@/lib/vendors/script";
 import { displayFor, LOCKED as LOCKED_DISPLAY, setDisplay } from "@/lib/attest/display";
 
@@ -855,7 +856,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_script_modules",
 		description:
-			"Turn parts of your script on or off. Args: any of proofs, agent_visitors, human_visitors (booleans). human_visitors needs a DNS-verified domain. The script picks up a change within a few minutes; collection stops at once.",
+			"Turn parts of your script on or off. Args: any of proofs, agent_visitors, human_visitors (booleans). human_visitors needs the site proven (verify_site, or the DNS record). The script picks up a change within a few minutes; collection stops at once.",
 		capability: "vendor:write",
 		inputSchema: S.setScriptModulesInput,
 		outputSchema: S.setScriptModulesOutput,
@@ -871,7 +872,7 @@ export const TOOLS: BoundTool[] = [
 				if (!current || current.enabled !== human_visitors) {
 					const result = await setVisitorIdentification(vendorId, human_visitors);
 					if (!result.ok) {
-						const status = result.error === "not_found" ? 404 : result.error === "domain_not_verified" ? 409 : 503;
+						const status = result.error === "not_found" ? 404 : result.error === "site_not_verified" ? 409 : 503;
 						return { ok: false, status, body: { error: result.error, detail: result.detail } };
 					}
 				}
@@ -1152,10 +1153,14 @@ export const TOOLS: BoundTool[] = [
 			// check exists to stop.
 			if (typeof update.domain === "string" && update.domain !== vendor.domain) {
 				update.domain_verified_at = null;
+				// The site proof (site-verify.ts) was for the old domain too.
+				update.site_verified_at = null;
 			}
 			// And any run of re-check misses counted against the old domain.
 			const resetRecheck =
-				update.domain_verified_at === null ? { domain_dns_failures: 0, domain_dns_failing_since: null } : {};
+				update.domain_verified_at === null
+					? { domain_dns_failures: 0, domain_dns_failing_since: null, site_check_failures: 0, site_failing_since: null }
+					: {};
 
 			const { error } = await db.from("vendors").update({ ...update, ...resetRecheck }).eq("id", vendorId);
 			if (error) return { ok: false, status: 400, body: { error: error.message } };
@@ -1903,9 +1908,24 @@ export const TOOLS: BoundTool[] = [
 	 * never stored or signed — see src/lib/vendors/visitors.ts.
 	 */
 	defineTool({
+		name: "verify_site",
+		description:
+			"Prove the caller's site is theirs without DNS: Letterprove fetches https://<domain>/ (then www.) and looks for the vendor's own key in its Visitors (lettervisit.com/v.js) or Letterprove (attest.js) script tag. Proven, People (visitor identification) can be turned on. Runs automatically once the Visitors script loads; call it to check now. No args. Doesn't count for the attestation, which still needs DNS.",
+		capability: "vendor:write",
+		inputSchema: S.verifySiteInput,
+		outputSchema: S.verifySiteOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const result = await verifySite(vendorId);
+			if (!result) return { ok: false, status: 404, body: { error: "not_found" } };
+			return { ok: true, body: result };
+		},
+	}),
+	defineTool({
 		name: "set_visitor_identification",
 		description:
-			"Turn visitor identification on or off for the caller's vendor. On, attest.js also loads a visitor identification pixel on your site, and get_visitors shows the people and companies it identified. Args: enabled (boolean). Needs a DNS-verified domain. Private: none of it is published or counted in your proof, and Letterprove stores no identified person.",
+			"Turn visitor identification on or off for the caller's vendor. On, attest.js also loads a visitor identification pixel on your site, and get_visitors shows the people and companies it identified. Args: enabled (boolean). Needs the site proven: your Visitors script found on your homepage (verify_site, checked automatically once the script loads) or the DNS record. Private: none of it is published or counted in your proof, and Letterprove stores no identified person.",
 		capability: "vendor:write",
 		inputSchema: S.setVisitorIdentificationInput,
 		outputSchema: S.setVisitorIdentificationOutput,
@@ -1918,16 +1938,37 @@ export const TOOLS: BoundTool[] = [
 			}
 			const result = await setVisitorIdentification(vendorId, enabled);
 			if (!result.ok) {
-				const status = result.error === "not_found" ? 404 : result.error === "domain_not_verified" ? 409 : 503;
+				const status = result.error === "not_found" ? 404 : result.error === "site_not_verified" ? 409 : 503;
 				return { ok: false, status, body: { error: result.error, detail: result.detail } };
 			}
 			return { ok: true, body: result.status };
 		},
 	}),
 	defineTool({
+		name: "set_visitor_identification_unlocked",
+		description:
+			"Staff only. Lift (or restore) the 10-person free limit on a vendor's identified visitors, after a call. Args: vendor (slug), unlocked (boolean). Identities are still pulled live and never stored.",
+		capability: "staff:write",
+		inputSchema: S.setVisitorIdentificationUnlockedInput,
+		outputSchema: S.setVisitorIdentificationUnlockedOutput,
+		// Staff tools act across vendors by slug, not principal.vendorId.
+		handler: async (args) => {
+			const parsed = S.setVisitorIdentificationUnlockedInput.safeParse(args ?? {});
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_args", detail: "vendor (slug) and unlocked (boolean) are required." } };
+			const db = dbClient();
+			if (!db) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			const { data: vendor } = await db.from("vendors").select("id, slug").eq("slug", parsed.data.vendor).maybeSingle();
+			if (!vendor) return { ok: false, status: 404, body: { error: "not_found" } };
+			if (!(await setVisitorIdentificationUnlocked(vendor.id, parsed.data.unlocked))) {
+				return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			}
+			return { ok: true, body: { vendor: vendor.slug, unlocked: parsed.data.unlocked } };
+		},
+	}),
+	defineTool({
 		name: "get_visitors",
 		description:
-			"People and companies identified visiting the caller's vendor's own site (verified domain and accepted hosts), newest first, with a per-company rollup. Args: limit (default 50, max 200), days (default 30, max 90). Pulled live from the identification provider each time (cached five minutes); Letterprove stores none of it and never publishes it. Also reports whether identification is on.",
+			"People and companies identified visiting the caller's vendor's own site (verified domain and accepted hosts), oldest first seen first, with a per-company rollup. The first 10 people are free and shown in full; the rest come back as a `locked` count only until unlocked after a call. Args: limit (default 50, max 200), days (default 30, max 90). Pulled live from the identification provider each time (cached five minutes); Letterprove stores none of it and never publishes it. Also reports whether identification is on.",
 		capability: "vendor:read",
 		inputSchema: S.getVisitorsInput,
 		outputSchema: S.getVisitorsOutput,

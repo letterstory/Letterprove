@@ -100,11 +100,43 @@ describe("visitor identification against a real schema", () => {
 		expect(await visitorPixel(VERIFIED)).toEqual({ customer_id: "1091", profile_id: "roxaObLRwvD" });
 	});
 
-	it("refuses a vendor whose domain isn't verified", async () => {
+	it("refuses a vendor with neither DNS nor site proof", async () => {
 		const { dispatchTool } = await import("@/lib/tools/registry");
 		const out = await dispatchTool("set_visitor_identification", { enabled: true }, caller(UNVERIFIED));
-		expect(out).toMatchObject({ kind: "result", result: { ok: false, status: 409, body: { error: "domain_not_verified" } } });
+		expect(out).toMatchObject({ kind: "result", result: { ok: false, status: 409, body: { error: "site_not_verified" } } });
 		expect(maverick.created).toEqual([]);
+	});
+
+	it("accepts the site proof instead of DNS: the vendor's key found on its homepage", async () => {
+		const SITE = randomUUID();
+		await vendor(SITE, "sited", "sited.example", false);
+		const { dispatchTool } = await import("@/lib/tools/registry");
+		const { verifySite } = await import("./site-verify");
+		const { visitorPixel } = await import("./visitors");
+
+		// Not on the page yet: still refused, and nothing is registered.
+		const missing = await verifySite(SITE, {
+			lookup: async () => ["93.184.216.34"],
+			fetcher: (async () => new Response("<html><head></head></html>", { status: 200 })) as unknown as typeof fetch,
+		});
+		expect(missing?.verified).toBe(false);
+		const refused = await dispatchTool("set_visitor_identification", { enabled: true }, caller(SITE));
+		expect(refused).toMatchObject({ kind: "result", result: { ok: false, status: 409, body: { error: "site_not_verified" } } });
+
+		// The Visitors tag with its own key: proven, and People turns on.
+		const found = await verifySite(SITE, {
+			lookup: async () => ["93.184.216.34"],
+			fetcher: (async () =>
+				new Response('<script src="https://lettervisit.com/v.js" data-key="lp_live_sited"></script>', { status: 200 })) as unknown as typeof fetch,
+		});
+		expect(found).toMatchObject({ verified: true, checked_url: "https://sited.example/" });
+		const on = await dispatchTool("set_visitor_identification", { enabled: true }, caller(SITE));
+		expect(on).toMatchObject({ kind: "result", result: { ok: true, body: { enabled: true, tracking: "active" } } });
+		expect(await visitorPixel(SITE)).toEqual({ customer_id: "1091", profile_id: "roxaObLRwvD" });
+
+		// Losing the site proof stops the pixel at once.
+		await pg.query(`update vendors set site_verified_at = null where id = $1`, [SITE]);
+		expect(await visitorPixel(SITE)).toBeNull();
 	});
 
 	it("turning it off deactivates only what it registered, never a domain someone else already tracked", async () => {
@@ -174,6 +206,57 @@ describe("visitor identification against a real schema", () => {
 				},
 			},
 		});
+	});
+
+	it("shows the first 10 people in full and the rest as a locked count, until staff unlock", async () => {
+		const { dispatchTool } = await import("@/lib/tools/registry");
+		const base = Date.now() - 5 * 86_400_000;
+		// 12 people on acme, first seen one hour apart; p00 is the oldest.
+		maverick.people = Array.from({ length: 12 }, (_, i) => {
+			const id = `p${String(i).padStart(2, "0")}`;
+			return {
+				id,
+				email: null,
+				businessEmail: `${id}@co${i}.example`,
+				firstName: id,
+				lastName: null,
+				title: null,
+				company: `co${i}`,
+				location: null,
+				linkedinUrl: null,
+				visitCount: 1,
+				firstSeen: new Date(base + i * 3_600_000).toISOString(),
+				lastSeen: new Date(Date.now() - 3_600_000).toISOString(),
+				classifiedSeniority: null,
+				classifiedJobFunction: null,
+				companyData: { name: `co${i}`, domain: `co${i}.example` },
+				domain: "acme.example",
+				clientRef: null,
+			};
+		}).reverse();
+		await dispatchTool("set_visitor_identification", { enabled: true }, caller(VERIFIED));
+
+		const free = await dispatchTool("get_visitors", { limit: 200 }, caller(VERIFIED));
+		const body = (free as { result: { body: Record<string, unknown> } }).result.body as {
+			visitors: { person_id: string }[];
+			companies: { company: string }[];
+		};
+		expect(body).toMatchObject({ total: 12, shown: 10, locked: 2, free_limit: 10, unlocked: false });
+		expect(body.visitors.map((v) => v.person_id)).toEqual(["p00", "p01", "p02", "p03", "p04", "p05", "p06", "p07", "p08", "p09"]);
+		// The locked two don't leak, not even as a company.
+		expect(JSON.stringify(body)).not.toMatch(/p10|p11|co10|co11/);
+		expect(body.companies).toHaveLength(10);
+
+		// A vendor can't lift it for itself.
+		const denied = await dispatchTool("set_visitor_identification_unlocked", { vendor: "acme", unlocked: true }, caller(VERIFIED));
+		expect(denied).not.toMatchObject({ kind: "result", result: { ok: true } });
+
+		await pg.query(`update vendors set visitor_identification_unlocked = true where id = $1`, [VERIFIED]);
+		const { _resetVisitorCache } = await import("./visitors");
+		_resetVisitorCache();
+		const all = await dispatchTool("get_visitors", { limit: 200 }, caller(VERIFIED));
+		expect(all).toMatchObject({ result: { body: { total: 12, shown: 12, locked: 0, unlocked: true } } });
+		await pg.query(`update vendors set visitor_identification_unlocked = false where id = $1`, [VERIFIED]);
 	});
 
 	it("never puts visitor data into the attestation body", async () => {

@@ -19,6 +19,7 @@ vi.mock("@/lib/vendors/script", () => ({
 	recordScriptSeen: vi.fn(),
 	scriptNameOf: (s: string | null) => (s === "visit" ? "visit" : "attest"),
 }));
+vi.mock("@/lib/vendors/site-verify", () => ({ scheduleSiteAutoVerify: vi.fn() }));
 vi.mock("@/lib/oauth/ratelimit", () => ({ oauthRateLimit: vi.fn(), oauthClientIp: vi.fn(() => "203.0.113.9") }));
 
 import { findVendorByKey } from "@/lib/fixtures/vendors";
@@ -26,6 +27,7 @@ import { oauthRateLimit } from "@/lib/oauth/ratelimit";
 import { recordConfigPing } from "@/lib/telemetry/ping";
 import { visitorPixel } from "@/lib/vendors/visitors";
 import { collectorModules, recordScriptSeen } from "@/lib/vendors/script";
+import { scheduleSiteAutoVerify } from "@/lib/vendors/site-verify";
 
 const VENDOR = {
 	id: "00000000-0000-0000-0000-000000000001",
@@ -62,6 +64,15 @@ describe("GET /v1/config", () => {
 		expect(recordScriptSeen).toHaveBeenLastCalledWith(VENDOR.id, "attest");
 		// "Either script" keeps being recorded for every one of them.
 		expect(recordConfigPing).toHaveBeenCalledTimes(3);
+	});
+
+	it("looks for the key on the vendor's homepage only when the Visitors script asked", async () => {
+		vi.mocked(scheduleSiteAutoVerify).mockClear();
+		await get("?k=lp_live_vantage_9f2c&s=attest");
+		await get("?k=lp_live_vantage_9f2c");
+		expect(scheduleSiteAutoVerify).not.toHaveBeenCalled();
+		await get("?k=lp_live_vantage_9f2c&s=visit");
+		expect(scheduleSiteAutoVerify).toHaveBeenCalledWith(VENDOR.id);
 	});
 
 	it("gives both scripts the same answer", async () => {
