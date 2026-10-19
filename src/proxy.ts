@@ -1,4 +1,5 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { forwardAgentVisit, isAgentRequest, isLettervisitHost, isLettervisitPage } from "@/lib/lettervisit";
 import { VERIFY_ORIGIN } from "@/lib/attest/verify-link";
 import { isOwnHost, slugForCustomDomain } from "@/lib/vendors/custom-domain";
 
@@ -23,13 +24,29 @@ import { isOwnHost, slugForCustomDomain } from "@/lib/vendors/custom-domain";
  * /.well-known/*, /api/cron/* — is the product's public collection/proof API
  * and stays reachable with no session; this does not gate anything.
  */
-export async function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest, event?: NextFetchEvent) {
 	const { pathname } = request.nextUrl;
+
+	const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
+	// LetterVisit: crawler requests to Letterprove's own pages are forwarded (lib/lettervisit).
+	// Crawlers never run the script, so only the server sees them. Inert unless its key is set.
+	const userAgent = request.headers.get("user-agent");
+	const signatureAgent = request.headers.get("signature-agent");
+	if (event && isLettervisitHost(host) && isLettervisitPage(pathname) && isAgentRequest(userAgent, signatureAgent)) {
+		event.waitUntil(
+			forwardAgentVisit({
+				userAgent,
+				ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+				path: pathname,
+				host: host.split(":")[0],
+				signatureAgent,
+			})
+		);
+	}
 
 	// A vendor's own proof domain (proof.acme.com): its root IS its proof page.
 	// An unknown or unpublished host answers 404 rather than our home page, so a
 	// hostname can't confirm who has installed us. See lib/vendors/custom-domain.ts.
-	const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
 	if (host && !isOwnHost(host)) {
 		const slug = await slugForCustomDomain(host.split(":")[0]);
 		if (!slug) return new NextResponse("Not found", { status: 404 });

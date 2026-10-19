@@ -93,6 +93,34 @@ describe("proxy — a vendor's own proof domain", () => {
 	});
 });
 
+describe("proxy — LetterVisit forwarding", () => {
+	const event = () => {
+		const waited: Promise<unknown>[] = [];
+		return { waited, ev: { waitUntil: (p: Promise<unknown>) => waited.push(p) } as never };
+	};
+	const bot = { "user-agent": "Mozilla/5.0 (compatible; GPTBot/1.2)" };
+
+	it("forwards a crawler on Letterprove's own pages", async () => {
+		vi.stubEnv("NEXT_PUBLIC_LETTERVISIT_KEY", "lv_pub_test");
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+		const { proxy: p } = await freshProxy();
+		const { waited, ev } = event();
+		await p(new NextRequest("https://www.letterprove.com/docs", { headers: { ...bot, host: "www.letterprove.com" } }), ev);
+		expect(waited).toHaveLength(1);
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	});
+
+	it("never forwards from a vendor's proof domain, a browser, or the API", async () => {
+		const { proxy: p } = await freshProxy({ "proof.acme.com": "acme" });
+		const { waited, ev } = event();
+		await p(new NextRequest("https://proof.acme.com/", { headers: { ...bot, host: "proof.acme.com" } }), ev);
+		await p(new NextRequest("https://www.letterprove.com/", { headers: { "user-agent": "Mozilla/5.0 Chrome/130.0", host: "www.letterprove.com" } }), ev);
+		await p(new NextRequest("https://www.letterprove.com/api/v1/observe", { headers: { ...bot, host: "www.letterprove.com" } }), ev);
+		expect(waited).toHaveLength(0);
+	});
+});
+
 async function freshProxy(hosts: Record<string, string> = {}) {
 	vi.doMock("@/lib/vendors/custom-domain", async (orig) => ({
 		...(await orig<typeof import("@/lib/vendors/custom-domain")>()),
