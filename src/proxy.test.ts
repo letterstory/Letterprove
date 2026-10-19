@@ -101,13 +101,11 @@ describe("proxy — LetterVisit forwarding", () => {
 	const bot = { "user-agent": "Mozilla/5.0 (compatible; GPTBot/1.2)" };
 
 	it("forwards a crawler on Letterprove's own pages", async () => {
-		vi.stubEnv("NEXT_PUBLIC_LETTERVISIT_KEY", "lv_pub_test");
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
 		const { proxy: p } = await freshProxy();
 		const { waited, ev } = event();
 		await p(new NextRequest("https://www.letterprove.com/docs", { headers: { ...bot, host: "www.letterprove.com" } }), ev);
 		expect(waited).toHaveLength(1);
-		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 	});
 

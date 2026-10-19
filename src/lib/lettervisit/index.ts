@@ -9,11 +9,12 @@
  *
  * Only on Letterprove's own site, letterprove.com and www: never on a vendor's custom proof
  * domain (proof.acme.com is the vendor's, not ours) and never on app.letterprove.com.
- * Env-gated: inert unless NEXT_PUBLIC_LETTERVISIT_KEY is set, so forks send nothing. The key is
- * publishable, not a secret.
+ *
+ * The key is letterprove.com's publishable Visitors key, committed as is: Visitors counts only
+ * letterprove.com, so a fork running this code on another domain counts nothing.
  */
 
-export const LETTERVISIT_KEY = process.env.NEXT_PUBLIC_LETTERVISIT_KEY ?? "";
+export const LETTERVISIT_KEY = "lv_pub_oshr7i0747cjjk5tq0ch0eux";
 
 const AGENT_VISIT_URL = "https://lettervisit.com/api/v1/agent-visit";
 
@@ -46,7 +47,6 @@ export async function forwardAgentVisit(input: {
 	host: string;
 	signatureAgent: string | null;
 }): Promise<void> {
-	if (!LETTERVISIT_KEY) return;
 	try {
 		await fetch(AGENT_VISIT_URL, {
 			method: "POST",

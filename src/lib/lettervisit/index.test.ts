@@ -22,16 +22,14 @@ describe("lettervisit", () => {
 			expect(isLettervisitPage(p)).toBe(false);
 	});
 
-	it("is inert without a key, and posts the site key when set", async () => {
+	it("posts letterprove.com's key with the request it saw", async () => {
 		const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
 		vi.stubGlobal("fetch", fetchMock);
-		const input = { userAgent: "GPTBot/1.2", ip: null, path: "/", host: "www.letterprove.com", signatureAgent: null };
-		vi.stubEnv("NEXT_PUBLIC_LETTERVISIT_KEY", "");
-		await (await import(".")).forwardAgentVisit(input);
-		expect(fetchMock).not.toHaveBeenCalled();
-		vi.resetModules();
-		vi.stubEnv("NEXT_PUBLIC_LETTERVISIT_KEY", "lv_pub_test");
-		await (await import(".")).forwardAgentVisit(input);
-		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ k: "lv_pub_test", ua: "GPTBot/1.2", host: "www.letterprove.com", path: "/" });
+		const { forwardAgentVisit, LETTERVISIT_KEY } = await import(".");
+		expect(LETTERVISIT_KEY).toMatch(/^lv_pub_[a-z0-9]{24}$/);
+		await forwardAgentVisit({ userAgent: "GPTBot/1.2", ip: null, path: "/", host: "www.letterprove.com", signatureAgent: null });
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe("https://lettervisit.com/api/v1/agent-visit");
+		expect(JSON.parse(init.body)).toMatchObject({ k: LETTERVISIT_KEY, ua: "GPTBot/1.2", host: "www.letterprove.com", path: "/" });
 	});
 });
