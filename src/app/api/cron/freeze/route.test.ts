@@ -79,7 +79,7 @@ describe("GET /api/cron/freeze", () => {
 			"hourly freeze failed: vendor attestations",
 			expect.stringContaining("lettertrace: insert boom"),
 		);
-		expect(sendAlert).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("froze 2 before failing"));
+		expect(sendAlert).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("froze 2"));
 	});
 
 	it("turns a throw into a named alert rather than an unhandled rejection", async () => {

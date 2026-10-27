@@ -16,18 +16,17 @@ import { sendAlert } from "@/lib/alerts/notify";
  * were retired (README decision 30) and are no longer frozen; their stored
  * history is untouched.
  */
-type Half = { ok: boolean; frozen: number; skipped?: string[]; detail?: string };
+type Half = { ok: boolean; frozen: number; skipped?: string[]; failed?: string[]; detail?: string };
 
 const SKIPPED_NAMES_IN_ALERT = 5;
 
 /**
- * Everything a human needs out of a single Slack line: why it broke, how far
- * it got before it broke, and which vendors were left out. `frozen` is blast
- * radius in the other direction, since dying at vendor 40 of 41 is a very
- * different morning from dying at vendor 1.
+ * Everything a human needs out of a single Slack line: which vendors broke and
+ * why, how many froze anyway, and which were left out. A failed vendor no
+ * longer stops the run, so `frozen` is everyone else who published this hour.
  */
 function failureDetail(half: Half): string {
-	const parts = [half.detail ?? "no detail reported", `froze ${half.frozen} before failing`];
+	const parts = [half.detail ?? "no detail reported", `froze ${half.frozen}`];
 	if (half.skipped?.length) {
 		const shown = half.skipped.slice(0, SKIPPED_NAMES_IN_ALERT).join(", ");
 		const rest = half.skipped.length - SKIPPED_NAMES_IN_ALERT;

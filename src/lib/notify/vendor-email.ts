@@ -41,7 +41,7 @@ export function noticeFor(kind: NoticeKind, ctx: { vendorName: string; domain: s
 			return {
 				subject: `Your Letterprove domain check for ${ctx.domain} is failing`,
 				paragraphs: [
-					`We couldn't find the Letterprove TXT record on ${ctx.domain} for two days, so ${ctx.vendorName}'s proof no longer counts that domain as proven. While it's unproven, the proof shows tier 0 and new sign-ins aren't collected.`,
+					`We couldn't find the Letterprove TXT record on ${ctx.domain} for two days, so ${ctx.vendorName}'s proof no longer counts that domain as proven. While it's unproven, the proof drops to a lower tier, and sign-ins are only collected on ${ctx.domain} itself, not on other hosts under it.`,
 					`Put the TXT record back at your DNS provider (it's shown in your Letterprove setup), then press Check again. Everything picks up where it left off.`,
 				],
 			};

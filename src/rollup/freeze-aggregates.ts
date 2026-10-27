@@ -22,6 +22,10 @@
  * never change. A rerun in the same hour skips a vendor already frozen; the
  * write is ON CONFLICT DO NOTHING for overlapping runs; a database trigger
  * refuses UPDATE. `prevHash` comes from the latest row in an EARLIER hour.
+ *
+ * One vendor's failure never costs another vendor its hour. A countersign
+ * refusal or timeout, or a database error, on one vendor is recorded against
+ * that vendor and the loop moves on; the run reports not ok, naming each one.
  */
 
 import { dbClient } from "@/lib/db/client";
@@ -47,6 +51,8 @@ export interface AggregateFreezeResult {
 	skipped?: string[];
 	/** Present when ok is false. */
 	detail?: string;
+	/** Vendors that failed this run, each `slug: reason`. ok is false when any did. */
+	failed?: string[];
 }
 
 export async function freezeAggregates(): Promise<AggregateFreezeResult> {
@@ -66,55 +72,71 @@ export async function freezeAggregates(): Promise<AggregateFreezeResult> {
 	let alreadyFrozen = 0;
 	const skipped: string[] = [];
 
+	const failed: string[] = [];
+
 	for (const vendor of await allVendors()) {
-		const { data: last, error: lastError } = await db
-			.from("published_aggregates")
-			.select("hour_bucket, attestation")
-			.eq("vendor_slug", vendor.slug)
-			.lte("hour_bucket", bucket)
-			.order("hour_bucket", { ascending: false })
-			.limit(1)
-			.maybeSingle();
-
-		// Scoped to the vendor the run died on, for the same reason freeze.ts
-		// scopes its own: the alert built from this detail has to name whose
-		// aggregate stopped publishing.
-		if (lastError) return { ok: false, frozen, detail: `${vendor.slug}: ${lastError.message}` };
-
-		// This hour is already frozen, and has very likely been served.
-		if (last?.hour_bucket === bucket) {
-			alreadyFrozen++;
-			continue;
+		try {
+			const outcome = await freezeVendor(db, vendor.slug, bucket);
+			if (outcome === "frozen") frozen++;
+			else if (outcome === "already") alreadyFrozen++;
+			else skipped.push(vendor.slug);
+		} catch (error) {
+			// Scoped to the vendor, for the same reason freeze.ts scopes its own:
+			// the alert built from this has to name whose aggregate stopped publishing.
+			failed.push(`${vendor.slug}: ${error instanceof Error ? error.message : String(error)}`);
 		}
-
-		const prevHash = last ? snapshotHash(last.attestation as SignedAggregate) : GENESIS_HASH;
-		const signed = await signAggregate(vendor.slug, prevHash);
-
-		// Null means the vendor is unknown or its telemetry could not be read.
-		// Either way there is nothing honest to freeze this hour; the next run
-		// picks it up if the read recovers.
-		if (!signed) {
-			skipped.push(vendor.slug);
-			continue;
-		}
-
-		const { error: upsertError } = await db.from("published_aggregates").upsert(
-			{
-				vendor_slug: vendor.slug,
-				hour_bucket: bucket,
-				published_at: signed.published_at,
-				attestation: signed,
-			},
-			// ON CONFLICT DO NOTHING: an overlapping run that froze this hour first wins.
-			{ onConflict: "vendor_slug,hour_bucket", ignoreDuplicates: true }
-		);
-		if (upsertError) return { ok: false, frozen, detail: `${vendor.slug}: ${upsertError.message}` };
-		frozen++;
-		// A new proof waiting for data joins the directory with its first
-		// snapshot that has sign-ins (src/lib/vendors/listing.ts). Best effort:
-		// a failed listing update never fails the freeze; the next hour retries.
-		await autoListOnFirstData(db, vendor.slug, signed.companies_observed);
 	}
 
-	return { ok: true, frozen, ...(alreadyFrozen && { alreadyFrozen }), ...(skipped.length && { skipped }) };
+	return {
+		ok: failed.length === 0,
+		frozen,
+		...(alreadyFrozen && { alreadyFrozen }),
+		...(skipped.length && { skipped }),
+		...(failed.length && { failed, detail: failed.join("; ") }),
+	};
+}
+
+/** One vendor's hour. Throws on a database or countersign failure. */
+async function freezeVendor(
+	db: NonNullable<ReturnType<typeof dbClient>>,
+	slug: string,
+	bucket: number
+): Promise<"frozen" | "already" | "skipped"> {
+	const { data: last, error: lastError } = await db
+		.from("published_aggregates")
+		.select("hour_bucket, attestation")
+		.eq("vendor_slug", slug)
+		.lte("hour_bucket", bucket)
+		.order("hour_bucket", { ascending: false })
+		.limit(1)
+		.maybeSingle();
+	if (lastError) throw new Error(lastError.message);
+
+	// This hour is already frozen, and has very likely been served.
+	if (last?.hour_bucket === bucket) return "already";
+
+	const prevHash = last ? snapshotHash(last.attestation as SignedAggregate) : GENESIS_HASH;
+	const signed = await signAggregate(slug, prevHash);
+
+	// Null means the vendor is unknown or its telemetry could not be read.
+	// Either way there is nothing honest to freeze this hour; the next run
+	// picks it up if the read recovers.
+	if (!signed) return "skipped";
+
+	const { error: upsertError } = await db.from("published_aggregates").upsert(
+		{
+			vendor_slug: slug,
+			hour_bucket: bucket,
+			published_at: signed.published_at,
+			attestation: signed,
+		},
+		// ON CONFLICT DO NOTHING: an overlapping run that froze this hour first wins.
+		{ onConflict: "vendor_slug,hour_bucket", ignoreDuplicates: true }
+	);
+	if (upsertError) throw new Error(upsertError.message);
+	// A new proof waiting for data joins the directory with its first
+	// snapshot that has sign-ins (src/lib/vendors/listing.ts). Best effort:
+	// a failed listing update never fails the freeze; the next hour retries.
+	await autoListOnFirstData(db, slug, signed.companies_observed);
+	return "frozen";
 }

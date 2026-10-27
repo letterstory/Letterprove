@@ -39,6 +39,14 @@ describe("provisionVendorForOrg", () => {
 		expect(insert).not.toHaveBeenCalled();
 	});
 
+	// Stored as null, it would mean every breakage email for the vendor goes nowhere.
+	it("400s a contact email that isn't one, without inserting", async () => {
+		const r = await provisionVendorForOrg(ORG, { name: "Acme", domain: "acme.com", contactEmail: "ops at acme" });
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.status).toBe(400);
+		expect(insert).not.toHaveBeenCalled();
+	});
+
 	it("400s a name with no slug characters", async () => {
 		const r = await provisionVendorForOrg(ORG, { name: "!!!", domain: "acme.com" });
 		expect(r.ok).toBe(false);
