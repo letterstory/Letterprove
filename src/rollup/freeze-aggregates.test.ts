@@ -126,6 +126,27 @@ describe("freezeAggregates", () => {
 		await expect(freezeAggregates()).resolves.toMatchObject({ ok: false, detail: "lettertrace: upsert boom" });
 	});
 
+	// One vendor's countersign refusal must not cost every vendor after it the hour.
+	it("keeps freezing the other vendors when one fails", async () => {
+		const db = mockDb({});
+		await setup(db);
+		const { allVendors } = await import("@/lib/fixtures/vendors");
+		const { signAggregate } = await import("@/lib/attest/aggregate");
+		vi.mocked(allVendors).mockResolvedValue([
+			{ slug: "acme", customers: [] },
+			{ slug: "lettertrace", customers: [] },
+		] as never);
+		vi.mocked(signAggregate)
+			.mockRejectedValueOnce(new Error("countersign refused: 403"))
+			.mockResolvedValueOnce({ published_at: "2026-08-18T00:00:00Z", vendor: "lettertrace" } as never);
+
+		const r = await freezeAggregates();
+
+		expect(r).toMatchObject({ ok: false, frozen: 1, failed: ["acme: countersign refused: 403"] });
+		expect(r.detail).toBe("acme: countersign refused: 403");
+		expect(db.upsert).toHaveBeenCalledTimes(1);
+	});
+
 	it("freezes the signed document whole, not just its numbers", async () => {
 		const signed = { vendor: "lettertrace", kind: "aggregate", companies_observed: 24, published_at: "2026-08-18T00:00:00Z", signature: "sig" };
 		const db = mockDb({});

@@ -19,9 +19,10 @@ export async function notifyQuietVendors(now: Date = new Date()): Promise<{ chec
 	try {
 		const { data, error } = await db
 			.from("vendors")
-			.select("id, slug, first_event_at, contact_email, domain_verified_at")
+			.select("id, slug, first_event_at, contact_email")
+			// Every vendor that has sent sign-ins, DNS-proven or not: domain proof is
+			// optional since 2026-10-14, and an unproven vendor's script breaks too.
 			.not("first_event_at", "is", null)
-			.not("domain_verified_at", "is", null)
 			.not("contact_email", "is", null);
 		if (error || !data) return out;
 		for (const v of data as { id: string; slug: string; first_event_at: string }[]) {

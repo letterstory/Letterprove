@@ -46,6 +46,13 @@ export async function provisionVendorForOrg(
 	const domain = normalizeDomain(input.domain);
 	if (!domain) return { ok: false, status: 400, error: domainRejectionReason(input.domain) };
 
+	// A contact email that isn't one is refused, not stored as null: a null
+	// address means every breakage email for this vendor silently goes nowhere.
+	const contactEmail = input.contactEmail?.trim() ? normalizeContactEmail(input.contactEmail) : null;
+	if (input.contactEmail?.trim() && !contactEmail) {
+		return { ok: false, status: 400, error: "contact_email isn't an email address." };
+	}
+
 	const name = (input.name ?? "").trim();
 	const baseSlug = slugify(name);
 	if (!baseSlug) return { ok: false, status: 400, error: "Vendor name must contain letters or numbers." };
@@ -78,7 +85,7 @@ export async function provisionVendorForOrg(
 				key,
 				letterstory_org_id: orgId,
 				issuer_affiliation,
-				contact_email: normalizeContactEmail(input.contactEmail),
+				contact_email: contactEmail,
 			});
 		if (!error) return { id };
 		// 23505 is unique_violation — could be the slug OR the org link. Either

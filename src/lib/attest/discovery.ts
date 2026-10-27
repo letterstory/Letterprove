@@ -56,7 +56,7 @@ export async function discoveryDocument(origin: string): Promise<DiscoveryDocume
 	return {
 		name: "Letterprove",
 		description:
-			"Signed, hourly attestations that a software vendor is who it says it is (its domain, proven by DNS, or more weakly by its script and key on a page there, or not at all, stated in `domain_proof`; its Stripe account, bound to the DNS-proven domain) and is backed by data (companies observed using it, and how many pay). Counts only; no customer is ever named.",
+			"Signed, hourly attestations that a software vendor is who it says it is (its domain, proven by DNS, or more weakly by its script and key on a page there, or not at all, stated in `domain_proof`; its Stripe account, bound to the DNS-proven domain) and is backed by data (companies observed signing in to its product). Counts only; no customer is ever named.",
 		signing: {
 			alg: "EdDSA",
 			crv: "Ed25519",

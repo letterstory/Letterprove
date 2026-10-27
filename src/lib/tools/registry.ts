@@ -919,7 +919,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_proof_display",
 		description:
-			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, stripe_business, observed_since, hosts, growth, retention (true shows, false hides) and logo_names (true names verified logo companies, false shows counts only). The domain, tier, companies observed and verify link are always shown. Hidden sections are named on the proof as hidden by you. Takes effect at the next hourly snapshot.",
+			"Show or hide optional sections on your public proof. Args: sections, an object of any of sessions, reported_history, logos, stripe_business, observed_since, hosts, growth, retention (true shows, false hides) and logo_names (true names verified logo companies, false shows counts only). The domain, tier, companies observed and verify link are always shown. A hidden section is left off the proof entirely; the proof says nothing about it. Takes effect at the next hourly snapshot.",
 		capability: "vendor:write",
 		inputSchema: S.setProofDisplayInput,
 		outputSchema: S.setProofDisplayOutput,
