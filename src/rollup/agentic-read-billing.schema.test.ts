@@ -51,9 +51,11 @@ beforeEach(async () => {
 
 describe("rollup_agentic_reads_daily", () => {
 	it("counts this month's reads per vendor into agentic_read_rollups", async () => {
+		// Minutes apart, not days: on the 1st or 2nd of a month a read from a day or two
+		// ago belongs to last month's row.
 		await insertRead("acme", 0);
-		await insertRead("acme", 1);
-		await insertRead("acme", 2);
+		await insertRead("acme", 0.001);
+		await insertRead("acme", 0.002);
 		await insertRead("vantage", 0);
 
 		await db.query("select rollup_agentic_reads_daily()");
