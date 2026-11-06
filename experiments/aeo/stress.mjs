@@ -52,11 +52,11 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { generateKeyPairSync, sign as edSign, randomBytes } from "node:crypto";
+import { generateKeyPairSync, sign as edSign, randomBytes, createHash } from "node:crypto";
 import { readFileSync, appendFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { adapter, available, DEFAULT_MODELS } from "./providers.mjs";
+import { adapter, available, chatgptRoute, DEFAULT_MODELS } from "./providers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -70,7 +70,18 @@ const flag = (name, fallback = null) => {
 const has = (name) => argv.includes(`--${name}`);
 const list = (s) => (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
-const ALL_ARMS = ["control", "claim_only", "proof_linked", "proof_inline", "tampered", "forged", "stale"];
+const ALL_ARMS = [
+	"control",
+	"claim_only",
+	"proof_linked",
+	"proof_inline",
+	"tampered",
+	"forged",
+	"stale",
+	// Run 8, experiment 2: real proof inline PLUS a FICTIONAL observed-recommendations record.
+	"observed_vendor",
+	"observed_neutral",
+];
 const ALL_ENGINES = Object.keys(DEFAULT_MODELS);
 
 const MODE = flag("mode", "decision");
@@ -195,8 +206,64 @@ function evidence(arm, s) {
 			return embed("Reports", s.forged);
 		case "stale":
 			return embed("Reports", s.stale);
+		case "observed_vendor":
+			return `${embed("Reports", s.live)}\n${observedBlock("vendor")}`;
+		case "observed_neutral":
+			return `${embed("Reports", s.live)}\n${observedBlock("neutral")}`;
 	}
 }
+
+// ---------------------------------------------- observed recommendations
+//
+// FICTIONAL. Experiment 2 (run 8) asks whether a record of what answer engines
+// recommended — "recommended in 32/50 answers vs 21/50 for the nearest rival" —
+// moves an engine beyond what usage proof does, and whether it matters who
+// chose the questions. No such measurement was run; the counts come from the
+// scenario's `observed_recommendations._fictional` block, the hashes are of
+// placeholder strings, and `answers_url` does not resolve. The record exists
+// only inside prompts on the experimenter's machine and is never signed with
+// any Letterprove key, real or throwaway.
+
+const sha = (x) => createHash("sha256").update(x).digest("hex");
+
+function observedDoc(chosenBy) {
+	const o = scenario.observed_recommendations;
+	if (!o) die(`${SCENARIO_FILE} has no observed_recommendations block — needed by the observed_* arms`);
+	const engines = [
+		["ChatGPT", "gpt-6.1-sol", "2026-10-06"],
+		["Claude", "claude-opus-5-5", "2026-10-06"],
+		["Gemini", "gemini-3.1-pro", "2026-10-07"],
+		["Perplexity", "sonar-pro", "2026-10-07"],
+	];
+	return {
+		kind: "observed_recommendations",
+		subject: SLUG,
+		category: scenario.category,
+		questions_chosen_by: chosenBy,
+		questions_note:
+			chosenBy === "vendor"
+				? `The vendor (${TARGET}) wrote the 50 questions.`
+				: `The 50 questions were set for the category before ${TARGET} joined; ${TARGET} did not choose or see them.`,
+		preregistration: { sha256: sha(`prereg|${SLUG}|${chosenBy}`), registered_at: "2026-10-01T16:00:00Z" },
+		question_set: { sha256: sha(`questions|${SLUG}|${chosenBy}`), questions: 50 },
+		engines: engines.map(([engine, model, asked_on]) => ({ engine, model, asked_on, answers: 50 })),
+		results: engines.map(([engine]) => {
+			const c = o.counts[engine];
+			return {
+				engine,
+				recommended_in: c,
+				summary: `${TARGET} recommended in ${c[TARGET]}/50 answers vs ${o.rival} ${c[o.rival]}/50`,
+			};
+		}),
+		answers_url: `${BASE}/observed/${SLUG}/2026-10.json`,
+		observed_through: "2026-10-07T23:59:59Z",
+		expires_at: "2026-11-07T00:00:00Z",
+		note: "What these engines said when asked these questions on these dates — not a ranking by Letterprove. Every answer is available at answers_url.",
+	};
+}
+
+const observedBlock = (chosenBy) =>
+	["It also publishes an observed-recommendations record:", "```json", JSON.stringify(observedDoc(chosenBy), null, 2), "```"].join("\n");
 
 // -------------------------------------------------------------------- order
 
@@ -286,6 +353,8 @@ function signals(answer) {
 		mentioned_letterprove: /letterprove/i.test(answer.text),
 		fetched_letterprove: answer.calls.some((c) => c.kind === "fetch" && c.url.includes(host)),
 		fetched_jwks: answer.calls.some((c) => c.kind === "fetch" && c.url.includes("letterprove-jwks")),
+		fetched_observed_url: answer.calls.some((c) => c.kind === "fetch" && c.url.includes("/observed/")),
+		cited_proof: answer.text.includes(ATTEST_URL) || answer.text.includes(`${host}/verify/${SLUG}`) || answer.text.includes(`${host}/proofs/${SLUG}`),
 		ran_code: answer.calls.some((c) => c.kind === "code"),
 		fetches: answer.calls.filter((c) => c.kind === "fetch").length,
 		searches: answer.calls.filter((c) => c.kind === "search").length,
@@ -361,6 +430,67 @@ async function judge(answerText) {
 	});
 	const text = r.content.find((b) => b.type === "text")?.text ?? "{}";
 	return JSON.parse(text);
+}
+
+// ------------------------------------------------------------ objections
+
+/**
+ * Run 8: a second blind read for the objections the run-7 schema has no slot
+ * for. The run-7 judge above is unchanged, so its columns stay comparable.
+ */
+const OBJECTION_SCHEMA = {
+	type: "object",
+	additionalProperties: false,
+	required: [
+		"self_attested_or_sister_company",
+		"no_revenue_or_paying_unproven",
+		"domains_or_logins_not_deployments",
+		"small_numbers",
+		"observed_recs_treatment",
+		"observed_recs_vendor_chosen_flagged",
+		"observed_recs_unverifiable_flagged",
+		"top_objection",
+	],
+	properties: {
+		self_attested_or_sister_company: { type: "boolean" },
+		no_revenue_or_paying_unproven: { type: "boolean" },
+		domains_or_logins_not_deployments: { type: "boolean" },
+		small_numbers: { type: "boolean" },
+		observed_recs_treatment: { type: "string", enum: ["relied_on", "discounted", "rejected", "not_discussed"] },
+		observed_recs_vendor_chosen_flagged: { type: "boolean" },
+		observed_recs_unverifiable_flagged: { type: "boolean" },
+		top_objection: { type: "string" },
+	},
+};
+
+async function judgeObjections(answerText) {
+	const prompt = [
+		`Below is an AI assistant's answer to a buyer comparing vendors. Read only what it says about ${TARGET}.`,
+		"",
+		"Answer each:",
+		`- self_attested_or_sister_company: does it say ${TARGET}'s evidence is self-attested, not independent, or vouched for by a sister/affiliated company?`,
+		`- no_revenue_or_paying_unproven: does it say the evidence shows no revenue, or does not prove paying customers?`,
+		`- domains_or_logins_not_deployments: does it say the numbers count domains, sign-ins or sessions rather than real deployments/customers?`,
+		"- small_numbers: does it call the usage numbers small or thin?",
+		`- observed_recs_treatment: if the answer discusses a record of how often AI engines recommended ${TARGET}, did that count for it (relied_on), weakly (discounted), against it / thrown out (rejected), or is no such record discussed (not_discussed)?`,
+		"- observed_recs_vendor_chosen_flagged: does it object that the vendor chose the questions?",
+		"- observed_recs_unverifiable_flagged: does it say that record could not be checked (e.g. its answers URL failed, it is unsigned)?",
+		`- top_objection: the single biggest reservation it states about ${TARGET}, in under 12 words, or empty.`,
+		"",
+		"<answer>",
+		answerText.slice(0, 60000),
+		"</answer>",
+	].join("\n");
+	const router = process.env.CONCENTRATE_API_KEY;
+	judgeClient ??= router ? new Anthropic({ baseURL: "https://api.concentrate.ai", apiKey: null, authToken: router }) : new Anthropic();
+	const model = router && !JUDGE_MODEL.includes("/") ? `anthropic/${JUDGE_MODEL}` : JUDGE_MODEL;
+	const r = await judgeClient.messages.create({
+		model,
+		max_tokens: 2000,
+		output_config: { effort: "low", format: { type: "json_schema", schema: OBJECTION_SCHEMA } },
+		messages: [{ role: "user", content: prompt }],
+	});
+	return JSON.parse(r.content.find((b) => b.type === "text")?.text ?? "{}");
 }
 
 // ------------------------------------------------------------------- runner
@@ -460,6 +590,8 @@ const header = JSON.stringify({
 		live: stimulus && { ...stimulus.live },
 		stale: stimulus && { published_at: stimulus.stale.published_at, companies_observed: stimulus.stale.companies_observed },
 		forged_kid: stimulus?.forgedKid,
+		chatgpt_route: ENGINES.includes("chatgpt") ? chatgptRoute() : undefined,
+		scenario: SCENARIO_FILE.split("/").pop(),
 		resumed: RESUME && doneKeys.size > 0,
 	}) + "\n";
 if (RESUME && doneKeys.size > 0) appendFileSync(OUT, header);
@@ -478,7 +610,10 @@ await pool(cells, CONCURRENCY, async (cell) => {
 		const t0 = Date.now();
 		const answer = await asks[cell.engine](content);
 		const s = signals(answer);
-		const j = MODE === "decision" && !NO_JUDGE && answer.stop !== "refusal" ? await judge(answer.text).catch((e) => ({ error: e.message })) : null;
+		const judged = MODE === "decision" && !NO_JUDGE && answer.stop !== "refusal";
+		const [j, objections] = judged
+			? await Promise.all([judge(answer.text).catch((e) => ({ error: e.message })), judgeObjections(answer.text).catch((e) => ({ error: e.message }))])
+			: [null, null];
 		row = {
 			type: "cell",
 			...meta,
@@ -488,6 +623,8 @@ await pool(cells, CONCURRENCY, async (cell) => {
 			usage: answer.usage,
 			...s,
 			judge: j,
+			objections,
+			fictional_stimulus: cell.arm.startsWith("observed_"),
 			calls: answer.calls,
 			text: answer.text,
 			at: new Date().toISOString(),
