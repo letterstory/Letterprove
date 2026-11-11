@@ -10,7 +10,7 @@
 
 import { dbClient } from "@/lib/db/client";
 
-export const DISPLAY_SECTIONS = ["sessions", "reported_history", "logos", "stripe_business", "observed_since", "hosts", "growth", "retention"] as const;
+export const DISPLAY_SECTIONS = ["sessions", "reported_history", "feature_usage", "logos", "stripe_business", "observed_since", "hosts", "growth", "retention"] as const;
 export type DisplaySection = (typeof DISPLAY_SECTIONS)[number];
 export type DisplaySettings = Record<DisplaySection, boolean> & {
 	/** Name the verified companies on the logo wall, or show only the counts. */
@@ -23,6 +23,7 @@ export const LOCKED = ["domain", "tier", "companies_observed", "verify"] as cons
 export const DEFAULT_DISPLAY: DisplaySettings = {
 	sessions: true,
 	reported_history: true,
+	feature_usage: true,
 	logos: true,
 	stripe_business: true,
 	observed_since: true,

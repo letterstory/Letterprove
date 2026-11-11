@@ -61,6 +61,9 @@ import {
 	type KeyRejection as PosthogKeyRejection,
 } from "@/lib/posthog/credentials";
 import { hogql } from "@/lib/posthog/fetch";
+import { MAX_FEATURE_USAGE_AGE_MS, readFeatureRows, saveFeatureUsage, setFeatureProofs } from "@/lib/attest/feature-usage";
+import { observedCompanyDomains } from "@/lib/attest/aggregate";
+import { domainProofOf } from "@/lib/attest/domain-proof";
 import { posthogStatus } from "@/lib/posthog/status";
 import { syncVendorPosthog } from "@/lib/posthog/sync";
 import { clearLogoWall, parseLogoWallInput, provenLogoDomain, saveLogoWall } from "@/lib/vendors/logo-wall";
@@ -1536,6 +1539,68 @@ export const TOOLS: BoundTool[] = [
 		},
 	}),
 	/*
+	 * ----------------------------------------------------------- feature usage
+	 *
+	 * Which features of the product companies use (lib/attest/feature-usage.ts). Letter pushes the counts daily from
+	 * its Visitors script on the vendor's product; the vendor picks what its proof shows. Published only as counts,
+	 * only of companies Letterprove observed signing in, labelled vendor-stated, never moving the tier.
+	 */
+	defineTool({
+		name: "report_feature_usage",
+		description:
+			"Store which features of the caller's vendor's product signed-in people used in the last 30 days, per feature its people and company domains, as Letter's Visitors script counted them. Replaces the last report; which features the proof shows is kept. Sent by Letter daily. Args: features [{key, label, people, domains}].",
+		capability: "vendor:write",
+		inputSchema: S.reportFeatureUsageInput,
+		outputSchema: S.reportFeatureUsageOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const parsed = S.reportFeatureUsageInput.safeParse(args);
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_features", detail: parsed.error.issues[0]?.message } };
+			const features = parsed.data.features.map((f) => ({
+				...f,
+				domains: f.domains.map((d) => d.trim().toLowerCase().replace(/\.$/, "")).filter((d) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)),
+			}));
+			if (!(await saveFeatureUsage(vendorId, features))) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: { stored: features.length, synced_at: new Date().toISOString() } };
+		},
+	}),
+	defineTool({
+		name: "get_feature_usage",
+		description:
+			"The caller's vendor's feature usage as Letter last reported it: each feature's signed-in people, the companies Letter counted and how many of those Letterprove observed signing in (what the proof would show), and whether it's shown. No args.",
+		capability: "vendor:read",
+		inputSchema: S.getFeatureUsageInput,
+		outputSchema: S.getFeatureUsageOutput,
+		handler: async (_args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const status = await featureUsageStatus(vendorId);
+			return status ? { ok: true, body: status } : { ok: false, status: 503, body: { error: "storage_unavailable" } };
+		},
+	}),
+	defineTool({
+		name: "set_feature_proofs",
+		description:
+			"Choose which features show on the caller's vendor's proof (at most 10, by key from get_feature_usage); every other is hidden. Each shows how many of the companies Letterprove observed signing in used it, and its signed-in people, labelled vendor-stated; it never changes the tier. Takes effect at the next hourly snapshot. Args: keys.",
+		capability: "vendor:write",
+		inputSchema: S.setFeatureProofsInput,
+		outputSchema: S.setFeatureProofsOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const parsed = S.setFeatureProofsInput.safeParse(args);
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_keys", detail: parsed.error.issues[0]?.message } };
+			const set = await setFeatureProofs(vendorId, parsed.data.keys);
+			if (!set.ok) return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			if (set.unknown.length) {
+				return { ok: false, status: 400, body: { error: "unknown_features", detail: `Not reported by Letter: ${set.unknown.join(", ")}.` } };
+			}
+			const status = await featureUsageStatus(vendorId);
+			return status ? { ok: true, body: status } : { ok: false, status: 503, body: { error: "storage_unavailable" } };
+		},
+	}),
+	/*
 	 * ----------------------------------------------------------------- posthog
 	 *
 	 * READ ONLY. The vendor's own analytics, read for history: which company
@@ -2041,4 +2106,47 @@ function assertOutputMatchesSchema(tool: BoundTool, result: ToolResult): void {
 		`${tool.name} returned a body its outputSchema rejects — the declared contract is wrong, or the handler is: ` +
 			JSON.stringify(parsed.error.issues),
 	);
+}
+
+/** What get_feature_usage and set_feature_proofs answer: each feature with what the proof would show. */
+async function featureUsageStatus(vendorId: string) {
+	const db = dbClient();
+	if (!db) return null;
+	const [rows, { data: vendor }] = await Promise.all([
+		readFeatureRows(vendorId),
+		db.from("vendors").select("slug, domain, domain_verified_at, site_verified_at").eq("id", vendorId).maybeSingle(),
+	]);
+	if (!rows || !vendor) return null;
+	const observed = await observedCompanyDomains(vendor.slug as string, vendor.domain as string);
+	const seen = observed ? new Set(observed) : null;
+	const features = rows
+		.map((r) => ({
+			key: r.feature_key,
+			label: r.label,
+			people: r.people,
+			companies_reported: r.domains.length,
+			companies_observed: seen ? new Set(r.domains.filter((d) => seen.has(d))).size : null,
+			shown: r.published,
+			synced_at: r.synced_at,
+		}))
+		.sort((a, b) => (b.companies_observed ?? 0) - (a.companies_observed ?? 0) || b.people - a.people || a.key.localeCompare(b.key));
+	const proof = domainProofOf({
+		domainVerified: Boolean(vendor.domain_verified_at),
+		siteVerifiedAt: (vendor.site_verified_at as string | null) ?? null,
+	});
+	const fresh = rows.some((r) => Date.now() - Date.parse(r.synced_at) <= MAX_FEATURE_USAGE_AGE_MS);
+	const shown = features.filter((f) => f.shown && (f.companies_observed ?? 0) > 0);
+	const reason =
+		proof === "none"
+			? "Verify your domain first (the site check or DNS)."
+			: !rows.length
+				? "Letter hasn't reported any feature usage yet."
+				: !fresh
+					? "Letter's last report is more than two days old."
+					: !features.some((f) => f.shown)
+						? "Choose the features to show (set_feature_proofs)."
+						: !shown.length
+							? "None of the features you chose was used by a company Letterprove observed signing in this window."
+							: null;
+	return { features, on_proof: reason === null, reason };
 }

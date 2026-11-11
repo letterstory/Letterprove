@@ -194,6 +194,7 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 				.filter(Boolean)
 				.join(" · ")
 		: binding;
+	const usage = f.feature_usage as { window_days?: number; features?: { name: string; companies: number; people: number }[] } | undefined;
 	const history = f.reported_history as
 		| {
 				companies?: number;
@@ -263,6 +264,13 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 			tile("Active, last 30 days", num(history.active_companies_30d)) +
 			tile("Also observed by Letterprove", `${num(history.observed_also_reported)} of ${num(f.companies_observed)}`) +
 			`</div><p class="muted">Vendor-reported, from its own PostHog. It never changes the tier.</p></section>`;
+	}
+
+	if (usage && Array.isArray(usage.features) && usage.features.length) {
+		html +=
+			`<section><h2>Features in use</h2><div class="tiles three">` +
+			usage.features.map((u) => tile(u.name, `${num(u.companies)} of ${num(f.companies_observed)}`, `companies · ${num(u.people)} people`)).join("") +
+			`</div><p class="muted">Companies observed signing in over the last ${num(usage.window_days)} days that used each feature, counted by Letter's script on the vendor's product. Vendor-stated: it never changes the tier.</p></section>`;
 	}
 
 	const growth = Array.isArray(f.growth)
