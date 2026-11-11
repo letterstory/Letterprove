@@ -7,15 +7,17 @@
  * pushes each feature's company domains here daily (report_feature_usage). The vendor picks which features its proof
  * shows (set_feature_proofs); nothing shows until it does.
  *
- * WHAT IS PUBLISHED. Per shown feature: `companies`, how many of the companies LETTERPROVE observed signing in this
- * window also used it, and `people`, the signed-in people Letter counted. A domain Letterprove never saw sign in is
- * never counted, so a vendor can't add companies it doesn't have; it could still say which of its real companies used
- * what, because it runs the script that counts. So the section is listed in `vendor_stated` and never moves the
- * tier, like `reported_history`. Absent unless the domain is proven (site or DNS), the push is under two days old,
- * and at least one shown feature has a company.
+ * WHAT IS PUBLISHED. Per shown feature: `companies`, how many of the companies Letter's script saw signed in used it,
+ * and `people`, the signed-in people Letter counted; and `companies_signed_in`, every company Letter reported in the
+ * window. Letter's sign-ins count on their own (2026-11-11, Mathew: one install, not two): a vendor with Letter's
+ * script on its product needs no Letterprove script for this section. Only company domains count (no free mail, not
+ * the vendor's own, partitionDomains). The vendor runs the script that counts, as it runs Letterprove's, so the
+ * section is listed in `vendor_stated` and never moves the tier, like `reported_history`. Absent unless the domain is
+ * proven (site or DNS), the push is under two days old, and at least one shown feature has a company.
  */
 
 import { dbClient } from "@/lib/db/client";
+import { partitionDomains } from "@/lib/identity/domains";
 
 /** A push older than this reads as absent: Letter pushes daily, so two days is one missed run. */
 export const MAX_FEATURE_USAGE_AGE_MS = 48 * 60 * 60 * 1000;
@@ -28,6 +30,8 @@ export interface FeatureUsage {
 	/** Where the counts came from: Letter's Visitors script on the vendor's product. */
 	source: "letter_visitors";
 	window_days: number;
+	/** Every company Letter reported signed in over the window (any feature, shown or not). */
+	companies_signed_in: number;
 	/** The shown features, the most companies first. */
 	features: { name: string; companies: number; people: number }[];
 }
@@ -41,22 +45,28 @@ export interface FeatureRow {
 	synced_at: string;
 }
 
-/**
- * Pure: the published section from the stored rows and the domains Letterprove observed this window. Null when
- * nothing would show.
- */
-export function featureUsageSection(rows: readonly FeatureRow[], observed: ReadonlySet<string>, windowDays: number, now = Date.now()): FeatureUsage | null {
-	const features = rows
-		.filter((r) => r.published && now - Date.parse(r.synced_at) <= MAX_FEATURE_USAGE_AGE_MS)
+/** Pure: the company domains among a report's domains (no free mail, not the vendor's own), once each. */
+export function companyDomains(domains: Iterable<string>, vendorDomain: string): string[] {
+	const own = vendorDomain.trim().toLowerCase().replace(/^www\./, "");
+	return partitionDomains(new Set(domains), vendorDomain).attributable.filter((d) => d !== own && !d.endsWith(`.${own}`));
+}
+
+/** Pure: the published section from the stored rows. Null when nothing would show. */
+export function featureUsageSection(rows: readonly FeatureRow[], vendorDomain: string, windowDays: number, now = Date.now()): FeatureUsage | null {
+	const fresh = rows.filter((r) => now - Date.parse(r.synced_at) <= MAX_FEATURE_USAGE_AGE_MS);
+	const features = fresh
+		.filter((r) => r.published)
 		.map((r) => ({
 			name: r.label,
-			companies: new Set(r.domains.filter((d) => observed.has(d))).size,
+			companies: companyDomains(r.domains, vendorDomain).length,
 			people: Math.max(0, Math.trunc(r.people)),
 		}))
 		.filter((f) => f.companies > 0)
 		.sort((a, b) => b.companies - a.companies || b.people - a.people || a.name.localeCompare(b.name))
 		.slice(0, MAX_SHOWN_FEATURES);
-	return features.length ? { source: "letter_visitors", window_days: windowDays, features } : null;
+	if (!features.length) return null;
+	const signedIn = companyDomains(fresh.flatMap((r) => r.domains), vendorDomain).length;
+	return { source: "letter_visitors", window_days: windowDays, companies_signed_in: signedIn, features };
 }
 
 export async function readFeatureRows(vendorId: string): Promise<FeatureRow[] | null> {
@@ -78,9 +88,9 @@ export async function readFeatureRows(vendorId: string): Promise<FeatureRow[] | 
 }
 
 /** The section for one vendor's next snapshot; null on any read failure (absent, never a confident zero). */
-export async function featureUsage(vendorId: string, observed: readonly string[], windowDays: number): Promise<FeatureUsage | null> {
+export async function featureUsage(vendorId: string, vendorDomain: string, windowDays: number): Promise<FeatureUsage | null> {
 	const rows = await readFeatureRows(vendorId);
-	return rows ? featureUsageSection(rows, new Set(observed), windowDays) : null;
+	return rows ? featureUsageSection(rows, vendorDomain, windowDays) : null;
 }
 
 export interface ReportedFeature {

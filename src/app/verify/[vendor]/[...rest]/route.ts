@@ -194,7 +194,7 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 				.filter(Boolean)
 				.join(" · ")
 		: binding;
-	const usage = f.feature_usage as { window_days?: number; features?: { name: string; companies: number; people: number }[] } | undefined;
+	const usage = f.feature_usage as { window_days?: number; companies_signed_in?: number; features?: { name: string; companies: number; people: number }[] } | undefined;
 	const history = f.reported_history as
 		| {
 				companies?: number;
@@ -269,8 +269,8 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 	if (usage && Array.isArray(usage.features) && usage.features.length) {
 		html +=
 			`<section><h2>Features in use</h2><div class="tiles three">` +
-			usage.features.map((u) => tile(u.name, `${num(u.companies)} of ${num(f.companies_observed)}`, `companies · ${num(u.people)} people`)).join("") +
-			`</div><p class="muted">Companies observed signing in over the last ${num(usage.window_days)} days that used each feature, counted by Letter's script on the vendor's product. Vendor-stated: it never changes the tier.</p></section>`;
+			usage.features.map((u) => tile(u.name, `${num(u.companies)} of ${num(usage.companies_signed_in ?? f.companies_observed)}`, `companies · ${num(u.people)} people`)).join("") +
+			`</div><p class="muted">Companies signed in over the last ${num(usage.window_days)} days that used each feature, counted by Letter's script on the vendor's product. Vendor-stated: it never changes the tier.</p></section>`;
 	}
 
 	const growth = Array.isArray(f.growth)

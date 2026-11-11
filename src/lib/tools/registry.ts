@@ -61,8 +61,7 @@ import {
 	type KeyRejection as PosthogKeyRejection,
 } from "@/lib/posthog/credentials";
 import { hogql } from "@/lib/posthog/fetch";
-import { MAX_FEATURE_USAGE_AGE_MS, readFeatureRows, saveFeatureUsage, setFeatureProofs } from "@/lib/attest/feature-usage";
-import { observedCompanyDomains } from "@/lib/attest/aggregate";
+import { companyDomains, MAX_FEATURE_USAGE_AGE_MS, readFeatureRows, saveFeatureUsage, setFeatureProofs } from "@/lib/attest/feature-usage";
 import { domainProofOf } from "@/lib/attest/domain-proof";
 import { posthogStatus } from "@/lib/posthog/status";
 import { syncVendorPosthog } from "@/lib/posthog/sync";
@@ -1543,7 +1542,7 @@ export const TOOLS: BoundTool[] = [
 	 *
 	 * Which features of the product companies use (lib/attest/feature-usage.ts). Letter pushes the counts daily from
 	 * its Visitors script on the vendor's product; the vendor picks what its proof shows. Published only as counts,
-	 * only of companies Letterprove observed signing in, labelled vendor-stated, never moving the tier.
+	 * only of company domains Letter's script saw signed in (one install: no Letterprove script needed), labelled vendor-stated, never moving the tier.
 	 */
 	defineTool({
 		name: "report_feature_usage",
@@ -1568,7 +1567,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "get_feature_usage",
 		description:
-			"The caller's vendor's feature usage as Letter last reported it: each feature's signed-in people, the companies Letter counted and how many of those Letterprove observed signing in (what the proof would show), and whether it's shown. No args.",
+			"The caller's vendor's feature usage as Letter last reported it: each feature's signed-in people, the domains Letter counted and how many of those are companies (what the proof would show; free mail and the vendor's own domain don't count), and whether it's shown. No args.",
 		capability: "vendor:read",
 		inputSchema: S.getFeatureUsageInput,
 		outputSchema: S.getFeatureUsageOutput,
@@ -1582,7 +1581,7 @@ export const TOOLS: BoundTool[] = [
 	defineTool({
 		name: "set_feature_proofs",
 		description:
-			"Choose which features show on the caller's vendor's proof (at most 10, by key from get_feature_usage); every other is hidden. Each shows how many of the companies Letterprove observed signing in used it, and its signed-in people, labelled vendor-stated; it never changes the tier. Takes effect at the next hourly snapshot. Args: keys.",
+			"Choose which features show on the caller's vendor's proof (at most 10, by key from get_feature_usage); every other is hidden. Each shows how many of the companies Letter's script saw signed in used it, and its signed-in people, labelled vendor-stated; it never changes the tier. Takes effect at the next hourly snapshot. Args: keys.",
 		capability: "vendor:write",
 		inputSchema: S.setFeatureProofsInput,
 		outputSchema: S.setFeatureProofsOutput,
@@ -2117,15 +2116,13 @@ async function featureUsageStatus(vendorId: string) {
 		db.from("vendors").select("slug, domain, domain_verified_at, site_verified_at").eq("id", vendorId).maybeSingle(),
 	]);
 	if (!rows || !vendor) return null;
-	const observed = await observedCompanyDomains(vendor.slug as string, vendor.domain as string);
-	const seen = observed ? new Set(observed) : null;
 	const features = rows
 		.map((r) => ({
 			key: r.feature_key,
 			label: r.label,
 			people: r.people,
 			companies_reported: r.domains.length,
-			companies_observed: seen ? new Set(r.domains.filter((d) => seen.has(d))).size : null,
+			companies_observed: companyDomains(r.domains, vendor.domain as string).length,
 			shown: r.published,
 			synced_at: r.synced_at,
 		}))
@@ -2146,7 +2143,7 @@ async function featureUsageStatus(vendorId: string) {
 					: !features.some((f) => f.shown)
 						? "Choose the features to show (set_feature_proofs)."
 						: !shown.length
-							? "None of the features you chose was used by a company Letterprove observed signing in this window."
+							? "None of the features you chose was used by a company (free mail and your own domain don't count)."
 							: null;
 	return { features, on_proof: reason === null, reason };
 }

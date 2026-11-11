@@ -291,16 +291,6 @@ async function observedTotals(vendorSlug: string): Promise<Map<string, Totals> |
 }
 
 /**
- * The company domains Letterprove observed signing in for this vendor over the window, as the proof counts them;
- * null when the read failed. What a vendor's feature usage is checked against before it is shown.
- */
-export async function observedCompanyDomains(vendorSlug: string, vendorDomain: string): Promise<string[] | null> {
-	const totals = await observedTotals(vendorSlug);
-	if (!totals) return null;
-	return partitionDomains(totals.keys(), vendorDomain).attributable;
-}
-
-/**
  * Returns null for an unknown vendor, and for one whose telemetry could not be
  * read. A failed read must never publish as "0 companies observed" — that is a
  * false claim signed and served, not a missing one.
@@ -337,8 +327,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		// the domain is proven by DNS.
 		vendor.id && vendor.domainVerified ? reportedHistory(vendor.id, attributable) : Promise.resolve(null),
 	]);
-	// Feature usage counts only companies observed here, so it needs the domain proven (site or DNS), not DNS alone.
-	const usage = vendor.id && domainProofOf(vendor) !== "none" ? await featureUsage(vendor.id, attributable, WINDOW_DAYS) : null;
+	// Feature usage counts the companies Letter's script saw signed in; it needs the domain proven (site or DNS).
+	const usage = vendor.id && domainProofOf(vendor) !== "none" ? await featureUsage(vendor.id, vendor.domain, WINDOW_DAYS) : null;
 	const wall = vendor.id && vendor.domainVerified ? await readLogoWall(vendor.id) : null;
 	// Logos are named only from the vendor's own public wall, only when on that
 	// page and observed signing in.

@@ -832,7 +832,7 @@ const featureStatus = z.object({
 		.number()
 		.int()
 		.nullable()
-		.describe("Of those, how many Letterprove observed signing in this window: what the proof would show. Null when that read failed."),
+		.describe("Of those, the company domains (no free mail, not your own domain): what the proof would show. Null when that read failed."),
 	shown: z.boolean().describe("You chose to show it on your proof."),
 	synced_at: z.string(),
 });

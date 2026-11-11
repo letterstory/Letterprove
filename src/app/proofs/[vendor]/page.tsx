@@ -289,13 +289,13 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 										<Tile
 											key={f.name}
 											label={f.name}
-											value={`${f.companies.toLocaleString("en-US")} of ${a.companies_observed.toLocaleString("en-US")}`}
+											value={`${f.companies.toLocaleString("en-US")} of ${(a.feature_usage!.companies_signed_in ?? a.companies_observed).toLocaleString("en-US")}`}
 											sub={<span className="text-xs text-fog">companies · {f.people.toLocaleString("en-US")} people</span>}
 										/>
 									))}
 								</dl>
 								<p className="mt-4 text-sm text-fog">
-									Companies observed signing in over the last {a.feature_usage.window_days} days that used each feature, counted by
+									Companies signed in over the last {a.feature_usage.window_days} days that used each feature, counted by
 									Letter&apos;s script on {proof.vendor.name}&apos;s product. The vendor runs that script, so this is stated by the
 									vendor and not used for the tier.
 								</p>
