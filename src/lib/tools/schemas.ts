@@ -777,6 +777,7 @@ export const setScriptModulesOutput = getScriptOutput;
 const displaySections = z.object({
 	sessions: z.boolean(),
 	reported_history: z.boolean(),
+	feature_usage: z.boolean().describe("Which features companies use, for the features you chose (set_feature_proofs)."),
 	logos: z.boolean(),
 	stripe_business: z.boolean().describe("The business Stripe verified behind your Stripe account: name, country, website."),
 	observed_since: z.boolean(),
@@ -796,3 +797,54 @@ export const setProofDisplayInput = z.object({
 	sections: displaySections.partial().describe("Only the sections you pass change."),
 });
 export const setProofDisplayOutput = getProofDisplayOutput;
+
+// ---------------------------------------------------------------- feature usage
+
+const featureKey = z.string().min(1).max(200);
+
+export const reportFeatureUsageInput = z.object({
+	features: z
+		.array(
+			z.object({
+				key: featureKey.describe("Letter's key for the feature, e.g. button:#export."),
+				label: z.string().min(1).max(80).describe("Its name on the proof."),
+				people: z.number().int().min(0).describe("Signed-in people who used it in the last 30 days."),
+				domains: z
+					.array(z.string().min(3).max(253))
+					.max(5000)
+					.describe("The company domains whose people used it in the last 30 days."),
+			}),
+		)
+		.max(200)
+		.describe("Every feature signed-in people used in the last 30 days, as Letter's Visitors script counted them."),
+});
+export const reportFeatureUsageOutput = z.object({
+	stored: z.number().int().describe("Features stored from this report."),
+	synced_at: z.string().describe("When it was stored; a report older than two days is left off the proof."),
+});
+
+const featureStatus = z.object({
+	key: z.string(),
+	label: z.string(),
+	people: z.number().int(),
+	companies_reported: z.number().int().describe("Company domains whose people used it, as Letter counted them."),
+	companies_observed: z
+		.number()
+		.int()
+		.nullable()
+		.describe("Of those, how many Letterprove observed signing in this window: what the proof would show. Null when that read failed."),
+	shown: z.boolean().describe("You chose to show it on your proof."),
+	synced_at: z.string(),
+});
+
+export const getFeatureUsageInput = empty;
+export const getFeatureUsageOutput = z.object({
+	features: z.array(featureStatus).describe("The most companies first."),
+	on_proof: z.boolean().describe("Whether feature usage appears on your proof at the next snapshot."),
+	reason: z.string().nullable().describe("Why it doesn't, when it doesn't."),
+});
+
+export const setFeatureProofsInput = z.object({
+	keys: z.array(featureKey).max(10).describe("The features to show on your proof, by key; every other is hidden. At most 10."),
+});
+export const setFeatureProofsOutput = getFeatureUsageOutput;

@@ -67,6 +67,7 @@ import {
 } from "./vendor-evidence";
 
 import { domainProofOf, tierForProof, type DomainProof } from "./domain-proof";
+import { featureUsage, type FeatureUsage } from "./feature-usage";
 
 const METHOD_PATH = "src/lib/attest/aggregate.ts";
 const WINDOW_DAYS = 30;
@@ -153,6 +154,14 @@ export interface AggregateBody {
 	 * before 2026-10-13.
 	 */
 	reported_history?: ReportedHistory;
+	/**
+	 * Which features of the product companies use (./feature-usage.ts): per feature the vendor chose to show, how
+	 * many of `companies_observed` used it in the window and how many signed-in people, counted by Letter's Visitors
+	 * script on the vendor's product. Only companies Letterprove observed signing in are counted. Listed in
+	 * `vendor_stated` and never moves the tier: the vendor runs the script that counts. Present only on a proven
+	 * domain (site or DNS) with a push under two days old. Absent before 2026-11-11.
+	 */
+	feature_usage?: FeatureUsage;
 	/**
 	 * Logo verification (README decision 36), opt-in. The companies the vendor
 	 * already shows on its own public logo wall (`page`) that Letterprove
@@ -282,6 +291,16 @@ async function observedTotals(vendorSlug: string): Promise<Map<string, Totals> |
 }
 
 /**
+ * The company domains Letterprove observed signing in for this vendor over the window, as the proof counts them;
+ * null when the read failed. What a vendor's feature usage is checked against before it is shown.
+ */
+export async function observedCompanyDomains(vendorSlug: string, vendorDomain: string): Promise<string[] | null> {
+	const totals = await observedTotals(vendorSlug);
+	if (!totals) return null;
+	return partitionDomains(totals.keys(), vendorDomain).attributable;
+}
+
+/**
  * Returns null for an unknown vendor, and for one whose telemetry could not be
  * read. A failed read must never publish as "0 companies observed" — that is a
  * false claim signed and served, not a missing one.
@@ -318,6 +337,8 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		// the domain is proven by DNS.
 		vendor.id && vendor.domainVerified ? reportedHistory(vendor.id, attributable) : Promise.resolve(null),
 	]);
+	// Feature usage counts only companies observed here, so it needs the domain proven (site or DNS), not DNS alone.
+	const usage = vendor.id && domainProofOf(vendor) !== "none" ? await featureUsage(vendor.id, attributable, WINDOW_DAYS) : null;
 	const wall = vendor.id && vendor.domainVerified ? await readLogoWall(vendor.id) : null;
 	// Logos are named only from the vendor's own public wall, only when on that
 	// page and observed signing in.
@@ -351,8 +372,9 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 		domains_excluded: excluded.length,
 		observed_since: firstSeen,
 		tier: tierForProof(observed, proof, stripeBusinessConfirms(business)),
-		vendor_stated: history ? ["reported_history"] : [],
+		vendor_stated: [...(history ? ["reported_history"] : []), ...(usage ? ["feature_usage"] : [])],
 		...(history ? { reported_history: history } : {}),
+		...(usage ? { feature_usage: usage } : {}),
 		...(logos ? { logos } : {}),
 		...(growth ? { growth } : {}),
 		...(retention ? { retention } : {}),
@@ -369,6 +391,7 @@ export async function aggregateBody(vendorSlug: string): Promise<Omit<AggregateB
 const SECTION_FIELDS: Record<DisplaySection, (keyof AggregateBody)[]> = {
 	sessions: ["sessions", "signups", "logins"],
 	reported_history: ["reported_history"],
+	feature_usage: ["feature_usage"],
 	logos: ["logos"],
 	stripe_business: ["stripe_business", "stripe_account_bound", "stripe_binding"],
 	observed_since: ["observed_since"],

@@ -959,7 +959,7 @@ copy of the observations. The leaf keeps its data whole; the trunk stays small.
 | Phase | Signals | Tier | Notes |
 |:---:|---|:---:|---|
 | **1** | Signups, logins, sessions, active accounts | 1–2 | Script only. Enough for *verified customer, active since, sessions/mo*. |
-| **2** | Feature adoption, seats | 2 | Named events from config. Fills the feature-level proof matrix. |
+| **2** | Feature adoption, seats | 2 | Feature adoption shipped 2026-11-11 as `feature_usage`: Letter's Visitors script counts what signed-in people use on the vendor's product, Letter pushes it daily (`report_feature_usage`), the vendor picks up to ten features (`set_feature_proofs`), and only companies Letterprove observed signing in are counted. Vendor-stated, so tier unchanged. Seats not yet. |
 | **3** | Payments — read-only Stripe key, settled invoices | 3 | First claim corroborated against a third party's ledger rather than the vendor's word. Contract value, tenure, renewal. Shipped as a read-only restricted key; the account is bound to the vendor by the domain it publishes (or a staff approval). |
 | **4** | Retention, ROI, expansion | 3 | Most valuable, hardest. Not yet designed. |
 

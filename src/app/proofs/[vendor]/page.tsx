@@ -280,6 +280,27 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 								</p>
 							</>
 						)}
+
+						{a.feature_usage && (
+							<>
+								<h2 className="mt-12 text-sm font-semibold tracking-widest text-fog uppercase">Features in use</h2>
+								<dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-3">
+									{a.feature_usage.features.map((f) => (
+										<Tile
+											key={f.name}
+											label={f.name}
+											value={`${f.companies.toLocaleString("en-US")} of ${a.companies_observed.toLocaleString("en-US")}`}
+											sub={<span className="text-xs text-fog">companies · {f.people.toLocaleString("en-US")} people</span>}
+										/>
+									))}
+								</dl>
+								<p className="mt-4 text-sm text-fog">
+									Companies observed signing in over the last {a.feature_usage.window_days} days that used each feature, counted by
+									Letter&apos;s script on {proof.vendor.name}&apos;s product. The vendor runs that script, so this is stated by the
+									vendor and not used for the tier.
+								</p>
+							</>
+						)}
 					</>
 				)}
 
