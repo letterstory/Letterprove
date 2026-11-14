@@ -1132,7 +1132,7 @@ describe("publish_proofs and unpublish_proofs", () => {
 
 	/*
 	 * DNS is optional since 2026-10-14: an unproven vendor publishes, at tier 0
-	 * and labelled "Domain not verified" on every surface (domain-proof.ts).
+	 * and shown with no domain label on every surface (domain-proof.ts).
 	 */
 	it("publishes a vendor whose domain is not verified by DNS", async () => {
 		const { dispatchTool } = await import("./registry");

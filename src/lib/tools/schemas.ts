@@ -123,7 +123,7 @@ export const getStatusOutput = z.object({
 	domain_proof: z
 		.enum(["none", "site", "dns"])
 		.describe(
-			"How your domain is proven. none: nothing proven, proof publishes as 'Domain not verified' at tier 0. site: Letterprove found attest.js with your key on site_verified_url; 'Site verified', tier 1 at most. dns: your TXT record; tiers 1 and 3, Stripe and the logo wall.",
+			"How your domain is proven. none: nothing proven, the proof shows no domain label and is tier 0. site: Letterprove found attest.js with your key on site_verified_url; 'Site verified', tier 1 at most. dns: your TXT record, 'Domain verified'; tiers 1 and 3, Stripe and the logo wall.",
 		),
 	domain_verified: z.boolean().describe("True only when the domain is proven by DNS (domain_proof dns)."),
 	site_verified_at: z.string().nullable().describe("When attest.js with your key was last found on site_verified_url. Null when not site-verified."),

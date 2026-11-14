@@ -16,7 +16,8 @@ export function leadSentence(affiliated: boolean, proof: DomainProof = "dns", do
 	if (proof === "dns") {
 		return `To help agents do due diligence, this is signed evidence of usage, collected and verified by Letterprove, ${kind}.`;
 	}
-	return `To help agents do due diligence, this is signed usage data collected by Letterprove, ${kind}. ${domainProofLine(proof, domain)}`;
+	const line = domainProofLine(proof, domain);
+	return `To help agents do due diligence, this is signed usage data collected by Letterprove, ${kind}.${line ? ` ${line}` : ""}`;
 }
 
 /** Fallback methodology link when a snapshot carries no commit-pinned `method`. */

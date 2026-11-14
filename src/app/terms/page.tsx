@@ -51,8 +51,8 @@ export default function TermsPage() {
 				<p>
 					You prove you control your domain by publishing a DNS record we specify, or more weakly
 					by carrying our script with your key on a page of that domain. Proof is optional: a
-					proof without it is labelled &ldquo;Domain not verified&rdquo; and carries the lowest
-					tier. You may only claim domains you actually control, and attempting to claim someone
+					proof without it shows no domain label and carries the lowest tier; a proof with the DNS
+					record shows &ldquo;Domain verified&rdquo;. You may only claim domains you actually control, and attempting to claim someone
 					else&apos;s domain is a breach of these terms.
 				</p>
 			</Section>

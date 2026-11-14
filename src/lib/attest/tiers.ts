@@ -40,7 +40,7 @@ export interface TierDescription {
 export const TIER_LADDER: Record<Tier, TierDescription> = {
 	0: {
 		name: "vendor-asserted",
-		means: "Nothing corroborates a claim: no usage was observed, or the vendor has not proven control of its domain at all (`domain_proof: none`, labelled \"Domain not verified\"), or the daily re-check found its proof gone.",
+		means: "Nothing corroborates a claim: no usage was observed, or the vendor has not proven control of its domain at all (`domain_proof: none`, shown with no domain label), or the daily re-check found its proof gone.",
 		forgeable_by: "The vendor alone, trivially. Treat as a claim, not as evidence.",
 	},
 	1: {
