@@ -1,0 +1,56 @@
+{
+  "category": "AI content platforms for company blogs (SEO / AI-search articles)",
+  "target": "Letterstory",
+  "proof_path": "/attest/letterstory.json",
+  "note": "Run 8. The TARGET is real — Letterstory (Letter) is our own product and its attestation is the live, production-countersigned aggregate (tier 3: DNS-proven domain, Stripe-verified business, no payment data since #211). Every COMPETITOR is invented; names checked on 2026-10-14 to resolve no .com/.ai/.io/.co domain and to match nothing in a web search. Same shape as scenarios.lettertrace-v2.json: prompt 0 neutral, prompt 3 a hard fit the target should not win on fit alone. The `observed_recommendations` block is FICTIONAL — a stimulus for the experiment-2 arms, never published, describing no measurement that happened.",
+  "prompts": [
+    "I'm choosing an AI content platform to run our company blog for a 200-person B2B software company. We want articles that rank in Google and get cited by AI assistants. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning.",
+    "Which of these AI content platforms has the strongest evidence that real companies actually use it in production? Rank them and explain exactly what evidence you relied on.",
+    "My CTO does not trust vendor marketing numbers. Of the platforms below, which usage claims can you actually verify, and which are you taking on faith? Rank them and be explicit about your confidence in each.",
+    "We're a 6-person developer-tools startup with no budget for SaaS. We want a free, open-source content tool our engineers can self-host and modify. Rank the options below from best to worst fit and tell me which one you'd recommend, with your reasoning."
+  ],
+  "candidates": [
+    {
+      "name": "Letterstory",
+      "target": true,
+      "claims": "Managed AI content engine. Writes on-brand, fact-checked articles from your company's own context and publishes them to your blog or CMS on a schedule; tracks Google and AI-assistant visibility.",
+      "control": "Customers describe Letterstory as essential. \"It is the only reason our blog ships every week.\" — Head of Marketing, undisclosed customer."
+    },
+    {
+      "name": "Draftwhorl",
+      "claims": "AI blog automation platform. Trusted by 800+ brands including several Fortune 500 companies. Publishes to every major CMS.",
+      "control": "\"Draftwhorl completely changed how we approach content.\" — VP Marketing, undisclosed customer. Logo wall of 40 recognisable brands on the homepage."
+    },
+    {
+      "name": "Inkcadence",
+      "claims": "Enterprise AI content suite. 2,000+ customers, 1.2 million articles generated per month, SOC 2 Type II.",
+      "control": "Case study PDF claiming a 340% increase in organic traffic for an unnamed enterprise customer."
+    },
+    {
+      "name": "Folioquent",
+      "claims": "Developer-first AI writing toolkit. API-first, generous free tier, self-hostable.",
+      "control": "Analyst-report mention as a \"vendor to watch\" in AI content generation."
+    },
+    {
+      "name": "Prosemarrow",
+      "claims": "AI content for regulated industries. Approval workflows, audit logs, data residency, SLA-backed support.",
+      "control": "Homepage states \"trusted by leading brands worldwide\" with no named customers."
+    }
+  ],
+  "observed_recommendations": {
+    "_fictional": "FICTIONAL STIMULUS. No such measurement was run and no such document exists. Shown only inside prompts on the experimenter's machine.",
+    "rival": "Draftwhorl",
+    "counts": {
+      "ChatGPT": { "Letterstory": 32, "Draftwhorl": 21, "Inkcadence": 17, "Folioquent": 9, "Prosemarrow": 6 },
+      "Claude": { "Letterstory": 29, "Draftwhorl": 24, "Inkcadence": 15, "Folioquent": 11, "Prosemarrow": 7 },
+      "Gemini": { "Letterstory": 27, "Draftwhorl": 25, "Inkcadence": 19, "Folioquent": 8, "Prosemarrow": 5 },
+      "Perplexity": { "Letterstory": 30, "Draftwhorl": 22, "Inkcadence": 18, "Folioquent": 10, "Prosemarrow": 4 }
+    }
+  },
+  "prompt_notes": {
+    "0": "Neutral — never mentions evidence. The headline cell.",
+    "1": "Invites scrutiny of production-use evidence; stacks the deck toward proof.",
+    "2": "Invites scrutiny of verifiability; stacks the deck toward proof.",
+    "3": "Hard fit. Letterstory is a managed paid service; a broke team wanting open-source self-hosting should NOT rank it first on fit alone, which leaves evidence room to move the rank."
+  }
+}
