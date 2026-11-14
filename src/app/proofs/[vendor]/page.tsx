@@ -81,7 +81,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 	const business = a?.stripe_business ?? null;
 	// A proof shows only what is present: no "not connected", no "hidden by".
 	const showBusiness = Boolean(business || binding);
-	const identityTiles = 1 + (showBusiness ? 1 : 0) + (a?.observed_since ? 1 : 0);
+	const identityTiles = (DOMAIN_PROOF_LABEL[domainProof] ? 1 : 0) + (showBusiness ? 1 : 0) + (a?.observed_since ? 1 : 0);
 
 	return (
 		<>
@@ -147,6 +147,7 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 						<dl
 							className={`mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-edge bg-edge ${identityTiles === 3 ? "sm:grid-cols-3" : identityTiles === 2 ? "sm:grid-cols-2" : ""}`}
 						>
+							{DOMAIN_PROOF_LABEL[domainProof] && (
 							<Tile
 								label="Domain"
 								value={DOMAIN_PROOF_LABEL[domainProof]}
@@ -157,11 +158,10 @@ export default async function ProofPage({ params }: { params: Promise<{ vendor: 
 										</span>
 									) : domainProof === "site" ? (
 										<span className="text-xs text-fog">script and key found on a page of {shownDomain}, checked daily</span>
-									) : (
-										<span className="text-xs text-fog">not proven by DNS or by the site</span>
-									)
+									) : null
 								}
 							/>
+							)}
 							{showBusiness && (
 							<Tile
 								label="Business"

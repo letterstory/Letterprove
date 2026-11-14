@@ -414,12 +414,12 @@ Letterprove.login(email)     // identifies, then fires "login"`}</Snippet>
               </li>
               <li>
                 <code>domain_proof</code>: how the vendor&apos;s claim to{" "}
-                <code>domain</code> is proven. <code>dns</code> (Verified by
-                DNS) allows every tier. <code>site</code> (Site verified):
+                <code>domain</code> is proven. <code>dns</code> (Domain
+                verified) allows every tier. <code>site</code> (Site verified):
                 Letterprove found the vendor&apos;s script and key on a page of
                 the domain, which proves control of a page rather than the
                 domain&apos;s DNS, so the tier stops at 1 and the logo wall
-                doesn&apos;t count. <code>none</code> (Domain not verified): the
+                doesn&apos;t count. <code>none</code> (no domain label): the
                 counts are the vendor&apos;s claim, tier 0.{" "}
                 <code>domain_verified</code> is true only for <code>dns</code>.
                 DNS is optional; a vendor site-verifies with{" "}

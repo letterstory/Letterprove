@@ -167,8 +167,9 @@ export default function PrivacyPage() {
             The request must come from a host the vendor is allowed to collect
             on: its own domain, or a host it proved or added. Whether the vendor
             proved the domain (by DNS, or by its script on a page there) is
-            stated on its proof, and an unproven domain is labelled{" "}
-            <strong>Domain not verified</strong> with the lowest tier. Once a
+            stated on its proof: a domain proven by DNS shows{" "}
+            <strong>Domain verified</strong>, and an unproven one shows no domain
+            label and has the lowest tier. Once a
             domain is proven by DNS, nobody else can collect on it.
           </li>
         </ul>

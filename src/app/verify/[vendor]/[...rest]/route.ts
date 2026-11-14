@@ -246,13 +246,15 @@ function summary(f: Record<string, unknown>, vendor: string, showLogos = true): 
 
 	html +=
 		`<section><h2>Who the vendor is</h2><dl class="facts">` +
-		`<div><dt>Domain</dt><dd>${esc(
+		(domainProof === "none"
+			? ""
+			: `<div><dt>Domain</dt><dd>${esc(
 			domainProof === "dns"
 				? fmtDay(f.domain_verified_since)
 					? `${DOMAIN_PROOF_LABEL.dns}, since ${fmtDay(f.domain_verified_since)}`
 					: DOMAIN_PROOF_LABEL.dns
-				: (domainProofLine(domainProof, domainName) ?? DOMAIN_PROOF_LABEL[domainProof]),
-		)}</dd></div>` +
+				: (domainProofLine(domainProof, domainName) ?? DOMAIN_PROOF_LABEL[domainProof] ?? ""),
+		)}</dd></div>`) +
 		(businessLine ? `<div><dt>Business</dt><dd>${esc(businessLine)}</dd></div>` : "") +
 		("observed_since" in f ? `<div><dt>Observed since</dt><dd>${esc(fmtDay(f.observed_since) ?? "—")}</dd></div>` : "") +
 		`</dl></section>`;

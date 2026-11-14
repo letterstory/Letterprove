@@ -84,7 +84,7 @@ export async function GET(request: Request) {
 	for (const slug of sites.cleared) {
 		await sendAlert(
 			`site verification cleared: ${slug}`,
-			"its Letterprove script was missing from its verified page for three daily checks over two days; its proof falls to Domain not verified (tier 0) at the next freeze until the script is back or the domain is verified by DNS",
+			"its Letterprove script was missing from its verified page for three daily checks over two days; its proof loses its domain label (tier 0) at the next freeze until the script is back or the domain is verified by DNS",
 		);
 	}
 	for (const e of sites.errors) console.error(`[letterprove:site-proof] ${e.slug}: ${e.detail}`);

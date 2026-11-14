@@ -44,19 +44,20 @@ export function tierForProof(observed: boolean, proof: DomainProof, stripeBusine
 	return stripeBusinessConfirmed ? 3 : 1;
 }
 
-/** Labels, one per state, used on every public surface. */
-export const DOMAIN_PROOF_LABEL: Record<DomainProof, string> = {
-	none: "Domain not verified",
+/**
+ * Labels used on every public surface. A domain nothing proves carries no label at all (Casey, 2026-11-13: say
+ * "Domain verified" where the TXT record is, and nothing where it isn't); its tier (0) and `domain_proof: none`
+ * in the signed document still tell an agent.
+ */
+export const DOMAIN_PROOF_LABEL = {
+	none: null,
 	site: "Site verified",
-	dns: "Verified by DNS",
-};
+	dns: "Domain verified",
+} as const satisfies Record<DomainProof, string | null>;
 
-/** The one plain line that explains a label. Null for DNS: nothing to caveat. */
+/** The one plain line that explains a label. Null for DNS (nothing to caveat) and for none (no label to explain). */
 export function domainProofLine(proof: DomainProof, domain?: string | null): string | null {
 	const d = domain ?? "its domain";
-	if (proof === "none") {
-		return `Domain not verified: this vendor has not proven that it controls ${d}, so treat these counts as the vendor's claim, not as evidence.`;
-	}
 	if (proof === "site") {
 		return `Site verified: Letterprove found this vendor's script and key on a page at ${d}. That proves control of a page, not of the domain's DNS, so it is weaker than DNS verification.`;
 	}

@@ -31,10 +31,10 @@ describe("tierForProof", () => {
 
 describe("labels", () => {
 	it("has one label per state", () => {
-		expect(DOMAIN_PROOF_LABEL).toEqual({ none: "Domain not verified", site: "Site verified", dns: "Verified by DNS" });
+		expect(DOMAIN_PROOF_LABEL).toEqual({ none: null, site: "Site verified", dns: "Domain verified" });
 	});
-	it("explains none and site in one plain line naming the domain, and says site is weaker than DNS", () => {
-		expect(domainProofLine("none", "acme.com")).toContain("has not proven that it controls acme.com");
+	it("explains site in one plain line naming the domain, says it is weaker than DNS, and says nothing for none", () => {
+		expect(domainProofLine("none", "acme.com")).toBeNull();
 		expect(domainProofLine("site", "acme.com")).toContain("weaker than DNS");
 		expect(domainProofLine("dns", "acme.com")).toBeNull();
 	});
@@ -42,8 +42,9 @@ describe("labels", () => {
 		for (const proof of ["none", "site"] as const) {
 			const s = leadSentence(false, proof, "acme.com");
 			expect(s).not.toContain("verified by Letterprove");
-			expect(s).toContain(DOMAIN_PROOF_LABEL[proof]);
+			expect(s).not.toContain("not verified");
 		}
+		expect(leadSentence(false, "site", "acme.com")).toContain("Site verified");
 		expect(leadSentence(false, "dns")).toContain("collected and verified by Letterprove");
 	});
 });

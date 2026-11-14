@@ -139,7 +139,7 @@ describe("vendorJsonLd", () => {
 		expect(site).toContain("Site verified");
 		expect(site).not.toContain("proven by DNS)");
 		const none = desc({ ...PROOF, vendor: { ...PROOF.vendor, domain_proof: "none" } });
-		expect(none).toContain("Domain not verified");
+		expect(none).toContain("(domain not verified)");
 		expect(none).not.toContain("verified by Letterprove");
 	});
 });
