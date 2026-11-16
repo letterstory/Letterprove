@@ -24,6 +24,13 @@
  * way: Concentrate's Responses surface accepts only web_search for them, with
  * no page fetch and no code tool, so the engine would be a weaker one than the
  * consumer app and not comparable to earlier runs.
+ *
+ * CHATGPT THROUGH CONCENTRATE (run 8). With no OPENAI_API_KEY but
+ * CONCENTRATE_API_KEY set, ChatGPT runs through the gateway's Responses
+ * surface with web_search only (which still opens pages: `open_page`, probed
+ * 2026-10-14). No code_interpreter — the gateway rejects it — so this ChatGPT
+ * can read a proof but cannot run a signature check, unlike runs 4–7.
+ * `chatgptRoute()` says which route a run used; stress.mjs records it.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -46,7 +53,7 @@ const KEY_ENV = {
 
 /** Which engines can actually run here — the Anthropic SDK also resolves an `ant auth login` profile. */
 export function available(engine) {
-	if (engine === "claude" && process.env.CONCENTRATE_API_KEY) return true;
+	if ((engine === "claude" || engine === "chatgpt") && process.env.CONCENTRATE_API_KEY) return true;
 	return engine === "claude" || Boolean(process.env[KEY_ENV[engine]]);
 }
 
@@ -156,14 +163,18 @@ async function askClaude(content, model) {
  * `action.type === "open_page"`) and code_interpreter: the same two
  * capabilities ChatGPT itself has.
  */
+export const chatgptRoute = () =>
+	process.env.OPENAI_API_KEY ? "openai (web_search + code_interpreter)" : process.env.CONCENTRATE_API_KEY ? "concentrate (web_search only, no code)" : null;
+
 async function askChatGPT(content, model) {
+	const direct = Boolean(process.env.OPENAI_API_KEY);
 	const r = await postJson(
-		"https://api.openai.com/v1/responses",
-		{ authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+		direct ? "https://api.openai.com/v1/responses" : "https://api.concentrate.ai/v1/responses",
+		{ authorization: `Bearer ${direct ? process.env.OPENAI_API_KEY : process.env.CONCENTRATE_API_KEY}` },
 		{
-			model,
+			model: direct || model.includes("/") ? model : `openai/${model}`,
 			input: content,
-			tools: [{ type: "web_search" }, { type: "code_interpreter", container: { type: "auto" } }],
+			tools: direct ? [{ type: "web_search" }, { type: "code_interpreter", container: { type: "auto" } }] : [{ type: "web_search" }],
 		}
 	);
 
