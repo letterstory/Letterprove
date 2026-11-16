@@ -62,6 +62,7 @@ import {
 } from "@/lib/posthog/credentials";
 import { hogql } from "@/lib/posthog/fetch";
 import { companyDomains, MAX_FEATURE_USAGE_AGE_MS, readFeatureRows, saveFeatureUsage, setFeatureProofs } from "@/lib/attest/feature-usage";
+import { caseStudyUrl, publishCaseStudy, unpublishCaseStudy } from "@/lib/attest/case-studies";
 import { domainProofOf } from "@/lib/attest/domain-proof";
 import { posthogStatus } from "@/lib/posthog/status";
 import { syncVendorPosthog } from "@/lib/posthog/sync";
@@ -1597,6 +1598,42 @@ export const TOOLS: BoundTool[] = [
 			}
 			const status = await featureUsageStatus(vendorId);
 			return status ? { ok: true, body: status } : { ok: false, status: 503, body: { error: "storage_unavailable" } };
+		},
+	}),
+	defineTool({
+		name: "publish_case_study",
+		description:
+			"Publish a case study Letter wrote from the caller's vendor's usage data (the people and companies its script saw signed in to the product, and the patterns in them) at a public Letterprove URL, or republish it in place. Labelled as the vendor's usage data counted by Letter: never signed, never moving the tier. Args: id, headline, paragraphs, facts, window, anonymization, named_companies, source.",
+		capability: "vendor:write",
+		inputSchema: S.publishCaseStudyInput,
+		outputSchema: S.publishCaseStudyOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const parsed = S.publishCaseStudyInput.safeParse(args);
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_case_study", detail: parsed.error.issues[0]?.message } };
+			const done = await publishCaseStudy(vendorId, parsed.data);
+			// Before its table exists Letter hears what a Letterprove without case studies says, and serves it itself.
+			if (done === "not_ready") return { ok: false, status: 404, body: { error: "unknown_tool" } };
+			if (done === "not_yours") return { ok: false, status: 409, body: { error: "case_study_conflict" } };
+			if (done !== "ok") return { ok: false, status: 503, body: { error: "storage_unavailable" } };
+			return { ok: true, body: { url: caseStudyUrl(parsed.data.id) } };
+		},
+	}),
+	defineTool({
+		name: "unpublish_case_study",
+		description: "Take one of the caller's vendor's case studies off Letterprove; its URL answers 404 until it is published again. Args: id.",
+		capability: "vendor:write",
+		inputSchema: S.unpublishCaseStudyInput,
+		outputSchema: S.unpublishCaseStudyOutput,
+		handler: async (args, principal) => {
+			const vendorId = requireVendorId(principal);
+			if (typeof vendorId !== "string") return vendorId;
+			const parsed = S.unpublishCaseStudyInput.safeParse(args);
+			if (!parsed.success) return { ok: false, status: 400, body: { error: "invalid_id" } };
+			const res = await unpublishCaseStudy(vendorId, parsed.data.id);
+			if (res === "not_ready") return { ok: false, status: 404, body: { error: "unknown_tool" } };
+			return res ? { ok: true, body: res } : { ok: false, status: 503, body: { error: "storage_unavailable" } };
 		},
 	}),
 	/*

@@ -848,3 +848,31 @@ export const setFeatureProofsInput = z.object({
 	keys: z.array(featureKey).max(10).describe("The features to show on your proof, by key; every other is hidden. At most 10."),
 });
 export const setFeatureProofsOutput = getFeatureUsageOutput;
+
+/* ------------------------------------------------------------- case studies */
+
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const publishCaseStudyInput = z.object({
+	id: z.string().uuid().describe("Letter's id for the case study: a republish lands at the same URL."),
+	headline: z.string().min(1).max(200),
+	paragraphs: z.array(z.string().min(1).max(2000)).min(1).max(8),
+	facts: z
+		.array(z.object({ text: z.string().min(1).max(500), numbers: z.array(z.number()).max(20) }))
+		.max(12)
+		.describe("The facts it was written from, as shown."),
+	window: z.object({ since: day, until: day, days: z.number().int().min(1).max(366) }),
+	anonymization: z.enum(["counts_only", "companies_named"]),
+	named_companies: z.array(z.string().min(3).max(253)).max(50),
+	source: z.literal("letter_usage_data"),
+});
+export const publishCaseStudyOutput = z.object({
+	url: z.string().describe("The case study's public page on Letterprove."),
+});
+
+export const unpublishCaseStudyInput = z.object({
+	id: z.string().uuid(),
+});
+export const unpublishCaseStudyOutput = z.object({
+	removed: z.boolean().describe("False when it was never published here, or already taken down."),
+});
